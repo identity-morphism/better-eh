@@ -1,0 +1,57 @@
+name: Update tag vocabulary
+
+on:
+  schedule:
+    # Mondays at 05:47 UTC. The upstream dataset publishes daily; weekly is enough for suggestions.
+    - cron: "47 5 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - assets/tag-index.bin
+      - .github/workflows/update-tag-index.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-tag-index
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - run: git checkout -B master origin/master
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run update:tag-index
+      - name: Detect asset change
+        id: asset
+        run: |
+          if [ -z "$(git status --porcelain -- assets/tag-index.bin)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.asset.outputs.changed == 'true'
+        run: bun run check
+      - if: steps.asset.outputs.changed == 'true'
+        run: bun run test
+      - if: steps.asset.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/tag-index.bin
+          git commit -m "chore: update tag vocabulary data"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:master

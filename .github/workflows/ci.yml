@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run format:check
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run build
+      - run: git diff --exit-code dist/
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:browser
+      - name: Check version bump
+        # A force push rewrites history; ordinary forward pushes are the ones that need a bump.
+        if: github.event_name == 'push' && github.event.forced != true
+        env:
+          BASE_REF: ${{ github.event.before }}
+        run: bun run check:version "$BASE_REF"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: better-eh.user.js
+          path: dist/better-eh.user.js

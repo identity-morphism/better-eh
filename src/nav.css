@@ -1,0 +1,58 @@
+/* nav feature styles. Compiled through Tailwind (see src/tailwind.css). */
+
+.topbar-nav {
+  @apply flex w-full min-w-0 items-center gap-2;
+}
+
+/* One scrolling row: tabs never wrap onto a second line, so the header height stays put. */
+.topbar-tabs {
+  @apply flex min-w-0 flex-1 items-center gap-1 overflow-x-auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.topbar-tab {
+  @apply shrink-0 px-2.5 font-medium;
+}
+
+/* Four primary tabs plus More cannot fit at the default padding on 320-380px phones, and a
+   horizontal scroll hides a whole section. Tighten the row instead of clipping "Torrents". */
+@media (max-width: 380px) {
+  .topbar-tabs {
+    gap: 0;
+  }
+
+  .topbar-tab {
+    padding-inline: 2px;
+    /* One step smaller keeps all five labels inside the row instead of scrolling it. */
+    font-size: var(--text-meta);
+  }
+}
+
+.topbar-tab svg,
+.topbar-more-link svg {
+  width: 12px;
+  height: 12px;
+  color: var(--color-muted);
+}
+
+.topbar-more {
+  @apply h-7 shrink-0 px-2.5 py-0 text-control;
+}
+
+.topbar-more[aria-expanded="true"] {
+  @apply border-accent text-fg;
+}
+
+.topbar-more-list {
+  @apply flex flex-col gap-0.5;
+}
+
+.topbar-more-link {
+  @apply justify-between gap-3;
+}
+
+/* A row inside a menu marks "current" with a bar, not a fill. */
+.topbar-more-link.is-active {
+  @apply bg-panel-hover text-fg;
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}

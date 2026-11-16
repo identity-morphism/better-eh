@@ -1,0 +1,25 @@
+# Git hooks for prek (https://prek.j178.dev). Install once per clone with `prek install`.
+exclude = "^dist/"
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "bun-lint"
+name = "bun lint"
+language = "system"
+# The pinned canary binary: `bun lint` does not exist in stable Bun, and the `lint` script
+# resolves to itself there.
+entry = "./node_modules/.bin/bun lint --no-script --fix"
+types_or = ["javascript", "jsx", "ts", "tsx"]
+exclude_types = ["symlink"]
+stages = ["pre-commit"]
+
+[[repos.hooks]]
+id = "bun-fmt"
+name = "bun fmt"
+language = "system"
+entry = "./node_modules/.bin/bun fmt --no-script"
+types_or = ["javascript", "jsx", "ts", "tsx", "json", "css", "html", "markdown", "yaml", "toml"]
+exclude_types = ["symlink"]
+stages = ["pre-commit"]

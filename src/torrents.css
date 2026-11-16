@@ -1,0 +1,197 @@
+/* torrents feature styles. Compiled through Tailwind (see src/tailwind.css). */
+
+.torrent-filters {
+  @apply flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line pt-2.5 pb-4;
+}
+
+.torrent-filter {
+  @apply flex items-center gap-2;
+}
+
+.torrent-status {
+  @apply flex flex-wrap items-center gap-1;
+}
+
+.torrent-filter-label {
+  @apply text-control text-muted;
+}
+
+.torrent-filter-btn[aria-pressed="true"] {
+  @apply border-accent bg-panel-hover text-fg;
+}
+
+.torrent-mine.is-disabled {
+  @apply cursor-not-allowed opacity-40;
+}
+
+.torrent-search {
+  @apply flex w-full max-w-[360px] items-center gap-1.5;
+}
+
+.torrent-search-input {
+  @apply w-full;
+}
+
+.torrent-table-wrap {
+  @apply mt-3 overflow-x-auto rounded-control border border-line bg-surface;
+  -webkit-overflow-scrolling: touch;
+}
+
+.torrent-table {
+  @apply w-full border-collapse text-control;
+  min-width: 620px;
+}
+
+.torrent-table thead th {
+  @apply border-b border-line-strong bg-panel px-3 py-2 text-meta font-semibold tracking-wide text-muted uppercase;
+}
+
+.torrent-sort {
+  @apply text-muted no-underline;
+}
+
+.torrent-sort:hover,
+.torrent-sort.is-active {
+  @apply text-accent;
+}
+
+/* A `top` inset is measured from the nearest scroll container. The wrapper has to be one (the
+   eight columns overflow narrow screens), so the sticky header only works once the wrapper stops
+   scrolling: on wide viewports the table fits and the page owns the scrollport. */
+@media (min-width: 1000px) {
+  .torrent-table-wrap {
+    overflow: visible;
+  }
+
+  /* Sticky on the row group, not each cell: collapsed borders make per-cell sticky paint under
+     the scrolling rows in Chrome. The background goes on the row so nothing shows through. */
+  .torrent-table thead {
+    position: sticky;
+    top: var(--topbar-h, 0px);
+    z-index: 2;
+  }
+
+  .torrent-table thead tr {
+    background: var(--color-panel);
+  }
+}
+
+.torrent-cell {
+  @apply border-b border-line px-3 py-2 text-left align-middle;
+}
+
+.torrent-table tbody tr:last-child .torrent-cell {
+  @apply border-b-0;
+}
+
+.torrent-cell.is-right {
+  @apply text-right;
+}
+
+.torrent-added {
+  @apply whitespace-nowrap text-muted;
+}
+
+.torrent-name-text {
+  @apply block max-w-[420px] truncate;
+}
+
+.torrent-name-link {
+  @apply text-fg no-underline;
+}
+
+.torrent-name-link:hover {
+  @apply text-link underline;
+}
+
+.torrent-gallery,
+.torrent-size,
+.torrent-seeds,
+.torrent-peers,
+.torrent-downloads {
+  @apply whitespace-nowrap tabular-nums;
+}
+
+/* Truncation has to happen on an inline-block inside the cell; `max-width` on a <td> is ignored by
+   automatic table layout. */
+.torrent-uploader-text {
+  @apply inline-block max-w-[120px] truncate align-bottom;
+}
+
+/* Narrow screens: eight columns cannot fit, so each row stacks. The name gets the full width and
+   the swarm numbers become one labelled meta line; the rest lives on the detail pages. */
+@media (max-width: 720px) {
+  .torrent-table {
+    display: block;
+    min-width: 0;
+  }
+
+  .torrent-table thead {
+    display: none;
+  }
+
+  .torrent-table tbody {
+    display: block;
+  }
+
+  .torrent-row {
+    display: block;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .torrent-row:last-child {
+    border-bottom: 0;
+  }
+
+  .torrent-cell {
+    display: inline-block;
+    padding: 0;
+    border: 0;
+    text-align: left;
+  }
+
+  .torrent-cell.is-right {
+    text-align: left;
+  }
+
+  .torrent-name {
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .torrent-added,
+  .torrent-gallery,
+  .torrent-uploader {
+    display: block;
+    margin-top: 4px;
+    color: var(--color-muted);
+  }
+
+  .torrent-added::before,
+  .torrent-gallery::before,
+  .torrent-uploader::before {
+    color: var(--color-muted);
+    content: attr(data-label) ": ";
+  }
+
+  .torrent-name-text {
+    @apply max-w-none whitespace-normal;
+    overflow-wrap: anywhere;
+  }
+
+  .torrent-size,
+  .torrent-seeds,
+  .torrent-peers,
+  .torrent-downloads {
+    margin-right: 12px;
+  }
+
+  .torrent-size::before,
+  .torrent-seeds::before,
+  .torrent-peers::before,
+  .torrent-downloads::before {
+    color: var(--color-muted);
+    content: attr(data-label) ": ";
+  }
+}

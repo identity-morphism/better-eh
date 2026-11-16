@@ -1,0 +1,68 @@
+<div id="reader">
+  <span id="img-wrap">
+    <img id="main-img" alt="" />
+    <img id="spread-img" alt="" hidden />
+  </span>
+  <div id="continuous" hidden></div>
+  <div id="hud">
+    <a id="hud-gallery" href="" title="Back to gallery" aria-label="Back to gallery"></a>
+    <div class="hud-spacer"></div>
+    <h1 id="hud-title"></h1>
+  </div>
+  <div id="page-nav">
+    <span class="page-nav-group">
+      <button id="hud-first" type="button" aria-label="First page" title="First page"></button>
+      <button id="hud-prev" type="button" aria-label="Previous page" title="Previous page"></button>
+    </span>
+    <span class="page-nav-group">
+      <button id="hud-next" type="button" aria-label="Next page" title="Next page"></button>
+      <button id="hud-last" type="button" aria-label="Last page" title="Last page"></button>
+    </span>
+  </div>
+  <div id="page-info">
+    <div id="hud-counter"></div>
+    <div id="file-info"></div>
+    <div id="page-links">
+      <a id="hud-original" href="" download>Original</a>
+      <a id="hud-forum" href="" target="_blank" rel="noopener">Forum link</a>
+      <a id="hud-search" href="">Find this image</a>
+    </div>
+  </div>
+  <div id="hud-help" role="group" aria-label="Reader shortcuts" hidden>
+    <p id="hud-help-title">Shortcuts</p>
+    <dl>
+      <dt>
+        <kbd class="kbd">←</kbd><kbd class="kbd">→</kbd><kbd class="kbd">A</kbd
+        ><kbd class="kbd">D</kbd>
+      </dt>
+      <dd>Previous / next page</dd>
+      <dt>
+        <kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd><kbd class="kbd">W</kbd
+        ><kbd class="kbd">S</kbd>
+      </dt>
+      <dd>Scroll or pan</dd>
+      <dt>Click</dt>
+      <dd>Page edge steps; the middle pins the HUD</dd>
+      <dt>Swipe</dt>
+      <dd>Horizontal swipe on touch</dd>
+      <dt><kbd class="kbd">F</kbd></dt>
+      <dd>Toggle fit-height / natural-width</dd>
+      <dt>
+        <kbd class="kbd">Ctrl</kbd><kbd class="kbd">+</kbd><kbd class="kbd">−</kbd
+        ><kbd class="kbd">0</kbd>
+      </dt>
+      <dd>Zoom in / out / reset</dd>
+      <dt><kbd class="kbd">Q</kbd><kbd class="kbd">Esc</kbd></dt>
+      <dd>Back to the gallery</dd>
+      <dt><kbd class="kbd">?</kbd></dt>
+      <dd>Show or hide this panel</dd>
+      <dt>Settings</dt>
+      <dd>Reader layout (single, spread, continuous), page direction, and keys</dd>
+    </dl>
+  </div>
+  <div id="hud-toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="img-error" role="alert" hidden>
+    <p id="img-error-text">This page could not be loaded.</p>
+    <button id="img-error-retry" class="img-error-retry" type="button">Retry</button>
+  </div>
+</div>
