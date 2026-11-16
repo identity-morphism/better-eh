@@ -1,0 +1,558 @@
+body.no-cursor,
+body.no-cursor * {
+  cursor: none !important;
+}
+
+body.fit-h {
+  overflow: hidden;
+}
+body.fit-h #reader {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* The fixed viewport owns pinch-to-zoom; continuous mode keeps native vertical scrolling. */
+body.fit-h:not(.reader-continuous) #reader {
+  touch-action: none;
+}
+body.fit-h #img-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+body.fit-h #main-img {
+  max-height: 100vh;
+  max-width: 100vw;
+  width: auto;
+  height: 100vh;
+  object-fit: contain;
+}
+
+body.fit-w {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+body.fit-w #reader {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+}
+body.fit-w #img-wrap {
+  display: block;
+}
+body.fit-w #main-img,
+.reader-page-img {
+  display: block;
+  max-width: 100vw;
+  height: auto;
+}
+
+#reader {
+  cursor: pointer;
+}
+
+#main-img,
+#spread-img,
+.reader-page-img {
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: transform 0.1s ease-out;
+}
+#main-img.no-transition {
+  transition: none !important;
+}
+
+/* ------------------------------------------------------------------- HUD
+ *
+ * Every overlay follows the pointer's idle state (`body.no-cursor`), not `:hover`: `:hover` leaves
+ * them invisible on touch and for keyboard-only readers, and an invisible overlay would still
+ * swallow the clicks meant to turn the page.
+ */
+
+#hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  padding: 6px 10px;
+  background: linear-gradient(to bottom, var(--scrim-control) 0%, transparent 100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.2s,
+    visibility 0.2s;
+  z-index: 10;
+}
+
+/* A hit area big enough for touch, drawn with the same icon set as the rest of the app. */
+#hud-gallery {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-control);
+  color: var(--color-fg);
+  text-decoration: none;
+  background: var(--scrim-control);
+  border: 1px solid var(--scrim-line);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+#hud-gallery svg {
+  width: 22px;
+  height: 22px;
+}
+#hud-gallery:hover,
+#hud-gallery:focus-visible {
+  background: var(--scrim-control-hover);
+  border-color: var(--scrim-line-hover);
+}
+.hud-spacer {
+  flex: 1;
+}
+#hud-title {
+  margin: 0;
+  padding-top: 4px;
+  font-size: var(--text-meta);
+  font-weight: inherit;
+  color: var(--color-muted);
+  text-align: right;
+  text-shadow: var(--text-scrim);
+  line-height: 1.35;
+}
+body.eh-viewer .title-main {
+  margin: 2px 0;
+}
+body.eh-viewer .title-primary {
+  font-size: var(--text-section);
+  color: var(--color-fg);
+  font-weight: 600;
+}
+body.eh-viewer .title-secondary {
+  font-size: var(--text-body);
+  color: var(--color-muted);
+  font-weight: 400;
+}
+body.eh-viewer .title-sep {
+  color: color-mix(in srgb, var(--color-fg) 40%, transparent);
+  margin: 0 2px;
+  white-space: nowrap;
+}
+body.eh-viewer .meta-item {
+  display: inline-block;
+  margin-left: 4px;
+}
+
+/* --------------------------------------------------------------- page nav */
+
+#page-nav {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 10px;
+  transform: translateY(-50%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.2s,
+    visibility 0.2s;
+  z-index: 10;
+}
+/* The scrim carries the contrast: a translucent pill over bright artwork used to swallow the
+   arrow, which is now the only thing inside it. */
+.page-nav-group {
+  display: flex;
+  gap: 8px;
+}
+#page-nav button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 76px;
+  border: 1px solid var(--scrim-line);
+  border-radius: var(--radius-chip);
+  background: var(--scrim-control);
+  color: var(--color-fg);
+  cursor: pointer;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+#page-nav button svg {
+  width: 24px;
+  height: 24px;
+}
+#page-nav button:hover,
+#page-nav button:focus-visible {
+  border-color: var(--scrim-line-hover);
+  background: var(--scrim-control-hover);
+}
+#page-nav button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+body:not(.no-cursor) #hud,
+body:not(.no-cursor) #page-info,
+body:not(.no-cursor) #page-nav,
+body.hud-pinned #hud,
+body.hud-pinned #page-info,
+body.hud-pinned #page-nav {
+  opacity: 1;
+  /* Visibility also decides whether a hidden control can take keyboard focus. */
+  visibility: visible;
+}
+body:not(.no-cursor) #hud-gallery,
+body:not(.no-cursor) #page-nav button,
+body.hud-pinned #hud-gallery,
+body.hud-pinned #page-nav button {
+  pointer-events: auto;
+}
+
+/* Touch has no idle pointer: keep the chrome and its hit areas available. */
+@media (hover: none) {
+  #hud,
+  #page-info,
+  #page-nav {
+    opacity: 1;
+    visibility: visible;
+  }
+  #hud-gallery,
+  #page-nav button {
+    pointer-events: auto;
+  }
+}
+
+/* --------------------------------------------------------------- status */
+
+#page-info {
+  position: fixed;
+  bottom: 12px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 10;
+}
+
+#hud-counter {
+  font-size: var(--text-section);
+  color: var(--color-fg);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-shadow: var(--text-scrim);
+}
+
+#file-info {
+  font-size: var(--text-meta);
+  color: color-mix(in srgb, var(--color-fg) 60%, transparent);
+  white-space: nowrap;
+  text-shadow: var(--text-scrim);
+}
+
+#page-links {
+  display: flex;
+  gap: 10px;
+  font-size: var(--text-meta);
+}
+#page-links a {
+  color: color-mix(in srgb, var(--color-fg) 70%, transparent);
+  text-decoration: none;
+  pointer-events: auto;
+  text-shadow: var(--text-scrim);
+}
+#page-links a:hover {
+  color: var(--color-fg);
+  text-decoration: underline;
+}
+#page-links a[hidden] {
+  display: none;
+}
+
+/* Toasts live outside `#page-info`: a failed image must report itself while the HUD is hidden. */
+#hud-toast {
+  position: fixed;
+  right: 14px;
+  /* Clear of the page counter, which owns the bottom-right corner. */
+  bottom: 62px;
+  max-width: min(420px, calc(100vw - 28px));
+  font-size: var(--text-control);
+  color: var(--color-star);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: right;
+  text-shadow: var(--text-scrim);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(5px);
+  transition:
+    opacity 0.2s ease-out,
+    transform 0.2s ease-out;
+  z-index: 12;
+}
+#hud-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ----------------------------------------------------------- image error */
+
+#img-error {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  padding: 18px 22px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-card);
+  background: var(--color-panel);
+  color: var(--color-fg);
+  text-align: center;
+  box-shadow: var(--shadow-float);
+  transform: translate(-50%, -50%);
+  z-index: 11;
+}
+#img-error p {
+  margin: 0;
+  font-size: var(--text-body);
+}
+.img-error-retry {
+  height: var(--control-h);
+  padding: 0 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-panel);
+  color: var(--color-fg);
+  font-size: var(--text-control);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.img-error-retry:hover {
+  border-color: var(--color-accent);
+}
+
+/* ---------------------------------------------------------- shortcut help */
+
+#hud-help {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  max-width: min(420px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-card);
+  background: var(--color-panel);
+  box-shadow: var(--shadow-float);
+  color: var(--color-muted);
+  font-size: var(--text-control);
+  z-index: 13;
+}
+#hud-help-title {
+  margin: 0 0 2px;
+  font-size: var(--text-meta);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+#hud-help dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+#hud-help dt {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-self: start;
+}
+#hud-help dd {
+  margin: 0;
+  align-self: center;
+  color: var(--color-fg);
+}
+
+/* ----------------------------------------------------------- reader modes */
+
+#img-wrap[hidden],
+#continuous[hidden],
+#spread-img[hidden] {
+  display: none !important;
+}
+
+#img-wrap {
+  transition: transform 0.1s ease-out;
+}
+
+#img-wrap.no-transition,
+#spread-img.no-transition,
+.reader-page-img.no-transition {
+  transition: none !important;
+}
+
+/* Spread: the current page and its neighbour share the viewport. RTL puts the current page on
+   the right by reversing the flex order. */
+body.reader-spread #img-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100vw;
+  max-height: 100vh;
+}
+
+body.reader-spread.reader-rtl #img-wrap {
+  direction: rtl;
+}
+
+body.reader-spread #main-img,
+body.reader-spread #spread-img {
+  max-width: 50vw;
+}
+
+/* An unpaired page has no second half to reserve, so let it use the full frame. The class is set
+   only when the next page is absent or its companion failed, not while the companion is loading. */
+body.reader-spread #img-wrap.is-single #main-img {
+  max-width: 100vw;
+}
+
+body.fit-h.reader-spread #main-img,
+body.fit-h.reader-spread #spread-img {
+  width: auto;
+  height: 100vh;
+  max-height: 100vh;
+  object-fit: contain;
+}
+
+body.fit-w.reader-spread #main-img,
+body.fit-w.reader-spread #spread-img {
+  display: block;
+  height: auto;
+  object-fit: contain;
+}
+
+/* A facing pair is unreadable on a phone-width viewport; keep the current page at full size. */
+@media (max-width: 720px) {
+  body.reader-spread #spread-img {
+    display: none !important;
+  }
+
+  body.reader-spread #main-img,
+  body.fit-h.reader-spread #main-img {
+    max-width: 100vw;
+  }
+
+  body.fit-w.reader-spread #main-img {
+    max-width: 100vw;
+  }
+}
+
+/* Continuous: a vertical stack that grows as the reader approaches the end. */
+#continuous {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--reader-gap, 12px);
+  width: 100%;
+}
+
+.reader-page {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.reader-page.is-failed .reader-page-img {
+  visibility: hidden;
+  min-height: 240px;
+}
+
+.reader-page.is-failed::after {
+  content: "This page could not be loaded.";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--color-muted);
+  font-size: var(--text-body);
+}
+
+.reader-sentinel {
+  width: 1px;
+  height: 1px;
+}
+
+body.reader-continuous #reader {
+  display: block;
+  min-height: 100vh;
+  height: auto;
+  overflow: visible;
+  padding-bottom: 40vh;
+}
+
+body.fit-h.reader-continuous {
+  overflow-y: auto;
+}
+
+body.fit-h.reader-continuous #reader {
+  height: auto;
+  overflow: visible;
+}
+
+/* ---------------------------------------------------------- forced colors */
+
+@media (forced-colors: active) {
+  #hud-gallery,
+  #page-nav button,
+  #hud-help,
+  #img-error,
+  .img-error-retry {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  /* Keep the artwork itself out of the forced palette; the interface around it still adapts. */
+  #main-img,
+  #spread-img,
+  .reader-page-img {
+    forced-color-adjust: none;
+  }
+
+  /* Windows High Contrast users still need a pointer; an invisible cursor is an accessibility bug. */
+  body.no-cursor,
+  body.no-cursor * {
+    cursor: auto !important;
+  }
+
+  :focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}

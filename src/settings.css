@@ -1,0 +1,194 @@
+/* settings feature styles. Compiled through Tailwind (see src/tailwind.css). */
+
+/* Left-aligned to the shell gutter: centring it moved the whole form sideways relative to the
+   header and every other view. */
+.settings-page {
+  @apply flex w-full max-w-[900px] flex-col gap-4 pb-6;
+}
+
+/* Sections */
+
+.settings-section {
+  @apply border border-line bg-surface px-4 py-3;
+  /* The sticky topbar and the sticky jump row own the top of the viewport. */
+  scroll-margin-top: var(--sticky-reading-line, 96px);
+  border-radius: var(--radius-card);
+}
+
+.settings-title {
+  @apply m-0 border-b border-line pb-2 text-section font-bold text-fg;
+}
+
+/* ---------------------------------------------------------- groups and rows
+ *
+ * The site form and the userscript panel render the same three shapes: a group of choices, one
+ * choice row, and a stacked label/control/hint field. They share these classes regardless of who
+ * builds the markup.
+ */
+
+.settings-group {
+  @apply m-0 mt-3 min-w-0 border-0 p-0;
+}
+
+/* One heading recipe for a fieldset legend and a panel subheading. */
+.settings-subhead {
+  @apply m-0 mb-2 p-0 text-control font-semibold text-fg;
+}
+
+.settings-rows {
+  @apply grid gap-0.5;
+}
+
+/* Panel toggles carry a hint under the label, so they need air between rows. */
+.settings-rows-roomy {
+  @apply gap-2;
+}
+
+.settings-row {
+  @apply flex min-h-7 cursor-pointer items-start gap-2 rounded-row px-2 py-1 text-control text-muted transition-colors;
+}
+
+.settings-row:hover {
+  @apply bg-panel-hover text-fg;
+}
+
+.settings-row input {
+  @apply mt-[2px] shrink-0;
+}
+
+.settings-row label {
+  @apply cursor-pointer;
+}
+
+.settings-row input:disabled + span,
+.settings-row input:disabled + label {
+  @apply opacity-40;
+}
+
+.settings-row-text {
+  @apply flex min-w-0 flex-col gap-0.5;
+}
+
+.settings-row-text label {
+  @apply cursor-pointer text-control text-fg;
+}
+
+/* A labelled control, stacked. Fields in a grid lay themselves out, so the grid items drop the
+   standalone top margin. */
+.settings-field {
+  @apply mt-3 flex min-w-0 flex-col gap-1.5;
+}
+
+.settings-number-grid > .settings-field {
+  @apply mt-0;
+}
+
+.settings-field .field-input,
+.settings-field .field-select {
+  @apply w-full max-w-[360px];
+}
+
+.settings-cat-chips {
+  @apply flex flex-wrap gap-1.5;
+}
+
+.settings-textarea {
+  @apply min-h-[96px] resize-y;
+  height: auto;
+}
+
+.settings-hint {
+  @apply m-0 mt-1 block text-meta text-muted;
+}
+
+/* Sticky action bar */
+
+.settings-actions {
+  @apply sticky bottom-0 z-30 mt-2 flex flex-wrap items-center gap-2 border-t border-line bg-canvas px-1 py-3;
+  backdrop-filter: blur(8px);
+}
+
+.settings-action-buttons {
+  @apply ml-auto flex items-center gap-2;
+}
+
+.settings-error {
+  @apply m-0 flex-1 text-control font-semibold text-danger-text;
+}
+
+.settings-dirty {
+  @apply text-meta font-semibold text-accent-text;
+}
+
+/* Userscript settings panel ("Better EH") */
+
+.settings-panel-group {
+  @apply mt-4 border-t border-line pt-3;
+}
+
+.settings-number-grid {
+  @apply grid grid-cols-1 gap-3 sm:grid-cols-2;
+}
+
+.settings-number-input {
+  @apply w-full;
+}
+
+.settings-field .settings-number-input {
+  @apply max-w-[160px];
+}
+
+.settings-keymap {
+  @apply grid gap-1.5;
+}
+
+.settings-key-row {
+  @apply flex flex-wrap items-center gap-x-2 gap-y-1 rounded-row px-2 py-1;
+}
+
+.settings-key-row:hover {
+  @apply bg-panel-hover;
+}
+
+.settings-key-label {
+  @apply w-full shrink-0 text-control text-muted sm:w-[190px];
+}
+
+.settings-keys {
+  @apply flex min-h-6 flex-wrap items-center gap-1;
+}
+
+.settings-key {
+  @apply gap-1 px-1.5 text-fg;
+}
+
+.settings-key-name {
+  @apply font-semibold;
+  font-family: ui-monospace, monospace;
+}
+
+.settings-key-remove {
+  @apply cursor-pointer border-0 bg-transparent p-0 text-control leading-none text-muted;
+}
+
+.settings-key-remove:hover,
+.settings-key-remove:focus-visible {
+  @apply text-accent-text;
+}
+
+.settings-key-capture {
+  @apply min-h-7 bg-transparent px-2 text-meta text-muted;
+}
+
+.settings-key-capture:hover,
+.settings-key-capture:focus-visible {
+  @apply bg-panel;
+}
+
+.settings-panel-actions {
+  @apply mt-1 flex flex-wrap items-center gap-2;
+}
+
+.settings-file-input {
+  @apply hidden;
+}

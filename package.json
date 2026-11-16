@@ -1,0 +1,35 @@
+{
+  "name": "better-eh",
+  "version": "1.0.1",
+  "private": true,
+  "description": "A userscript that reskins E-Hentai and ExHentai into one consistent, image-first interface: galleries, listings, favorites, toplists, torrents and the reader, with tag autocomplete, previews and prefetching.",
+  "type": "module",
+  "scripts": {
+    "build": "bun run build.ts",
+    "update:tag-counts": "bun run scripts/update-tag-counts.ts",
+    "update:tag-index": "bun run scripts/update-tag-index.ts",
+    "release": "bun run scripts/release.ts",
+    "check:version": "bun run scripts/check-version-bump.ts",
+    "verify:release": "bun run scripts/verify-release.ts",
+    "dev": "bun run build.ts --watch --serve",
+    "typecheck": "./node_modules/.bin/bun check --no-script",
+    "test": "bun test --isolate",
+    "test:browser": "bun run test/browser/smoke.ts",
+    "lint": "./node_modules/.bin/bun lint --no-script",
+    "lint:fix": "./node_modules/.bin/bun lint --no-script --fix",
+    "format": "./node_modules/.bin/bun fmt",
+    "format:check": "./node_modules/.bin/bun fmt --check",
+    "check": "bun run format:check && bun run lint && bun run typecheck",
+    "prek": "prek run --all-files"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/bun": "latest",
+    "@types/tampermonkey": "^5.5.0",
+    "bun": "1.4.4-canary.20261024.1",
+    "linkedom": "^0.18.14",
+    "playwright": "^1.65.0",
+    "tailwindcss": "^4.3.3"
+  },
+  "packageManager": "bun@1.4.4-canary.20261024.1"
+}

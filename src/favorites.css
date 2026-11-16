@@ -1,0 +1,155 @@
+/* favorites feature styles. Compiled through Tailwind (see src/tailwind.css). */
+
+.favorites-search {
+  @apply mt-4 flex max-w-[420px] items-center gap-1.5;
+}
+
+.favorites-search-input {
+  @apply w-full;
+}
+
+.favorites-tabs {
+  @apply mt-4 flex flex-wrap gap-2;
+}
+
+.favorites-tab {
+  @apply flex h-8 min-w-[132px] items-center justify-between gap-3 rounded-control border border-line bg-panel px-3 text-control text-fg no-underline transition-colors;
+}
+
+.favorites-tab:hover {
+  @apply border-line-strong bg-panel-hover;
+}
+
+/* Folder tabs are navigation, so they share the site tab row's active treatment. */
+.favorites-tab.is-active {
+  @apply border-line-strong;
+}
+
+.favorites-tab-name {
+  @apply truncate font-semibold;
+}
+
+.favorites-tab-count {
+  @apply text-meta text-muted tabular-nums;
+}
+
+/* The active tab sits on the lighter hover surface, which costs a step of contrast. */
+.favorites-tab.is-active .favorites-tab-count {
+  @apply text-fg;
+}
+
+.favorites-order {
+  @apply mt-3 flex items-center gap-2 text-control text-muted;
+}
+
+.favorites-order-label {
+  @apply text-muted;
+}
+
+/* An inline sort filter is filled when current, not barred like a menu row. */
+.favorites-order-link.is-active {
+  @apply bg-panel-hover text-fg;
+}
+
+.favorites-select {
+  @apply absolute top-2 left-2 flex cursor-pointer items-center rounded-row p-1.5 backdrop-blur-sm;
+  background: var(--scrim-control);
+}
+
+/* With a mouse the boxes only appear on the hovered/focused/selected card, so the cover art is not
+   dotted with empty squares. Touch keeps them visible. */
+@media (hover: hover) {
+  .favorites-select {
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .favorites-card:hover .favorites-select,
+  .favorites-card:focus-within .favorites-select,
+  .favorites-select:has(.favorites-checkbox:checked) {
+    opacity: 1;
+  }
+}
+
+.favorites-checkbox,
+.favorites-check-all {
+  @apply size-4 cursor-pointer;
+}
+
+.favorites-note {
+  @apply mt-1 line-clamp-3 border-l-2 border-line-strong pl-2 text-meta text-muted;
+}
+
+.favorites-bulk {
+  @apply fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[60] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center gap-2 rounded-card border border-line-strong bg-panel px-3 py-2 shadow-float;
+}
+
+.favorites-bulk-count {
+  @apply px-1 text-control font-semibold text-fg;
+}
+
+.favorites-bulk-status {
+  @apply px-1 text-control text-accent-text;
+}
+
+.favorites-move-panel {
+  @apply flex w-[220px] flex-col gap-1;
+}
+
+.favorites-move-head {
+  @apply px-2 pt-1 pb-1.5;
+}
+
+.favorites-move-item {
+  @apply h-auto justify-between gap-3 border-0 bg-transparent py-1.5 text-left text-fg;
+}
+
+.favorites-move-name {
+  @apply min-w-0 truncate;
+}
+
+.favorites-move-count {
+  @apply shrink-0 text-meta text-muted tabular-nums;
+}
+
+.favorites-move-empty {
+  @apply px-2 py-1.5 text-control text-muted;
+}
+
+.favorites-toolbar {
+  @apply mt-3 flex flex-wrap items-center gap-3 text-control text-muted;
+}
+
+.favorites-delete {
+  @apply border-accent-text text-accent-text;
+}
+
+.favorites-delete:hover {
+  @apply border-accent-text text-accent-text;
+}
+
+.favorites-delete.is-armed {
+  @apply border-accent-text bg-accent-text text-burgundy;
+}
+
+/* Phones get one scrolling strip instead of five stacked rows of folder tabs. */
+@media (max-width: 720px) {
+  .favorites-tabs {
+    @apply flex-nowrap overflow-x-auto;
+    mask-image: var(--scroll-fade);
+  }
+
+  /* The active tab is centred, so the row starts scrolled; fade both edges instead of slicing the
+     leading label. `trackScrollEdges` publishes the attributes. */
+  .favorites-tabs[data-scrolled] {
+    mask-image: var(--scroll-fade-both);
+  }
+
+  .favorites-tabs[data-scrolled][data-at-end] {
+    mask-image: var(--scroll-fade-left);
+  }
+
+  .favorites-tab {
+    @apply min-w-[128px] flex-none;
+  }
+}

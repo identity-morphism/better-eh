@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+  <body>
+    <div id="profile_outer">
+      <form id="profile_form" action="" method="post">
+        <input type="hidden" name="profile_name" value="x" />
+      </form>
+    </div>
+    <form action="" method="post">
+      <a name="imgload"></a>
+      <h2>Image Load Settings</h2>
+      <div class="optouter">
+        <p>Load images through H@H?</p>
+        <p>
+          <label><input type="radio" name="uh" value="0" checked />Any client</label>
+        </p>
+        <p>
+          <label><input type="radio" name="uh" value="1" />Default port</label>
+        </p>
+        <p>
+          <label><input type="radio" name="uh" value="2" disabled />No HTTPS</label>
+        </p>
+      </div>
+      <div class="optouter">
+        <p>Pick a region.</p>
+        <div>
+          H@H Region:
+          <select name="co">
+            <option value="" selected>Auto</option>
+            <option value="EU">Europe</option>
+            <option value="US" disabled>NA</option>
+          </select>
+        </div>
+      </div>
+      <a name="imgsize"></a>
+      <h2>Image Size Settings</h2>
+      <div class="optouter">
+        <p>Max display size</p>
+        <table>
+          <tr>
+            <td>Horizontal:</td>
+            <td><input type="text" name="rx" value="0" /></td>
+          </tr>
+          <tr>
+            <td>Vertical:</td>
+            <td><input type="text" name="ry" value="0" /></td>
+          </tr>
+        </table>
+      </div>
+      <a name="orgimg"></a>
+      <div class="optouter">
+        <p>Use original images?</p>
+        <p>
+          <label><input type="radio" name="oi" value="0" checked />Resampled</label>
+        </p>
+      </div>
+      <a name="frontpage"></a>
+      <h2>Front Page / Search Settings</h2>
+      <div class="optouter">
+        <p>Categories</p>
+        <input type="hidden" name="ct_doujinshi" value="0" />
+        <input type="hidden" name="ct_misc" value="1" />
+        <input type="hidden" name="ct_gamecg" value="1" />
+        <label><input type="checkbox" name="-" />Select all</label>
+        <label><input type="checkbox" />Select all</label>
+      </div>
+      <div class="optouter">
+        <p>Historic UI elements.</p>
+        <p>
+          <label><input type="checkbox" name="xn_0" checked />Thumbnail selector</label>
+        </p>
+        <p>
+          <label><input type="checkbox" name="xn_1" />Other option</label>
+        </p>
+      </div>
+      <a name="uploaders"></a>
+      <h2>Excluded Uploaders</h2>
+      <div class="optouter">
+        <p>Hide these uploaders.</p>
+        <textarea name="xu">one two</textarea>
+      </div>
+      <div class="optouter">
+        <p>Favorites sort:</p>
+        <p>
+          <label><input type="radio" name="fs" value="0" />Last update</label>
+        </p>
+        <p>
+          <label><input type="radio" name="fs" value="1" checked />Favorited</label>
+        </p>
+      </div>
+      <div><input type="submit" name="apply" value="Apply" /></div>
+    </form>
+  </body>
+</html>

@@ -1,0 +1,177 @@
+import { beforeEach, describe, expect, test, vi } from "bun:test";
+
+import type { FavoriteMark } from "../../src/types";
+import { closeFavoriteMenu, createStatusRegion, openFavoriteMenu } from "../../src/ui/favmenu";
+import { createFavoriteState } from "../../src/ui/favorite-state";
+import { closePopovers } from "../../src/ui/popover";
+import { flushMicrotasks } from "./async";
+import { installDom } from "./dom";
+
+const GALLERY_URL = "https://exhentai.org/g/101/aaaa/";
+
+function favoriteState(mark: FavoriteMark | null, known = mark !== null) {
+  return createFavoriteState({ gid: "101", token: "aaaa" }, mark, known);
+}
+
+let document: Document;
+
+beforeEach(() => {
+  closeFavoriteMenu();
+  closePopovers();
+  document = installDom();
+  Object.assign(globalThis, { location: new URL(GALLERY_URL) });
+});
+
+describe("favorite menu status region", () => {
+  test("keeps one role=status node across status updates", () => {
+    const status = createStatusRegion();
+    document.body.append(status.node);
+    const node = status.node;
+
+    expect(node.getAttribute("role")).toBe("status");
+    expect(node.getAttribute("aria-live")).toBe("polite");
+
+    status.announce("Loading folders…");
+    expect(node.textContent).toBe("Loading folders…");
+
+    status.announce("Saving…");
+    expect(document.querySelector("[role='status']")).toBe(node);
+    expect(node.textContent).toBe("Saving…");
+  });
+
+  test("re-announces a repeated message by blanking it first", () => {
+    vi.useFakeTimers();
+    try {
+      const status = createStatusRegion();
+      document.body.append(status.node);
+
+      status.announce("Favorite update failed");
+      status.announce("Favorite update failed");
+
+      expect(status.node.textContent).toBe("");
+      expect(status.node.hidden).toBe(true);
+
+      // The blank frame is restored on the next tick so assistive tech re-reads the message.
+      vi.advanceTimersByTime(16);
+
+      expect(status.node.textContent).toBe("Favorite update failed");
+      expect(status.node.hidden).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("marks the current folder by slot", async () => {
+    document.cookie = "ipb_member_id=1";
+    const anchor = document.createElement("button");
+    document.body.append(anchor);
+
+    openFavoriteMenu({
+      anchor,
+      state: favoriteState({ folder: "Good Stuff", slot: 1 }),
+      loadFolders: () =>
+        Promise.resolve([
+          { slot: 1, name: "Good Stuff", color: "#c8c8c8" },
+          { slot: 2, name: "Plan to Read", color: "#ff7b7b" },
+        ]),
+    });
+
+    await flushMicrotasks(2);
+
+    const current = document.querySelector<HTMLElement>(".fav-item.is-current");
+    expect(current?.textContent).toContain("Good Stuff");
+    expect(current?.getAttribute("aria-current")).toBe("true");
+    expect(document.querySelectorAll(".fav-item.is-current")).toHaveLength(1);
+    expect(current?.querySelector(".fav-check")?.textContent).toBe("✓");
+  });
+
+  test("falls back to the folder name when no slot is known", async () => {
+    document.cookie = "ipb_member_id=1";
+    const anchor = document.createElement("button");
+    document.body.append(anchor);
+
+    openFavoriteMenu({
+      anchor,
+      state: favoriteState({ folder: "plan to read", slot: null }),
+      loadFolders: () =>
+        Promise.resolve([
+          { slot: 1, name: "Good Stuff", color: "#c8c8c8" },
+          { slot: 2, name: "Plan to Read", color: "#ff7b7b" },
+        ]),
+    });
+
+    await flushMicrotasks(2);
+
+    const current = document.querySelector<HTMLElement>(".fav-item.is-current");
+    expect(current?.textContent).toContain("Plan to Read");
+  });
+
+  test("does not mark a folder for an unfavorited gallery", async () => {
+    document.cookie = "ipb_member_id=1";
+    const anchor = document.createElement("button");
+    document.body.append(anchor);
+
+    openFavoriteMenu({
+      anchor,
+      state: favoriteState(null, true),
+      loadFolders: () => Promise.resolve([{ slot: 1, name: "Good Stuff", color: "#c8c8c8" }]),
+    });
+
+    await flushMicrotasks(2);
+
+    expect(document.querySelector(".fav-item.is-current")).toBeNull();
+    expect(document.querySelector(".fav-check")).toBeNull();
+  });
+
+  test("announces folder states through the menu's own region", async () => {
+    const anchor = document.createElement("button");
+    document.body.append(anchor);
+
+    openFavoriteMenu({
+      anchor,
+      state: favoriteState(null, true),
+    });
+
+    const node = document.querySelector<HTMLElement>("[role='status']");
+    expect(node?.textContent).toBe("Loading folders…");
+
+    await flushMicrotasks(2);
+
+    expect(document.querySelector("[role='status']")).toBe(node);
+    expect(node?.textContent).toBe("Sign in to use favorites.");
+  });
+
+  test("loads the saved note and submits it with the folder change", async () => {
+    document.cookie = "ipb_member_id=1";
+    const anchor = document.createElement("button");
+    document.body.append(anchor);
+    const writes: { slot: number | null; note: string }[] = [];
+
+    openFavoriteMenu({
+      anchor,
+      state: favoriteState({ folder: "Good Stuff", slot: 1 }),
+      loadFolders: () =>
+        Promise.resolve([
+          { slot: 1, name: "Good Stuff", color: "#c8c8c8" },
+          { slot: 2, name: "Plan to Read", color: "#ff7b7b" },
+        ]),
+      loadNote: () => Promise.resolve("keep me"),
+      save: (_gallery, slot, note) => {
+        writes.push({ slot, note: note ?? "" });
+        return Promise.resolve();
+      },
+    });
+
+    await flushMicrotasks(2);
+    const note = document.querySelector<HTMLTextAreaElement>(".fav-note");
+    expect(note?.value).toBe("keep me");
+
+    const target = [...document.querySelectorAll<HTMLButtonElement>(".fav-item")].find((item) =>
+      item.textContent.includes("Plan to Read"),
+    );
+    target?.click();
+    await flushMicrotasks(2);
+
+    expect(writes).toEqual([{ slot: 2, note: "keep me" }]);
+  });
+});

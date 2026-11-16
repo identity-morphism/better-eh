@@ -1,0 +1,284 @@
+/* gallery-actions feature styles. Compiled through Tailwind (see src/tailwind.css). */
+
+/* ------------------------------------------------------------ rating */
+
+.rating-control {
+  @apply mt-3 flex flex-wrap items-center gap-3;
+}
+
+.rating-stars {
+  @apply inline-flex items-center;
+}
+
+/* Mouse and keyboard pick halves: each star is two 10px targets. Coarse pointers get one
+   `.rating-star` button per star instead (see below), because ten 10px targets are untappable. */
+.rating-half {
+  @apply relative inline-block h-5 w-2.5 cursor-pointer overflow-hidden border-0 bg-transparent p-0;
+}
+
+/* One whole-star target for touch: two half cells inside a 24px button, so the target still meets
+   WCAG 2.5.8 and the five-target row fits the gallery header at 320px. A tap rates whole stars. */
+.rating-star {
+  @apply inline-flex min-h-6 min-w-6 cursor-pointer items-center justify-center border-0 bg-transparent p-0;
+}
+.rating-star svg {
+  pointer-events: none;
+}
+
+.rating-half svg {
+  @apply pointer-events-none absolute top-0 size-5;
+}
+
+.rating-half-left svg {
+  @apply left-0;
+}
+
+.rating-half-right svg {
+  @apply -left-2.5;
+}
+
+/* Read-only rows on result cards reuse the same glyphs one step smaller. */
+.rating-stars.is-static .rating-half {
+  @apply h-4 w-2 cursor-default;
+}
+
+.rating-stars.is-static .rating-half svg {
+  @apply size-4;
+}
+
+.rating-stars.is-static .rating-half-right svg {
+  @apply -left-2;
+}
+
+.rating-half-on {
+  @apply hidden text-star;
+}
+
+.rating-half-off {
+  @apply text-muted;
+}
+
+/* `is-on` is the painted fill and follows a hover preview; `aria-pressed` only follows a
+   committed rating. That is why this state is a class and not the ARIA attribute. */
+.rating-half.is-on .rating-half-off {
+  @apply hidden;
+}
+
+.rating-half.is-on .rating-half-on {
+  @apply block;
+}
+
+.rating-half:focus-visible,
+.rating-star:focus-visible {
+  outline: 2px solid var(--color-star);
+  outline-offset: 1px;
+}
+
+.rating-meta {
+  @apply flex flex-wrap items-baseline gap-2;
+}
+
+.rating-label {
+  @apply text-control text-muted;
+}
+
+.rating-count {
+  @apply text-meta text-muted;
+}
+
+/* --------------------------------------------------------- tag menu */
+
+.tag-menu-panel {
+  @apply w-[240px] p-3;
+}
+
+.tag-menu {
+  @apply grid gap-2;
+}
+
+/* Name first, namespace after it as a quiet label; the raw `ns:name` id never reaches the UI. */
+.tag-menu-head {
+  @apply flex flex-wrap items-baseline gap-1.5;
+}
+
+.tag-menu-title {
+  @apply text-control font-semibold text-fg;
+}
+
+.tag-menu-ns {
+  @apply text-micro text-muted lowercase;
+}
+
+.tag-menu-divider {
+  @apply m-0 border-0 border-t border-line;
+}
+
+.tag-menu-actions {
+  @apply grid gap-0.5;
+}
+
+.tag-menu-item svg {
+  @apply size-3 shrink-0;
+  color: var(--color-muted);
+}
+
+.tag-menu-new {
+  @apply flex items-center gap-1.5;
+}
+
+.tag-menu-new .field-input {
+  @apply min-w-0 flex-1 px-2 py-1 text-control;
+}
+
+.tag-menu-item:disabled {
+  @apply cursor-not-allowed opacity-40;
+}
+
+/* ------------------------------------------------------- tag section */
+
+.tag-title {
+  @apply text-section font-semibold text-fg;
+}
+
+/* Namespace labels and the tag chips share one two-column row, and the composer starts in the
+   content column, so every chip lines up whether or not its row has a composer. */
+.tag-row {
+  @apply grid grid-cols-[4.75rem_minmax(0,1fr)] items-start gap-x-2 gap-y-2;
+}
+
+.tag-name {
+  @apply text-control;
+}
+
+/* The site's editorial note after a tag's pipe, kept quieter than the tag it explains. */
+.tag-note {
+  @apply ml-1 text-micro;
+  color: var(--color-muted);
+}
+
+.tag-add-row .tag-add {
+  @apply mt-0;
+}
+
+/* --------------------------------------------------------- comments */
+
+.gallery-comments {
+  @apply mt-2 grid gap-3 border-t border-line pt-5 pb-10;
+}
+
+.comments-title {
+  @apply text-section font-semibold text-fg;
+}
+
+.comment-list {
+  @apply grid gap-2;
+}
+
+.comment {
+  @apply rounded-control border border-line bg-surface p-3;
+}
+
+.comment.is-uploader {
+  @apply border-accent bg-panel;
+}
+
+.comment-head {
+  @apply flex flex-wrap items-center gap-x-2 gap-y-1 text-control text-muted;
+}
+
+.comment-author {
+  @apply font-semibold;
+}
+
+.comment-badge {
+  @apply rounded-none border border-accent px-1.5 py-px text-micro text-star;
+}
+
+.comment-posted {
+  @apply text-meta text-muted;
+}
+
+.comment-score-wrap {
+  @apply ml-auto flex items-center gap-1;
+}
+
+.comment-score {
+  @apply min-w-6 text-right text-control font-semibold text-muted;
+}
+
+.comment-vote {
+  @apply inline-grid min-h-6 min-w-6 px-1.5 py-0.5 text-meta leading-none text-muted;
+}
+
+.comment.is-busy .comment-vote {
+  @apply cursor-progress opacity-60;
+}
+
+.comment-retry {
+  @apply cursor-pointer border-0 bg-transparent p-0 text-meta font-semibold text-link underline;
+}
+
+.comment-vote:hover,
+.comment-vote:focus-visible,
+.comment-vote[aria-pressed="true"] {
+  @apply text-star;
+  border-color: var(--color-accent);
+}
+
+/* A downvote is destructive: the same gold as an upvote made the direction unreadable. */
+.comment-vote-down:hover,
+.comment-vote-down:focus-visible,
+.comment-vote-down[aria-pressed="true"] {
+  border-color: var(--color-danger-line);
+  color: var(--color-danger-text);
+}
+
+.comment-body {
+  @apply mt-2 text-body whitespace-pre-line text-fg;
+}
+
+.comment-votes {
+  @apply mt-2 text-meta text-muted;
+}
+
+.comment-composer {
+  @apply mt-1 grid gap-2;
+}
+
+.comment-input {
+  @apply min-h-20 w-full resize-y text-body;
+  height: auto;
+}
+
+.comment-compose-actions {
+  @apply flex items-center gap-2;
+}
+
+.comment-status {
+  @apply text-control text-muted;
+}
+
+/* Resume control in the gallery action row. */
+.gallery-resume-group {
+  @apply inline-flex min-w-0 items-stretch;
+}
+
+.gallery-resume-clear {
+  @apply -ml-px w-8 bg-transparent text-control leading-none text-muted;
+}
+
+/* --------------------------------------------------------- comment edit */
+
+.comment-edit-form {
+  @apply mt-1 grid gap-2;
+}
+
+.comment-edit-form .comment-input {
+  @apply w-full;
+}
+
+/* My Tags watch/hide/colour controls in the tag menu. */
+.tag-menu-color {
+  @apply h-7 w-10 cursor-pointer border border-line bg-canvas p-0.5;
+  border-radius: var(--radius-control);
+}

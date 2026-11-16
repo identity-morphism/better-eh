@@ -1,0 +1,1846 @@
+/* Application shell and non-viewer screens. Compiled through Tailwind. */
+
+html,
+body {
+  height: 100%;
+}
+
+html {
+  background: var(--color-canvas);
+  color-scheme: dark;
+}
+
+body.eh-body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  text-align: left;
+  -webkit-font-smoothing: antialiased;
+}
+
+#eh-root {
+  min-height: 100vh;
+}
+
+#eh-view[aria-busy="true"] {
+  pointer-events: none;
+}
+
+#eh-view {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 28px 56px;
+}
+
+body.eh-viewer #eh-view {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+body.eh-viewer {
+  background: var(--color-void);
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: var(--color-burgundy);
+  color: var(--color-fg);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+/* Base surface for every anchored panel. Declared before the per-panel classes so a panel can
+   change its padding or background without out-specificity games. */
+.eh-popover {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-card);
+  background: var(--color-panel);
+  color: var(--color-fg);
+  box-shadow: var(--shadow-float);
+  outline: none;
+}
+
+/* ------------------------------------------------------------ shared recipes
+ *
+ * A component class below only carries what makes it different: size, padding, surface, emphasis.
+ * Shape, border, hover language and state colours live here once, so a new control cannot invent
+ * its own version of "a box you can click".
+ */
+
+/* Every interactive box is a bordered panel surface that lifts its border to the accent on hover. */
+.icon-btn,
+.btn,
+.fav-btn,
+.pager-btn,
+.pager-num,
+.comment-vote,
+.gallery-resume-clear,
+.search-history-remove,
+.settings-key-capture {
+  @apply inline-flex cursor-pointer items-center justify-center gap-1.5;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-panel);
+  color: var(--color-fg);
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+.icon-btn:hover,
+.btn:hover,
+.pager-btn:hover,
+.pager-num:hover,
+.settings-key-capture:hover,
+.settings-key-capture:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-fg);
+}
+
+/* Icon-only controls that sit on the chrome rather than inside a panel. */
+.topbar-clear,
+.topbar-history,
+.expression-remove,
+.card-preview-trigger {
+  @apply inline-grid cursor-pointer place-items-center border-0 bg-transparent p-0;
+  color: var(--color-muted);
+  transition:
+    color 0.15s,
+    background-color 0.15s;
+}
+
+.topbar-clear:hover,
+.topbar-history:hover,
+.expression-remove:hover,
+.card-preview-trigger:hover {
+  @apply bg-panel-hover text-fg;
+}
+
+/* Rows clip their content, so their focus ring sits inside the border. */
+.topbar-tab:focus-visible,
+.term-toggle:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Category chip, saved expression, and the add/edit chip are one shape before their colour. */
+.cat-chip,
+.quick-tag,
+.quick-tag-edit {
+  @apply inline-flex h-[26px] cursor-pointer items-center rounded-chip text-meta font-semibold;
+}
+
+/* A clickable row: menu item, tab, rail link, sort filter. One shape and one hover. Current
+   state keeps two idioms on purpose: a row inside a menu carries an inset accent bar
+   (`.topbar-more-link`, `.tag-option`), while an inline filter or tab is filled or underlined
+   (`.favorites-tab`, `.pager-num`, `.cat-chip`). */
+.rail-link,
+.fav-item,
+.favorites-move-item,
+.favorites-order-link,
+.topbar-more-link,
+.toplist-tab,
+.topbar-tab,
+.action-menu-item,
+.tag-menu-item {
+  @apply flex h-7 cursor-pointer items-center gap-1 rounded-row px-2 text-control text-muted no-underline transition-colors;
+}
+
+.rail-link:hover,
+.fav-item:hover,
+.favorites-move-item:hover,
+.favorites-order-link:hover,
+.topbar-more-link:hover,
+.toplist-tab:hover,
+.topbar-tab:hover,
+.action-menu-item:hover,
+.action-menu-item:focus-visible,
+.tag-menu-item:hover,
+.tag-menu-item:focus-visible {
+  @apply bg-panel-hover text-fg;
+}
+
+/* Accent-tinted ghost control: the surface stays panel, only the ink and border lift. */
+.gallery-resume-clear:hover,
+.gallery-resume-clear:focus-visible,
+.settings-key-capture.capturing {
+  @apply bg-panel text-accent-text;
+  border-color: var(--color-accent);
+}
+
+/* Filled accent state: the primary submit, a pressed toggle, the current page number. */
+.topbar-search-submit,
+.tag-combobox-exclude[aria-pressed="true"],
+.filters-count,
+.pager-num.is-current {
+  @apply border-accent bg-accent text-parchment;
+}
+
+/* Text links: one colour, underline on hover. */
+.meta-link,
+.fav-link,
+.comment-author,
+.torrent-link {
+  @apply text-link no-underline;
+}
+
+.meta-link:hover,
+.fav-link:hover,
+.comment-author:hover,
+.torrent-link:hover {
+  @apply underline;
+}
+
+/* Quiet text actions (clear, edit) share one size and hover. */
+.search-history-clear,
+.comment-edit {
+  @apply cursor-pointer border-0 bg-transparent p-0 text-meta text-muted underline-offset-2;
+}
+
+.search-history-clear:hover,
+.search-history-clear:focus-visible,
+.comment-edit:hover,
+.comment-edit:focus-visible {
+  @apply text-fg underline;
+}
+
+/* Inline note: one shape, three tones. The block-level alert is `.eh-banner`. */
+.draft-note,
+.tag-menu-error,
+.torrent-filter-note {
+  @apply m-0 rounded-row border px-2.5 py-1.5 text-meta;
+}
+
+.draft-note {
+  @apply border-line bg-surface text-muted;
+}
+
+.tag-menu-error {
+  @apply border-danger-line bg-panel text-danger-text;
+}
+
+.torrent-filter-note {
+  @apply flex items-center gap-2 border-accent text-accent-text;
+}
+
+/* Uppercase section label: one size, one tracking, everywhere. */
+.eyebrow,
+.rail-label,
+.fav-head,
+.search-history-heading,
+.toplist-tab-group-title,
+.favorites-move-head {
+  @apply font-semibold uppercase;
+  font-size: var(--text-micro);
+  letter-spacing: 0.06em;
+  color: var(--color-muted);
+}
+
+/* One "you are here" tab treatment: the accent bar under the label. The tab row's overflow
+   trigger is the same tab when the current page lives in the menu. */
+.topbar-tab.is-active,
+.favorites-tab.is-active,
+.toplist-tab.is-active,
+.topbar-more.is-active {
+  @apply bg-panel-hover text-fg;
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+/* A current row inside a menu carries the bar on its leading edge instead. */
+.tag-option.is-active {
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+/* A row that scrolls sideways: no visible scrollbar, one shared right-edge fade. */
+.settings-jump,
+.toplist-jump,
+.topbar-tabs,
+.favorites-tabs {
+  position: relative;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.settings-jump::-webkit-scrollbar,
+.toplist-jump::-webkit-scrollbar,
+.topbar-tabs::-webkit-scrollbar,
+.favorites-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* `.favorites-tabs` wraps on wide screens, so it only fades once the media query makes it scroll. */
+.settings-jump,
+.toplist-jump,
+.topbar-tabs {
+  mask-image: var(--scroll-fade);
+}
+
+/* Tabs that had to scroll fade both edges instead of slicing the leading label. */
+.topbar-tabs[data-scrolled] {
+  mask-image: var(--scroll-fade-both);
+}
+
+.topbar-tabs[data-scrolled][data-at-end] {
+  mask-image: var(--scroll-fade-left);
+}
+
+/* A jump row scrolled away from its start also needs the leading edge hidden; at the end only the
+   leading edge remains. `trackJumpRow` publishes both attributes from its scroll listener. */
+.settings-jump[data-scrolled],
+.toplist-jump[data-scrolled] {
+  mask-image: var(--scroll-fade-both);
+}
+
+.settings-jump[data-scrolled][data-at-end],
+.toplist-jump[data-scrolled][data-at-end] {
+  mask-image: var(--scroll-fade-left);
+}
+
+/* A field and its submit share a row, so they share the control height even when the button is
+   the compact variant. */
+.tag-add .field-input,
+.tag-add .btn,
+.tag-menu-new .field-input,
+.tag-menu-new .btn,
+.torrent-search .field-input,
+.torrent-search .btn {
+  height: var(--control-h);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-accent);
+}
+
+/* One secondary status line: quiet by default, danger when it reports a failure. */
+.status-line {
+  @apply m-0 text-meta;
+  color: var(--color-muted);
+}
+
+.status-line.is-error {
+  color: var(--color-danger-text);
+}
+
+/* ---------------------------------------------------------------- top bar */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0 -28px;
+  padding: 14px 28px 10px;
+  background: linear-gradient(var(--color-canvas) 82%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.topbar-main {
+  @apply flex w-full items-center gap-3;
+}
+
+/* Views without a search form put the brand and back button in the tab row. */
+.topbar-slim {
+  @apply pt-3 pb-2.5;
+}
+
+.topbar-filters {
+  @apply w-full;
+}
+
+.icon-btn {
+  @apply size-8 shrink-0 text-muted;
+}
+
+.brand {
+  @apply inline-flex h-8 shrink-0 items-center rounded-control bg-parchment px-3 text-control font-extrabold tracking-[0.08em] text-burgundy no-underline;
+}
+
+.topbar-search {
+  @apply flex h-8 min-w-0 max-w-[760px] flex-1 items-center rounded-control border border-line-strong bg-panel pl-2.5 transition-colors;
+}
+
+.topbar-search:focus-within {
+  @apply border-accent;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.topbar-search-icon {
+  @apply inline-flex shrink-0 text-muted;
+}
+
+.topbar-search input {
+  @apply h-full min-w-0 flex-1 border-0 bg-transparent px-2.5 text-body text-fg outline-none;
+}
+
+.topbar-search input::placeholder {
+  color: var(--color-muted);
+}
+
+/* We render our own labelled clear button; the native search decoration duplicates it. */
+.topbar-search input::-webkit-search-cancel-button,
+.topbar-search input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+/* One keyboard-hint recipe, shared by the topbar shortcut and the reader help panel. */
+.kbd,
+.settings-key {
+  @apply inline-flex min-h-[18px] shrink-0 items-center justify-center rounded-row border border-line bg-canvas px-[5px] text-micro text-muted;
+  font-family: inherit;
+}
+
+.topbar-kbd {
+  @apply mr-1;
+}
+
+.topbar-search-submit {
+  @apply mr-1 h-6 cursor-pointer rounded-control border-0 px-2.5 text-meta font-semibold transition-colors;
+}
+
+.topbar-search-submit-icon {
+  display: none;
+}
+
+.topbar-clear {
+  @apply mr-1 size-6 shrink-0;
+}
+
+.topbar-search-submit:hover {
+  /* Parchment on the lighter hover red measures 3.87:1; white clears 4.5:1. */
+  @apply bg-accent-hover text-fg;
+}
+
+/* ----------------------------------------------------------------- header */
+
+.list-header {
+  @apply flex flex-wrap items-end justify-between gap-3 pt-4 pb-2;
+}
+
+.list-heading h1 {
+  @apply m-0 text-heading font-semibold tracking-[-0.01em];
+}
+
+.list-summary {
+  @apply flex flex-wrap items-center justify-end gap-2 text-control text-muted;
+}
+
+.badge {
+  @apply rounded-none border border-line-strong px-2 py-0.5 text-meta text-muted;
+}
+
+/* -------------------------------------------------------- search filters */
+
+.search-filters {
+  @apply flex flex-wrap items-center gap-1.5;
+}
+
+.term-chip {
+  @apply inline-flex min-w-0 items-stretch overflow-hidden rounded-none border border-line-strong bg-panel;
+}
+
+.term-chip.is-excluded {
+  border-color: color-mix(in srgb, var(--color-accent) 70%, var(--color-line-strong));
+}
+
+.term-chip.is-or {
+  border-style: dashed;
+}
+
+.term-toggle {
+  @apply inline-flex min-w-0 cursor-pointer items-center gap-1.5 border-0 bg-transparent px-2 py-[3px] text-muted;
+  font: inherit;
+}
+
+.term-toggle:hover {
+  @apply text-fg;
+}
+
+.term-sign {
+  @apply w-3 shrink-0 text-center text-control font-bold text-muted;
+}
+
+.term-chip.is-excluded .term-sign {
+  /* A 1.9:1 accent-hover sign was invisible; danger-text clears 4.5:1 on panel and panel-hover. */
+  color: var(--color-danger-text);
+}
+
+.term-ns {
+  @apply shrink-0 text-micro tracking-[0.05em] uppercase;
+  color: var(--ns-color, var(--color-muted));
+}
+
+.term-value {
+  @apply max-w-[260px] truncate text-control text-fg;
+}
+
+.term-chip.is-excluded .term-value {
+  @apply line-through opacity-75;
+}
+
+.search-filters-clear {
+  @apply ml-0.5 inline-flex min-h-6 cursor-pointer items-center border-0 bg-transparent px-1.5 py-0.5 text-meta text-muted;
+}
+
+.search-filters-clear:hover {
+  @apply text-fg;
+}
+
+/* -------------------------------------------------------- tag suggestions */
+
+.tag-combobox {
+  @apply fixed flex flex-col overflow-hidden;
+}
+
+.tag-combobox-list {
+  @apply min-h-0 flex-1 overflow-y-auto overscroll-contain p-1;
+  scrollbar-width: thin;
+  scroll-padding: 4px;
+}
+
+.tag-option {
+  @apply flex min-h-8 cursor-pointer items-center gap-2 rounded-control px-2 py-1.5;
+}
+
+.tag-option:hover,
+.tag-option.is-active {
+  @apply bg-panel-hover;
+}
+
+.tag-option-sign {
+  @apply w-3 shrink-0 text-center text-body font-bold;
+  color: var(--color-danger-text);
+}
+
+.tag-option-badge {
+  @apply shrink-0 rounded-none border px-1 py-px text-micro uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ns-color, var(--color-muted));
+  border-color: color-mix(in srgb, var(--ns-color, var(--color-muted)) 45%, transparent);
+  background: color-mix(in srgb, var(--ns-color, var(--color-muted)) 12%, transparent);
+}
+
+.tag-option-key {
+  @apply min-w-0 flex-1 truncate text-control;
+}
+
+.tag-option-key mark {
+  @apply rounded-inline text-inherit;
+  background: color-mix(in srgb, var(--color-star) 30%, transparent);
+}
+
+.tag-option-meta {
+  @apply shrink-0 text-micro text-muted;
+}
+
+.tag-option.is-applied .tag-option-meta {
+  color: var(--color-star);
+}
+
+.tag-option.is-namespace .tag-option-key {
+  @apply font-semibold;
+}
+
+.tag-combobox-state {
+  @apply grid gap-1 px-3.5 py-4 text-control text-muted;
+}
+
+.tag-combobox-state strong {
+  @apply font-semibold text-fg;
+}
+
+.tag-combobox-foot {
+  @apply flex shrink-0 items-center justify-between gap-2.5 border-t border-line bg-panel px-2 py-1.5 text-micro text-muted;
+}
+
+.tag-combobox-count {
+  @apply truncate;
+}
+
+.tag-combobox-actions {
+  @apply flex shrink-0 items-center gap-2;
+}
+
+.tag-combobox-hints {
+  @apply text-muted;
+}
+
+.tag-combobox-exclude {
+  @apply min-h-6 cursor-pointer rounded-none border border-line-strong bg-transparent px-2 py-0.5 text-micro text-muted;
+  font: inherit;
+}
+
+/* ----------------------------------------------------------------- search */
+
+.search-panel {
+  @apply grid gap-2.5 border-b border-line pt-2.5 pb-4;
+}
+
+.cat-row {
+  @apply flex flex-wrap items-center gap-1.5;
+}
+
+/* Native `.cs` category buttons: the site's hue, re-tinted for a dark theme. The lightness and
+   chroma are fixed so one white label clears 4.5:1 on every one of the ten. */
+.cat-chip {
+  @apply px-3 transition-opacity;
+  border: 1px solid color-mix(in oklab, var(--cat, var(--color-accent)) 70%, transparent);
+  background: linear-gradient(
+    oklch(0.47 var(--cat-c, 0.1) var(--cat-h, 20)),
+    oklch(0.42 var(--cat-c, 0.1) var(--cat-h, 20))
+  );
+  color: var(--color-fg);
+}
+
+.cat-chip:hover {
+  opacity: 0.85;
+}
+
+/* A deselected category is still an interactive label, so it stays readable instead of fading
+   like a disabled control. */
+.cat-chip[aria-pressed="false"] {
+  opacity: 0.6;
+}
+
+.cat-chip[aria-pressed="false"]:hover {
+  opacity: 0.8;
+}
+
+/* Quick tags sit under the category chips: saved expressions, not categories. */
+.quick-tags {
+  @apply flex flex-wrap items-center gap-1.5;
+}
+
+.quick-tag {
+  @apply border border-line-strong bg-panel px-3 text-muted transition-colors;
+}
+
+.quick-tag:hover {
+  @apply border-line-strong text-fg;
+}
+
+.quick-tag[aria-pressed="true"] {
+  @apply border-accent bg-panel-hover text-fg;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 55%, transparent);
+}
+
+.quick-tag-label {
+  @apply max-w-[180px] truncate;
+}
+
+.quick-tag-edit {
+  @apply ml-0.5 border border-dashed border-line-strong bg-transparent px-2.5 text-muted;
+}
+
+.quick-tag-edit:hover {
+  @apply border-accent text-fg;
+}
+
+.expression-editor-panel {
+  @apply max-w-[calc(100vw-2rem)];
+}
+
+.expression-editor {
+  @apply flex w-[460px] max-w-full flex-col gap-2 p-3 text-control;
+}
+
+.expression-editor-title {
+  @apply m-0 font-semibold text-fg;
+}
+
+.expression-editor-hint {
+  @apply m-0 text-meta text-muted;
+}
+
+.expression-list {
+  @apply flex max-h-[320px] flex-col gap-2 overflow-y-auto;
+}
+
+.expression-row {
+  @apply grid grid-cols-[minmax(72px,0.7fr)_minmax(0,1.6fr)_auto] items-center gap-1.5;
+}
+
+.expression-options {
+  @apply col-span-full flex items-center gap-2;
+}
+
+.expression-input {
+  @apply w-full px-2 text-meta;
+}
+
+.expression-mode {
+  @apply h-7 w-auto px-1.5 text-meta;
+}
+
+.expression-pin {
+  @apply text-meta text-muted;
+}
+
+.expression-remove {
+  @apply h-6 w-6 text-control;
+}
+
+.expression-editor-actions {
+  @apply mt-1 flex items-center gap-1.5;
+}
+
+.expression-editor-spacer {
+  @apply flex-1;
+}
+
+.filters {
+  @apply w-fit rounded-control border border-line bg-surface;
+}
+
+.filters[open] {
+  @apply w-full;
+}
+
+.filters-summary {
+  @apply flex cursor-pointer select-none items-center gap-2 px-3 py-2.5 text-control text-muted;
+}
+
+.filters-summary:hover {
+  @apply text-fg;
+}
+
+.filters-count {
+  @apply inline-flex min-w-[18px] items-center justify-center rounded-none px-1.5 py-0.5 text-micro font-bold;
+}
+
+.filters-grid {
+  @apply flex flex-wrap items-end gap-4 px-3 pb-3;
+}
+
+.filters-grid > .field {
+  @apply w-[190px];
+}
+
+.filters-grid .filters-actions {
+  @apply ml-auto;
+}
+
+.field {
+  @apply flex flex-col gap-1.5 text-meta text-muted;
+}
+
+.field-row {
+  @apply flex items-center gap-1.5;
+}
+
+.field-input,
+.field-select {
+  /* The fill is nearly the section colour, so this border is what identifies the field: 3:1. */
+  @apply h-8 min-w-0 rounded-control border border-line bg-canvas px-2.5 text-control text-fg;
+  border-color: var(--color-field-line);
+}
+
+.field-select:focus,
+.field-input:focus {
+  @apply border-accent;
+}
+
+.field-input {
+  @apply w-[84px];
+}
+
+.check-row {
+  @apply flex flex-wrap gap-2.5 text-control text-fg;
+}
+
+.check {
+  @apply inline-flex cursor-pointer items-center gap-1.5;
+}
+
+.filters-actions {
+  @apply flex justify-end gap-2;
+}
+
+/* Native-only escape hatches: file search and the site's own settings form. */
+.filters-native,
+.settings-native {
+  @apply text-meta text-muted;
+}
+
+.filters-native {
+  @apply mr-auto self-center;
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.card-grid {
+  /* Real columns rather than CSS multi-column: the browser rebalances a multi-column feed on every
+     infinite-scroll append, shifting cards the reader already passed. Each column here is a flex
+     track, and new cards go to the next track in order, so existing cards never move. */
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap, 12px);
+  padding: 18px 0 10px;
+}
+
+.card-column {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--gap, 12px);
+  min-width: 0;
+}
+
+.card {
+  @apply flex flex-col overflow-hidden rounded-card border border-line bg-panel transition-[border-color,transform] duration-150;
+}
+
+.card:hover {
+  @apply -translate-y-0.5 border-line-strong;
+}
+
+.card-cover-wrap {
+  @apply relative overflow-hidden;
+}
+
+.card-cover {
+  @apply block bg-canvas;
+}
+
+/* The site's list thumbnails already carry the gallery's own aspect; cropping them to 5:7
+   upscaled every landscape cover. */
+.card-cover img {
+  @apply block h-auto w-full;
+}
+
+/* A long-strip thumbnail keeps its card at a sane height and shows its top edge; the alternative
+   is one enormous card stretching a whole masonry column and leaving its neighbours blank. */
+.card-cover.is-tall-cover {
+  aspect-ratio: 1 / 2.5;
+  overflow: hidden;
+}
+
+.card-cover.is-tall-cover img {
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+
+/* A card without a usable thumbnail still owns its cover box, so the favourite/select controls
+   cannot land on the title. */
+.card-cover.is-missing {
+  @apply grid aspect-[250/353] place-items-center bg-surface text-meta text-muted;
+}
+
+.card-cover-wrap .fav-btn {
+  @apply absolute top-2 right-2 rounded-none p-1.5 backdrop-blur-sm;
+  background: var(--scrim-control);
+}
+
+.card-cover-wrap .fav-label {
+  @apply hidden;
+}
+
+.card-body {
+  @apply flex flex-col gap-1 px-3 pt-2.5 pb-3;
+}
+
+.card-title {
+  @apply text-body leading-[1.35] text-fg no-underline;
+}
+
+.card-title:hover {
+  @apply text-link;
+}
+
+/* The translated title owns the two-line clamp; the original title sits under it as its own
+   truncated line instead of wrapping mid-separator. */
+.card-primary {
+  @apply line-clamp-2 font-semibold;
+}
+
+.card-artist {
+  @apply text-muted;
+}
+
+.card-secondary {
+  @apply block truncate text-meta text-muted;
+}
+
+.card-uploader {
+  @apply truncate text-meta text-muted;
+}
+
+.card-torrent {
+  @apply inline-flex items-center;
+  color: var(--color-torrent);
+}
+
+.card-meta {
+  @apply flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted;
+}
+
+/* The site marks a favorited row by outlining its posted date in the folder's colour. A full
+   outline made the timestamp read as an input field, so the folder colour is a bar instead. */
+.card-posted.is-favorite {
+  padding-left: 6px;
+  box-shadow: inset 2px 0 0 var(--fav-color, var(--color-accent));
+  color: var(--color-fg);
+}
+
+/* ---------------------------------------------------------------- gallery */
+
+.gallery-header {
+  @apply mt-2 grid grid-cols-[250px_minmax(0,1fr)_auto] items-center gap-7 rounded-card border border-line bg-gradient-to-b from-panel to-surface p-5;
+}
+
+/* Let a long translated title wrap instead of widening the header's middle column. */
+.gallery-details {
+  @apply min-w-0;
+}
+
+.gallery-rail {
+  @apply -mr-2 flex flex-col gap-0.5 text-meta leading-[1.4];
+}
+
+.rail-link {
+  @apply text-meta;
+}
+
+.gallery-cover {
+  @apply w-[250px] overflow-hidden rounded-control border border-line-strong bg-surface;
+}
+
+.gallery-cover img {
+  @apply block h-auto w-full;
+}
+
+.gallery-cover.is-missing {
+  @apply grid aspect-[250/364] place-items-center text-meta text-muted;
+}
+
+/* The title fragment is phrasing content (the viewer puts it inside its <h1>), so its blocks are
+   spans that the layout makes block-level. */
+.title-meta-wrap,
+.title-main {
+  display: block;
+}
+
+.gallery-title .title-meta-wrap {
+  @apply mb-1;
+}
+
+.gallery-title .meta-item {
+  @apply text-control;
+}
+
+/* Title metadata uses the same namespace palette as the tag chips, in the gallery header and the
+   reader's HUD alike. */
+.meta-artist {
+  color: var(--ns-artist);
+  font-weight: 600;
+}
+.meta-artist span {
+  color: var(--ns-group);
+  font-weight: 400;
+}
+.meta-event {
+  color: var(--ns-character);
+}
+.meta-anthology {
+  color: var(--ns-female);
+  font-weight: 600;
+}
+.meta-parody {
+  color: var(--ns-parody);
+}
+.meta-tag {
+  color: var(--ns-language);
+}
+.meta-lang {
+  color: var(--ns-mixed);
+  font-weight: 600;
+}
+
+.gallery-title .title-primary {
+  @apply block text-display leading-[1.22] font-semibold tracking-[-0.01em] text-fg;
+}
+
+.gallery-title .title-secondary,
+.gallery-title .title-alt {
+  @apply text-title-2 font-normal text-muted;
+}
+
+/* The primary title is its own block here, so the secondary starts a new line; a separator would
+   lead it with a bare pipe. The reader keeps the inline separator. */
+.gallery-title .title-sep {
+  display: none;
+}
+
+.gallery-meta {
+  @apply mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-2 text-control text-muted;
+}
+
+.cat-badge {
+  /* Label and dot share the category hue; only lightness differs, so the light label clears
+     4.5:1 on the card panel for all ten categories. */
+  --cat-fg: oklch(0.85 calc(var(--cat-c, 0.1) * 0.45) var(--cat-h, 20));
+  --cat: oklch(0.72 var(--cat-c, 0.1) var(--cat-h, 20));
+  @apply inline-flex items-center gap-1.5 rounded-chip border px-2 py-0.5 text-meta font-medium;
+  border-color: color-mix(in oklab, var(--cat) 40%, transparent);
+  background: color-mix(in oklab, var(--cat) 12%, transparent);
+  color: var(--cat-fg);
+}
+
+.cat-badge::before {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-chip);
+  background: var(--cat);
+  content: "";
+}
+
+/* The site's official category hues (`g.css` `.ct1`…`.cta`), kept as hue + chroma so chips and
+   badges can pick their own lightness. Values are the closest OKLCH hue to each official colour. */
+.ct1 {
+  --cat-h: 0;
+  --cat-c: 0.004;
+}
+.ct2 {
+  --cat-h: 25;
+  --cat-c: 0.16;
+}
+.ct3 {
+  --cat-h: 62;
+  --cat-c: 0.14;
+}
+.ct4 {
+  --cat-h: 104;
+  --cat-c: 0.13;
+}
+.ct5 {
+  --cat-h: 143;
+  --cat-c: 0.15;
+}
+.ct6 {
+  --cat-h: 265;
+  --cat-c: 0.15;
+}
+.ct7 {
+  --cat-h: 305;
+  --cat-c: 0.17;
+}
+.ct8 {
+  --cat-h: 330;
+  --cat-c: 0.13;
+}
+.ct9 {
+  --cat-h: 214;
+  --cat-c: 0.12;
+}
+.cta {
+  --cat-h: 133;
+  --cat-c: 0.15;
+}
+
+/* Separators live between items, never before the first one, so a wrapped line cannot start
+   with an orphan dot. */
+.meta-dot {
+  @apply relative;
+}
+
+.meta-dot + .meta-dot {
+  @apply pl-3;
+}
+
+.meta-dot + .meta-dot::before {
+  @apply absolute top-1/2 left-0 size-[3px] -translate-y-1/2 rounded-full bg-line-strong content-[''];
+}
+
+/* The field holds a draft that the rendered results do not match yet. */
+.draft-note strong {
+  @apply font-semibold text-fg;
+}
+
+.gallery-actions {
+  @apply mt-5 flex flex-wrap items-center gap-2.5;
+}
+
+.btn {
+  @apply h-8 whitespace-nowrap px-3.5 text-body font-semibold no-underline;
+}
+
+.btn-primary {
+  @apply border-parchment bg-parchment text-burgundy;
+}
+
+.btn-primary:hover {
+  @apply border-parchment-hover bg-parchment-hover text-burgundy;
+}
+
+.btn-ghost {
+  @apply bg-transparent;
+}
+
+.btn-small {
+  @apply h-7 px-3 text-control;
+}
+
+.btn.is-disabled,
+.btn:disabled {
+  @apply pointer-events-none opacity-40;
+}
+
+.btn:disabled {
+  @apply cursor-not-allowed;
+}
+
+.fav-btn {
+  @apply h-8 max-w-full overflow-hidden whitespace-nowrap px-3 text-body font-semibold text-muted;
+}
+
+.fav-btn:hover {
+  color: var(--color-star);
+  border-color: color-mix(in srgb, var(--color-star) 45%, var(--color-line-strong));
+}
+
+.fav-btn.is-favorite {
+  color: var(--color-star);
+  border-color: color-mix(in srgb, var(--color-star) 40%, var(--color-line));
+  background: color-mix(in srgb, var(--color-star) 12%, var(--color-panel));
+}
+
+.fav-label {
+  @apply min-w-0 truncate leading-none;
+}
+
+/* ------------------------------------------------------------------- tags */
+
+.tag-section {
+  @apply grid gap-2 border-b border-line py-5;
+}
+
+.tag-ns {
+  @apply w-[4.75rem] shrink-0 pt-1.5 text-meta tracking-[0.02em] lowercase;
+  color: var(--ns-color, var(--color-muted));
+}
+
+.tag-chips {
+  @apply flex min-w-0 flex-1 flex-wrap gap-1.5;
+}
+
+.tag-add {
+  @apply mt-1 flex max-w-[520px] items-center gap-2;
+}
+
+.tag-add-input {
+  @apply w-full flex-1;
+}
+
+.tag-chip {
+  @apply rounded-none border bg-panel px-2.5 py-1 text-control text-muted no-underline transition-colors;
+  border-color: var(--ns-color, var(--color-line));
+}
+
+.tag-chip:hover {
+  @apply border-accent text-fg;
+}
+
+.tag-chip-wrap {
+  @apply inline-flex items-stretch;
+}
+
+/* Touch has no context menu; coarse and no-hover pointers get a visible menu trigger. */
+.tag-menu-trigger {
+  display: none;
+}
+
+@media (pointer: coarse), (hover: none) {
+  .tag-menu-trigger {
+    @apply grid w-6 cursor-pointer place-items-center border border-l-0 bg-panel text-control text-muted;
+    border-color: var(--ns-color, var(--color-line));
+  }
+
+  .tag-menu-trigger:hover,
+  .tag-menu-trigger:focus-visible {
+    @apply border-accent text-fg;
+  }
+}
+
+/* A chip whose tag is already in the draft query reads as applied, with its sign. */
+.tag-chip.is-added {
+  @apply text-fg;
+  border-color: var(--ns-color, var(--color-line-strong));
+  background: color-mix(in srgb, var(--ns-color, var(--color-line-strong)) 26%, transparent);
+}
+
+.tag-chip.is-added.is-excluded {
+  border-color: color-mix(in srgb, var(--color-accent) 75%, var(--color-line-strong));
+  border-style: dashed;
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+.tag-chip.is-added.is-or {
+  border-style: dashed;
+}
+
+.ns-artist {
+  --ns-color: var(--ns-artist);
+}
+.ns-group {
+  --ns-color: var(--ns-group);
+}
+.ns-parody {
+  --ns-color: var(--ns-parody);
+}
+.ns-character {
+  --ns-color: var(--ns-character);
+}
+.ns-female {
+  --ns-color: var(--ns-female);
+}
+.ns-male {
+  --ns-color: var(--ns-male);
+}
+.ns-language {
+  --ns-color: var(--ns-language);
+}
+.ns-cosplayer {
+  --ns-color: var(--ns-cosplayer);
+}
+.ns-mixed {
+  --ns-color: var(--ns-mixed);
+}
+.ns-other {
+  --ns-color: var(--ns-other);
+}
+.ns-location {
+  --ns-color: var(--ns-location);
+}
+.ns-reclass {
+  --ns-color: var(--ns-reclass);
+}
+
+/* ----------------------------------------------------------------- thumbs */
+
+.thumb-grid {
+  --scale: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--thumb-size, 200px));
+  justify-content: center;
+  gap: var(--gap, 12px);
+  padding: 14px 0 8px;
+}
+
+.thumb-cell {
+  @apply flex flex-col gap-1;
+}
+
+.thumb {
+  @apply relative block overflow-hidden bg-canvas bg-no-repeat shadow-[inset_0_0_0_1px_rgb(255_255_255/0.05)];
+  background-position-y: 0;
+}
+
+.thumb.is-loaded {
+  background-size: calc(var(--sprite-w) * var(--sprite-count) * var(--scale)) auto;
+  background-position-x: calc(var(--sprite-x) * var(--scale));
+}
+
+.thumb.is-missing {
+  background-color: var(--color-panel);
+}
+
+.thumb:hover {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.thumb-page {
+  @apply text-center text-micro leading-[1.3] text-muted;
+}
+
+/* ------------------------------------------------------------------ pager */
+
+.pager {
+  @apply flex flex-wrap items-center justify-center gap-4 pt-6 pb-12;
+}
+
+.pager.is-above {
+  @apply pt-5 pb-0;
+}
+
+.pager-btn {
+  @apply h-7 px-3 text-control no-underline;
+}
+
+.pager-info {
+  @apply text-meta text-muted;
+}
+
+.pager-nums {
+  @apply flex flex-wrap items-center justify-center gap-1;
+}
+
+.pager-num {
+  @apply h-7 min-w-7 px-2 text-control text-muted no-underline;
+}
+
+.pager-gap {
+  @apply px-1 text-meta text-muted;
+}
+
+/* -------------------------------------------------------------- jump rows */
+
+/* In-page jump navigation (settings sections, toplist blocks). One scrolling line of text links,
+   deliberately not tab-shaped: these move within the page, they do not change route. */
+.settings-jump,
+.toplist-jump {
+  @apply sticky z-20 flex items-center gap-0.5 overflow-x-auto border border-line bg-surface px-2 py-1 text-meta text-muted;
+  top: var(--topbar-h, 0px);
+  border-radius: var(--radius-card);
+}
+
+.settings-jump-link,
+.toplist-jump-link {
+  @apply inline-flex h-6 shrink-0 items-center rounded-row px-2 no-underline transition-colors;
+}
+
+.settings-jump-link:hover,
+.toplist-jump-link:hover {
+  @apply bg-panel-hover text-fg;
+}
+
+.settings-jump-link[aria-current],
+.toplist-jump-link[aria-current] {
+  @apply text-fg;
+}
+
+/* --------------------------------------------------------- infinite scroll */
+
+.infinite-scroll {
+  @apply flex flex-col items-center gap-2 pt-5 pb-10 text-control text-muted;
+}
+
+.infinite-status:empty {
+  /* The sentinel needs height even between requests so it stays observable. */
+  min-height: 1px;
+}
+
+/* ------------------------------------------------------------ favorite menu */
+
+.fav-menu {
+  @apply w-[280px] p-2;
+}
+
+.fav-head {
+  @apply mb-1.5 px-1;
+}
+
+.fav-note {
+  @apply mb-1.5 w-full resize-y;
+  min-height: 48px;
+}
+
+.fav-grid {
+  @apply grid grid-cols-2 gap-1;
+}
+
+.fav-item {
+  @apply gap-2 text-fg;
+}
+
+.fav-remove {
+  @apply mt-2 w-full text-danger-text;
+}
+
+.fav-dot {
+  @apply size-2 shrink-0 rounded-full;
+}
+
+.fav-name {
+  @apply truncate;
+}
+
+/* The folder the gallery already sits in: the picker says which choice is a no-op. */
+.fav-item.is-current {
+  @apply bg-panel-hover text-fg;
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.fav-check {
+  @apply ml-auto shrink-0 text-accent-text;
+}
+
+.fav-status {
+  @apply px-0.5 py-1.5 text-control leading-relaxed text-muted;
+}
+
+.fav-link {
+  @apply mt-2 block text-meta;
+}
+
+/* ------------------------------------------------------------ misc chrome */
+
+.eh-skip {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 600;
+  padding: 8px 14px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-panel);
+  color: var(--color-fg);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.eh-skip:focus-visible {
+  transform: translateY(0);
+  outline-offset: 2px;
+}
+
+.eh-banner-host {
+  @apply flex w-full flex-col items-center gap-2 px-7 pt-2.5;
+}
+
+.eh-banner {
+  @apply flex w-full max-w-[760px] items-start gap-2.5 rounded-control border border-danger-line bg-danger-surface px-3 py-2.5 text-control leading-relaxed text-danger-text shadow-float;
+}
+
+.eh-banner svg {
+  @apply mt-px shrink-0;
+}
+
+.eh-banner-text {
+  @apply whitespace-pre-wrap break-words;
+}
+
+.eh-banner-count {
+  @apply shrink-0 opacity-70;
+}
+
+.eh-banner-close {
+  @apply ml-auto inline-grid size-6 cursor-pointer place-items-center border-0 bg-transparent p-0.5 text-inherit opacity-70;
+}
+
+.eh-banner-close:hover {
+  @apply opacity-100;
+}
+
+.eh-toast {
+  @apply fixed bottom-[26px] left-1/2 z-[350] rounded-chip border border-line-strong bg-panel px-4 py-2 text-control text-fg opacity-0 shadow-float;
+  pointer-events: none;
+  transform: translate(-50%, 8px);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.eh-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.eh-loading {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 500;
+  width: 100%;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+}
+
+body.is-loading .eh-loading {
+  opacity: 1;
+  animation: eh-loading-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes eh-loading-slide {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+
+.empty-state,
+.error-view {
+  @apply mx-auto my-16 max-w-[560px] rounded-card border border-line-strong bg-panel p-8 text-center;
+}
+
+.state-icon {
+  @apply mx-auto mb-3 grid size-9 place-items-center rounded-chip bg-panel-hover text-muted;
+}
+
+.state-title {
+  @apply mt-0 mb-2 text-heading font-semibold text-fg;
+}
+
+.state-text {
+  @apply m-0 text-body leading-relaxed text-muted;
+}
+
+/* The secondary explanation is its own paragraph; without a gap the two lines read as one block. */
+.state-text + .state-text {
+  @apply mt-1.5;
+}
+
+.state-actions {
+  @apply mt-5 flex flex-wrap items-center justify-center gap-2.5;
+}
+
+/* --------------------------------------------------------------- responsive */
+
+@media (max-width: 720px) {
+  #eh-view {
+    @apply px-3.5 pb-7;
+  }
+
+  .eh-banner-host {
+    @apply px-3.5;
+  }
+
+  .gallery-header {
+    @apply grid-cols-[120px_minmax(0,1fr)] items-start gap-4 p-3.5;
+  }
+
+  .gallery-cover {
+    @apply w-[120px];
+  }
+
+  /* Keep the rail's label: without it the links read as a paragraph of loose text. */
+  .gallery-rail {
+    @apply col-span-full flex-row flex-wrap items-center gap-x-3 gap-y-1;
+  }
+
+  .gallery-rail .rail-label {
+    @apply mr-1;
+  }
+
+  .gallery-title .title-primary {
+    @apply text-title-2;
+  }
+
+  .topbar {
+    margin: 0 -14px;
+    padding: 12px 14px 10px;
+  }
+
+  .topbar-kbd {
+    @apply hidden;
+  }
+
+  /* The text submit would crowd the field on a phone; the icon keeps the action visible. */
+  .topbar-search-submit {
+    @apply mr-1 grid size-6 shrink-0 place-items-center;
+    padding: 0;
+  }
+
+  .topbar-search-submit-label {
+    display: none;
+  }
+
+  .topbar-search-submit-icon {
+    @apply inline-flex;
+  }
+
+  .tag-combobox-hints {
+    @apply hidden;
+  }
+
+  /* Keep the active filters to one row on a phone. Wrapping made a long query grow the sticky
+     header by several lines; the row already has the shared edge-fade treatment. */
+  .search-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .search-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .search-filters .term-chip {
+    flex: 0 0 auto;
+  }
+
+  .search-filters[data-scrollable] {
+    mask-image: var(--scroll-fade);
+  }
+
+  .search-filters[data-scrollable][data-scrolled] {
+    mask-image: var(--scroll-fade-both);
+  }
+
+  .search-filters[data-scrollable][data-at-end] {
+    mask-image: var(--scroll-fade-left);
+  }
+
+  .term-value {
+    @apply max-w-[160px];
+  }
+
+  /* A wrapped meta line would otherwise start with an orphan `·`; on phones the items are
+     separated by space alone. */
+  .gallery-meta .meta-dot {
+    padding-left: 0;
+  }
+
+  .gallery-meta .meta-dot + .meta-dot::before {
+    display: none;
+  }
+
+  .gallery-meta {
+    @apply gap-x-3 gap-y-1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- shared overlays ---------- */
+
+.action-menu-panel,
+.topbar-more-panel {
+  min-width: 180px;
+  padding: 4px;
+}
+
+.action-menu {
+  @apply grid gap-0.5;
+}
+
+.action-menu-item,
+.tag-menu-item {
+  @apply w-full border-0 bg-transparent text-left;
+}
+
+/* ------------------------------------------------------------ card preview */
+
+.card-preview-trigger {
+  @apply ml-auto size-7 shrink-0;
+  border-radius: var(--radius-control);
+}
+
+.card-preview {
+  @apply p-3;
+  width: min(320px, calc(100vw - 16px));
+}
+
+.card-preview-body {
+  @apply grid gap-2;
+}
+
+.card-preview-title {
+  @apply m-0 text-body font-semibold text-fg;
+}
+
+.card-preview-secondary {
+  @apply m-0 truncate text-meta text-muted;
+}
+
+.card-preview-facts {
+  @apply flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted;
+}
+
+.card-preview-favorite {
+  @apply text-star;
+}
+
+.card-preview-actions {
+  @apply mt-1 flex flex-wrap items-center gap-2;
+}
+
+/* Jump/seek beside the pager links. */
+.pager-jump {
+  @apply flex items-center gap-1.5;
+}
+
+.pager-jump-label {
+  @apply text-meta text-muted;
+}
+
+.pager-jump-input {
+  @apply h-7 w-16 px-2;
+}
+
+.pager-seek-input {
+  @apply w-32;
+}
+
+/* --------------------------------------------------------- search history */
+
+.topbar-history {
+  @apply mr-1 size-6 shrink-0;
+}
+
+.topbar-history[aria-expanded="true"] {
+  @apply bg-panel-hover text-fg;
+}
+
+.search-history {
+  @apply flex max-h-[min(70vh,520px)] w-[min(360px,calc(100vw-16px))] flex-col gap-2 overflow-y-auto p-3;
+}
+
+.search-history-title {
+  @apply m-0 text-body font-semibold text-fg;
+}
+
+.search-history-heading {
+  @apply m-0 mt-1;
+}
+
+.search-history-list {
+  @apply grid gap-1;
+}
+
+.search-history-saved {
+  @apply flex items-stretch gap-1;
+}
+
+.search-history-query {
+  @apply flex min-w-0 flex-1 cursor-pointer flex-col items-start gap-0.5 border border-line bg-canvas px-2 py-1 text-left text-control text-fg transition-colors;
+  border-radius: var(--radius-row);
+}
+
+.search-history-query:hover,
+.search-history-query:focus-visible {
+  @apply border-accent bg-panel-hover;
+}
+
+.search-history-name {
+  @apply w-full truncate font-semibold;
+}
+
+.search-history-text {
+  @apply w-full truncate text-meta text-muted;
+}
+
+.search-history-remove,
+.search-history-toggle {
+  @apply w-7 shrink-0 bg-transparent text-control leading-none text-muted;
+}
+
+.search-history-remove:hover,
+.search-history-remove:focus-visible {
+  @apply bg-panel text-danger-text;
+  border-color: var(--color-accent);
+}
+
+.search-history-toggle:hover,
+.search-history-toggle:focus-visible {
+  @apply bg-panel text-accent-text;
+  border-color: var(--color-accent);
+}
+
+.search-history-edit {
+  @apply cursor-pointer self-start border-0 bg-transparent p-0 text-meta text-muted underline-offset-2;
+}
+
+.search-history-edit:hover,
+.search-history-edit:focus-visible {
+  @apply text-fg underline;
+}
+
+.search-history-clear {
+  @apply self-start;
+}
+
+.search-history-empty {
+  @apply m-0 text-control text-muted;
+}
+
+/* ------------------------------------------------------------ forced colors */
+
+@media (forced-colors: active) {
+  /* Author colours disappear under a forced palette; keep the control borders and state colours
+     that carry meaning, and let the system own the text/background pair. */
+  .btn,
+  .fav-btn,
+  .pager-btn,
+  .pager-num,
+  .cat-chip,
+  .term-toggle,
+  .tag-chip,
+  .card,
+  .gallery-header,
+  .settings-section,
+  .comment,
+  .topbar-search,
+  .field-input,
+  .field-select,
+  .card-preview,
+  .eh-popover,
+  .tag-menu-color,
+  .pager-jump-input {
+    border: 1px solid CanvasText;
+  }
+
+  .btn-primary,
+  .topbar-search-submit,
+  .pager-num.is-current,
+  .cat-chip[aria-pressed="true"],
+  .quick-tag[aria-pressed="true"],
+  .tag-combobox-exclude[aria-pressed="true"] {
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+  }
+
+  .card:hover,
+  .card:focus-within {
+    transform: none;
+  }
+
+  .eh-popover,
+  .card-preview {
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+
+  .card-posted.is-favorite,
+  .comment-score,
+  .comment-votes,
+  :focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}
+
+/* Coarse pointers get a larger preview hit area without changing the grid. */
+@media (pointer: coarse) {
+  .card-preview-trigger {
+    @apply size-9;
+  }
+}
