@@ -94,7 +94,8 @@ describe("parseRoute", () => {
     expect(parseRoute(`${ORIGIN}/torrents.php`).kind).toBe("torrents");
     expect(parseRoute(`${ORIGIN}/toplist.php`).kind).toBe("toplist");
     expect(parseRoute(`${ORIGIN}/uconfig.php`).kind).toBe("settings");
-    expect(parseRoute(`${ORIGIN}/mytags`).kind).toBe("native");
+    expect(parseRoute(`${ORIGIN}/mytags`).kind).toBe("myTags");
+    expect(parseRoute(`${ORIGIN}/gallerytorrents.php`).kind).toBe("galleryTorrents");
     expect(parseRoute(`${ORIGIN}/news.php`).kind).toBe("native");
     expect(parseRoute(`${ORIGIN}/?eh_native=1`).kind).toBe("native");
     expect(parseRoute("https://example.com/g/123456/abcdef1234/").kind).toBe("native");

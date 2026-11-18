@@ -101,7 +101,8 @@ export function isHtmlResponse(response: Response, text: string): boolean {
 }
 
 /** Markers every real owned page carries; a wall/404 page has none of them. */
-const PAGE_CONTENT_SELECTOR = "#gn, #gdt, #gdd, #i1, #i2, #i3, #profile_form, .itg";
+const PAGE_CONTENT_SELECTOR =
+  "#gn, #gdt, #gdd, #i1, #i2, #i3, #profile_form, #usertags_outer, #torrentinfo, .itg";
 
 function hasPageContent(doc: Document): boolean {
   return doc.querySelector(PAGE_CONTENT_SELECTOR) !== null;

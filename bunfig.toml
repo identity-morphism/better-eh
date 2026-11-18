@@ -6,7 +6,7 @@ trailingComma = "all"
 sortImports = true
 sortPackageJson = true
 jsdoc = true
-ignorePatterns = ["dist/"]
+ignorePatterns = ["dist/", "src/tags/core-vocabulary.ts"]
 
 [lint]
 ignorePatterns = ["dist/"]

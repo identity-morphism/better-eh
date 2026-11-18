@@ -1,37 +1,35 @@
 /**
- * My Tags mutations: watch, hide, and colour a tag.
+ * My Tags mutations: watch, hide, colour and weight a tag.
  *
- * The site stores user tags server-side. Watching/hiding/colouring an existing tag goes through the
- * `setusertag` JSON API, which needs the numeric user-tag id (only present on `/mytags`), so the
- * current list is fetched first. A tag that is not on that list is added through the native
- * `/mytags` form instead.
+ * The site stores user tags server-side. Editing an existing tag goes through the `setusertag` JSON
+ * API, which needs the numeric user-tag id (only present on `/mytags`), so the current list is
+ * fetched first unless the caller already has the row's state. A tag that is not on that list is
+ * added through the native `/mytags` form instead.
  */
 
 import type { DocumentOptions, HtmlResponse } from "../fetch/loader";
 import { postForm, postJson } from "../net/http";
-import { isChecked } from "../parse/helpers";
-import type { GalleryApiConfig } from "../types";
+import type { ApiCredentials } from "../parse/gallery";
+import type { UserTagState } from "../parse/my-tags";
+import { normalizeColor, parseUserTags } from "../parse/my-tags";
 import type { GalleryPost } from "./gallery-actions";
 
-interface UserTagState {
-  id: number;
-  name: string;
-  watched: boolean;
-  hidden: boolean;
-  color: string;
-  weight: number;
-}
+const DEFAULT_WEIGHT = 10;
 
 export interface MyTagChange {
   watched?: boolean;
   hidden?: boolean;
   /** `null` clears the colour; `undefined` keeps it. */
   color?: string | null;
+  /** -99..99; `undefined` keeps the current weight (10 when adding). */
+  weight?: number;
 }
 
 interface MyTagDeps {
-  config: GalleryApiConfig;
+  config: ApiCredentials;
   myTagsUrl: string;
+  /** Current tag state; when present the My Tags page is not fetched. */
+  existing?: UserTagState;
   loadDocument: (url: string, options: DocumentOptions) => Promise<HtmlResponse>;
   post?: GalleryPost;
   addTag?: (url: string, body: URLSearchParams, signal?: AbortSignal) => Promise<void>;
@@ -42,43 +40,12 @@ function normalizeName(name: string): string {
   return name.replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
-/** Accept `#rgb`/`#rrggbb` (or the same without `#`); anything else means "no colour". */
-export function normalizeColor(color: string | null | undefined): string {
-  if (color === null || color === undefined) {
-    return "";
+/** Round a weight and keep it inside the site's -99..99 range; missing input means 10. */
+export function normalizeWeight(weight: number | null | undefined): number {
+  if (weight === null || weight === undefined || !Number.isFinite(weight)) {
+    return DEFAULT_WEIGHT;
   }
-  const value = color.trim().replace(/^#/, "");
-  return /^[0-9a-f]{3}(?:[0-9a-f]{3})?$/iu.test(value) ? `#${value.toLowerCase()}` : "";
-}
-
-/** Parse the user tags rendered inside `/mytags`. */
-export function parseUserTags(doc: Document): UserTagState[] {
-  const tags: UserTagState[] = [];
-  for (const block of doc.querySelectorAll<HTMLElement>("#usertags_outer > div[id^='usertag_']")) {
-    const rawId = block.id.slice("usertag_".length);
-    const id = Number.parseInt(rawId, 10);
-    // The blank add-row uses `usertag_0`; it is not a saved tag.
-    if (!Number.isFinite(id) || id <= 0) {
-      continue;
-    }
-    const preview = block.querySelector<HTMLElement>(`#tagpreview_${id}`);
-    const name = preview?.getAttribute("title")?.trim() ?? "";
-    if (name === "") {
-      continue;
-    }
-    const colorInput = block.querySelector<HTMLInputElement>(`#tagcolor_${id}`);
-    const weightInput = block.querySelector<HTMLInputElement>(`#tagweight_${id}`);
-    const weight = Number.parseInt(weightInput?.value ?? "", 10);
-    tags.push({
-      id,
-      name,
-      watched: isChecked(block.querySelector<HTMLInputElement>(`#tagwatch_${id}`)),
-      hidden: isChecked(block.querySelector<HTMLInputElement>(`#taghide_${id}`)),
-      color: normalizeColor(colorInput?.value ?? ""),
-      weight: Number.isFinite(weight) ? weight : 10,
-    });
-  }
-  return tags;
+  return Math.min(99, Math.max(-99, Math.round(weight)));
 }
 
 function throwIfFailed(data: unknown): void {
@@ -118,13 +85,20 @@ export async function applyMyTag(
   if (name === "") {
     throw new Error("Missing tag name.");
   }
-  const response = await deps.loadDocument(deps.myTagsUrl, { fresh: true, signal: deps.signal });
+
+  let existing = deps.existing;
+  if (existing === undefined) {
+    const response = await deps.loadDocument(deps.myTagsUrl, { fresh: true, signal: deps.signal });
+    if (deps.signal?.aborted) {
+      return "updated";
+    }
+    existing = parseUserTags(response.doc).find((entry) => normalizeName(entry.name) === name);
+  }
   if (deps.signal?.aborted) {
     return "updated";
   }
-  const existing = parseUserTags(response.doc).find((entry) => normalizeName(entry.name) === name);
 
-  if (existing) {
+  if (existing !== undefined) {
     let watched = change.watched ?? existing.watched;
     let hidden = change.hidden ?? existing.hidden;
     // The site treats watch and hide as mutually exclusive; the field just changed wins.
@@ -137,6 +111,7 @@ export async function applyMyTag(
       watched,
       hidden,
       color: change.color === undefined ? existing.color : normalizeColor(change.color),
+      weight: change.weight === undefined ? existing.weight : normalizeWeight(change.weight),
     };
     const post = deps.post ?? ((url, body) => postTagJson(url, body, deps.signal));
     const data = await post(deps.config.apiUrl, {
@@ -147,16 +122,17 @@ export async function applyMyTag(
       tagwatch: next.watched ? 1 : 0,
       taghide: next.hidden ? 1 : 0,
       tagcolor: next.color,
-      tagweight: existing.weight,
+      tagweight: next.weight,
     });
     throwIfFailed(data);
     return "updated";
   }
 
+  const weight = change.weight === undefined ? DEFAULT_WEIGHT : normalizeWeight(change.weight);
   const body = new URLSearchParams({
     usertag_action: "add",
     tagname_new: name,
-    tagweight_new: "10",
+    tagweight_new: String(weight),
     usertag_target: "0",
   });
   if (change.watched === true) {

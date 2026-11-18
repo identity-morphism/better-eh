@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
+import { ParseMismatchError } from "../../src/fetch/errors";
 import type { DocumentOptions, ViewerPageOptions } from "../../src/fetch/loader";
 import { priorityOf } from "../../src/net/priority";
 import { parseGalleryPage } from "../../src/parse/gallery";
+import { parseGalleryTorrents } from "../../src/parse/gallery-torrents";
 import { parseListPage } from "../../src/parse/list";
 import { parseSearchQuery } from "../../src/parse/query";
 import { parseTorrents } from "../../src/parse/torrents";
@@ -21,8 +23,10 @@ const GALLERY_URL = "https://e-hentai.org/g/123456/abcdef1234/";
 const LIST_URL = "https://e-hentai.org/?f_search=test";
 const VIEWER_URL = "https://e-hentai.org/s/hash123/987654-2";
 const TORRENTS_URL = "https://e-hentai.org/torrents.php";
+const GALLERY_TORRENTS_URL = "https://e-hentai.org/gallerytorrents.php?gid=987654&t=abcdef1234";
 
 const galleryDoc = await loadFixture("gallery.html");
+const galleryTorrentsDoc = await loadFixture("gallerytorrents.html");
 const listDoc = await loadFixture("list.html");
 const torrentsDoc = await loadFixture("torrents.html");
 const viewerDoc = await loadFixture("viewer.html");
@@ -34,6 +38,7 @@ const toplistDoc = await loadFixture("toplist.html");
 const DOCS: Record<string, Document> = {
   [LIST_URL]: listDoc,
   [TORRENTS_URL]: torrentsDoc,
+  [GALLERY_TORRENTS_URL]: galleryTorrentsDoc,
   "https://e-hentai.org/uconfig.php": uconfigDoc,
   "https://e-hentai.org/favorites.php": favoritesDoc,
   "https://e-hentai.org/toplist.php": toplistDoc,
@@ -48,6 +53,10 @@ const listRoute = {
 } satisfies RouteOf<"list">;
 const viewerRoute = { kind: "viewer", url: VIEWER_URL } satisfies RouteOf<"viewer">;
 const torrentsRoute = { kind: "torrents", url: TORRENTS_URL } satisfies RouteOf<"torrents">;
+const galleryTorrentsRoute = {
+  kind: "galleryTorrents",
+  url: GALLERY_TORRENTS_URL,
+} satisfies RouteOf<"galleryTorrents">;
 
 const viewerData = parseViewer(viewerDoc, VIEWER_URL);
 
@@ -180,6 +189,18 @@ describe("viewer route", () => {
     expect(viewerCalls[0]?.url).toBe(VIEWER_URL);
     expect(viewerCalls[0]?.options.signal).toBe(signal);
     expect(viewerCalls[0]?.options.priority).toBe(priorityOf("navigation"));
+  });
+
+  test("rejects a loaded page whose image the parser could not resolve", async () => {
+    const views = createRouteViews({
+      document: () => Promise.reject(new Error("unexpected document load")),
+      viewerPage: () => Promise.resolve({ ...viewerData, imgSrc: "" }),
+      seedViewerPage: () => undefined,
+    });
+
+    await expect(
+      views.routeView(viewerRoute).load(viewerRoute, new AbortController().signal),
+    ).rejects.toThrow(ParseMismatchError);
   });
 
   test("parses the initial document with the viewer parser and seeds the page cache", () => {
@@ -330,6 +351,30 @@ describe("list route", () => {
       calls: docCalls,
     });
   });
+
+  test("translates the app's date range into the site's seek cursor before loading", async () => {
+    const url = "https://e-hentai.org/?eh_until=2024-12-31";
+    const route = {
+      kind: "list",
+      url,
+      query: parseSearchQuery(new URL(url)),
+      scope: "search",
+    } satisfies RouteOf<"list">;
+    const docCalls: DocCall[] = [];
+    const views = createRouteViews({
+      document: (requestUrl, options) => {
+        docCalls.push({ url: requestUrl, options: options ?? {} });
+        return Promise.resolve({ doc: listDoc, url: requestUrl });
+      },
+      viewerPage: () => Promise.reject(new Error("unexpected viewer load")),
+      seedViewerPage: () => undefined,
+    });
+
+    await views.routeView(route).load(route, new AbortController().signal);
+
+    expect(docCalls).toHaveLength(1);
+    expect(new URL(docCalls[0]?.url ?? "").searchParams.get("seek")).toBe("2024-12-31");
+  });
 });
 
 describe("torrents route", () => {
@@ -355,6 +400,34 @@ describe("torrents route", () => {
     const data = parseTorrents(torrentsDoc, TORRENTS_URL);
 
     expect(views.routeView(torrentsRoute).title(data)).toBe("Torrents - E-Hentai");
+  });
+});
+
+describe("gallery torrents route", () => {
+  test("loads and parses the gallery's torrent popup", async () => {
+    const { views, docCalls, viewerCalls } = harness();
+    const signal = new AbortController().signal;
+
+    const data = await views.routeView(galleryTorrentsRoute).load(galleryTorrentsRoute, signal);
+
+    expect(data.torrents).toHaveLength(2);
+    expect(viewerCalls).toHaveLength(0);
+    expect(docCalls).toHaveLength(1);
+    expectDocumentLoad(docCalls[0], {
+      url: GALLERY_TORRENTS_URL,
+      signal,
+      priority: "navigation",
+      tag: "gallery-torrents",
+    });
+  });
+
+  test("titles the page with the gallery name", () => {
+    const { views } = harness();
+    const data = parseGalleryTorrents(galleryTorrentsDoc, GALLERY_TORRENTS_URL);
+
+    expect(views.routeView(galleryTorrentsRoute).title(data)).toBe(
+      "Torrents for Test Gallery - E-Hentai",
+    );
   });
 });
 

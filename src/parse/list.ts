@@ -208,7 +208,7 @@ function nextLink(doc: Document, id: string, base: string): string | null {
  */
 function resultSummary(doc: Document): string | null {
   const raw = cleanText(doc.querySelector(".searchtext p")?.textContent);
-  const match = /(?:Found|Showing)[^.]*?\./i.exec(raw);
+  const match = /^(?:Found|Showing)\b[^.]*\./i.exec(raw);
   if (match?.[0]) {
     return match[0];
   }

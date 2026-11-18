@@ -376,12 +376,7 @@ function siteActionItems(data: GalleryData): ActionMenuItem[] {
     });
   }
   if (torrentsHref !== null) {
-    items.push({
-      label: "Torrent Download",
-      href: torrentsHref,
-      native: true,
-      popup: { width: 610, height: 590 },
-    });
+    items.push({ label: "Torrent Download", href: torrentsHref });
   }
   if (reportHref !== null) {
     items.push({ label: "Report Gallery", href: reportHref, native: true });
@@ -410,7 +405,7 @@ function siteActionRail(items: readonly ActionMenuItem[]): HTMLElement {
       continue;
     }
     // Same affordance as the More menu, without an external glyph: these are site pages, not
-    // another host, even though they load outside the app.
+    // another host.
     const href = item.href;
     const popup = item.popup;
     rail.append(

@@ -1,8 +1,10 @@
+import { listRequestUrl } from "./data/list-date";
 import { applyPersistedListFilters } from "./data/list-filters";
 import {
   HttpError,
   isAbortError,
   LoginRequiredError,
+  ParseMismatchError,
   RateLimitedError,
   RequestPurgedError,
 } from "./fetch/errors";
@@ -293,6 +295,13 @@ async function transition(
     if (id !== navId || isAbortError(error)) {
       return;
     }
+    if (error instanceof ParseMismatchError) {
+      // The owned view cannot trust this document. Replace the entry with the site's own page so
+      // the back button cannot land on the owned URL and fall back again.
+      console.error(LOG_TAG, "parse mismatch, opening the native page", error);
+      location.replace(nativeUrl(route.url));
+      return;
+    }
     console.error(LOG_TAG, "navigation failed", error);
     errorView(error, route);
   } finally {
@@ -437,11 +446,27 @@ export function boot(): void {
   }
   route = effective;
 
+  // A direct load of an app-owned range starts the site's cursor at the range's newest day. The
+  // redirected address already carries `seek`, so this runs once and never loops.
+  if (route.kind === "list") {
+    const requestUrl = listRequestUrl(route.url);
+    if (requestUrl !== route.url) {
+      location.replace(requestUrl);
+      return;
+    }
+  }
+
   const start = (): void => {
     try {
       startOwned(route);
     } catch (error) {
       console.error(LOG_TAG, "startup failed", error);
+      if (error instanceof ParseMismatchError) {
+        // The document is hidden and the shell may not exist yet; the site's own page is next.
+        revealDocument();
+        location.replace(nativeUrl(location.href));
+        return;
+      }
       // A signed-out first load has no shell yet, so the site's own login wall would stay visible.
       if (error instanceof LoginRequiredError) {
         ensureShell();

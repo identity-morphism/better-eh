@@ -4,13 +4,16 @@
  * The vocabulary comes from the community-maintained EhTagTranslation database (the same source
  * used by E-Hentai's translation userscripts). Only namespace and tag names are kept: the full
  * database is several megabytes, while the compact index is about one. It is cached in userscript
- * storage, so suggestions work offline after the first successful download. Gallery-popularity
- * counts are downloaded separately (see `counts.ts`) and attached when the index is loaded.
+ * storage, so suggestions work offline after the first successful download. A generated core
+ * vocabulary is embedded in the bundle as a synchronous fallback until that download lands.
+ * Gallery-popularity counts are downloaded separately (see `counts.ts`) and attached when the index
+ * is loaded.
  */
 
 import { isRecord } from "../guards";
 import { log, warn } from "../log";
 import { createStore, gmStorage } from "../store";
+import { coreVocabularyGroups } from "./core";
 import { getTagCounts, loadTagCounts, onTagCountsChange } from "./counts";
 import { decodeTagVocabulary } from "./index-codec";
 import { ASSET_RETRY_MS, ASSET_TTL_MS, assetUrls, fetchAsset } from "./mirror";
@@ -253,6 +256,17 @@ function readIndexCache(): CachedSnapshot<BoundIndex> | null {
   return index ? { value: { index, counts }, updated: stored.updated } : null;
 }
 
+/** The embedded vocabulary as an index; built on first use and never persisted. */
+let core: TagIndex | null | undefined;
+
+function coreIndex(): TagIndex | null {
+  if (core === undefined) {
+    const groups = coreVocabularyGroups();
+    core = groups === null ? null : buildTagIndexFromGroups(groups, 0);
+  }
+  return core;
+}
+
 async function fetchVocabulary(): Promise<Map<string, readonly string[]>> {
   const { value } = await fetchAsset(INDEX_URLS, decodeTagVocabulary, {
     label: "Tag index mirror",
@@ -305,12 +319,18 @@ function applyTagCounts(counts: TagCounts): void {
 
 onTagCountsChange(applyTagCounts);
 
-/** The cached index, loading the local copy on first access. Never touches the network. */
+/**
+ * The cached full index or, until one is downloaded, the embedded core. Reads local data only;
+ * never touches the network.
+ */
 export function getTagIndex(): TagIndex | null {
-  return indexSnapshot.get()?.index ?? null;
+  return indexSnapshot.get()?.index ?? coreIndex();
 }
 
-/** Forget the in-memory index; the next read consults storage again. */
+/**
+ * Forget the in-memory index; the next read consults storage again. The embedded core remains
+ * available.
+ */
 export function resetTagIndex(): void {
   indexSnapshot.reset();
 }
@@ -318,11 +338,29 @@ export function resetTagIndex(): void {
 /**
  * Return the index, downloading it when no local copy exists. A stale local copy is served
  * immediately and refreshed in the background so opening the search field never waits on the CDN.
+ * Without any cache the embedded core is served at once and the full download continues in the
+ * background. A forced load always awaits the download and throws when it fails.
  */
 export async function loadTagIndex(force = false): Promise<TagIndex> {
   void loadTagCounts().catch((error: unknown) => {
     warn("Tag popularity refresh failed", error);
   });
+
+  if (!force) {
+    const cached = indexSnapshot.get();
+    if (cached) {
+      const loaded = await indexSnapshot.load(false);
+      return loaded?.index ?? cached.index;
+    }
+
+    const fallback = coreIndex();
+    if (fallback) {
+      void indexSnapshot.load(false).catch((error: unknown) => {
+        warn("Tag index background download failed", error);
+      });
+      return fallback;
+    }
+  }
 
   const loaded = await indexSnapshot.load(force);
   if (!loaded) {

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>My Tags</title>
+  </head>
+  <body>
+    <div id="usertags_outer">
+      <div id="usertag_0" class="usertag">
+        <div id="tagpreview_0" class="tagpreview"></div>
+        <div class="usertag-controls">
+          <label><input id="tagwatch_0" type="checkbox" /> Watch</label>
+          <label><input id="taghide_0" type="checkbox" /> Hide</label>
+          <label><input id="tagcolor_0" type="color" value="#000000" /> Colour</label>
+          <label
+            ><input id="tagweight_0" type="number" min="-99" max="99" value="10" /> Weight</label
+          >
+        </div>
+      </div>
+      <div id="usertag_4242" class="usertag">
+        <div id="tagpreview_4242" class="tagpreview" title="female:entry">female:entry</div>
+        <div class="usertag-controls">
+          <label><input id="tagwatch_4242" type="checkbox" checked /> Watch</label>
+          <label><input id="taghide_4242" type="checkbox" /> Hide</label>
+          <label><input id="tagcolor_4242" type="color" value="#FF8800" /> Colour</label>
+          <label
+            ><input id="tagweight_4242" type="number" min="-99" max="99" value="15" /> Weight</label
+          >
+        </div>
+      </div>
+      <div id="usertag_4243" class="usertag">
+        <div id="tagpreview_4243" class="tagpreview" title="language:english">language:english</div>
+        <div class="usertag-controls">
+          <label><input id="tagwatch_4243" type="checkbox" /> Watch</label>
+          <label><input id="taghide_4243" type="checkbox" checked /> Hide</label>
+          <label><input id="tagcolor_4243" type="text" value="" /> Colour</label>
+          <label
+            ><input id="tagweight_4243" type="number" min="-99" max="99" value="10" /> Weight</label
+          >
+        </div>
+      </div>
+    </div>
+    <form id="usertags_form" action="/mytags" method="post">
+      <input type="hidden" name="usertag_action" value="add" />
+      <input type="hidden" name="usertag_target" value="0" />
+      <label>
+        Tag
+        <input id="tagname_new" name="tagname_new" type="text" value="" />
+      </label>
+      <label><input id="tagwatch_new" name="tagwatch_new" type="checkbox" /> Watch</label>
+      <label><input id="taghide_new" name="taghide_new" type="checkbox" /> Hide</label>
+      <label>
+        Colour
+        <input id="tagcolor_new" name="tagcolor_new" type="color" value="#000000" />
+      </label>
+      <label>
+        Weight
+        <input
+          id="tagweight_new"
+          name="tagweight_new"
+          type="number"
+          min="-99"
+          max="99"
+          value="10"
+        />
+      </label>
+      <button type="submit">Add Tag</button>
+    </form>
+    <script>
+      var api_url = "https://api.e-hentai.org/api.php";
+      var apiuid = 424242;
+      var apikey = "fake-api-key";
+    </script>
+  </body>
+</html>

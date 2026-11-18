@@ -18,6 +18,8 @@ const EMPTY: SearchQuery = {
   torrent: false,
   pageFrom: "",
   pageTo: "",
+  since: "",
+  until: "",
   disableLanguage: false,
   disableUploader: false,
   disableTags: false,
@@ -33,6 +35,8 @@ describe("search query serialization", () => {
       torrent: false,
       pageFrom: "1",
       pageTo: "10",
+      since: "",
+      until: "",
       disableLanguage: true,
       disableUploader: false,
       disableTags: true,
@@ -64,6 +68,29 @@ describe("search query serialization", () => {
 
   test("adds advsearch when an advanced switch is set", () => {
     expect(buildSearchUrl({ ...EMPTY, torrent: true })).toBe("/?f_sto=on&advsearch=1");
+  });
+
+  test("round-trips an app-owned posted-date range", () => {
+    const query: SearchQuery = {
+      ...EMPTY,
+      text: "dogs",
+      since: "2024-01-01",
+      until: "2024-12-31",
+    };
+
+    const built = buildSearchUrl(query);
+    expect(built).toBe("/?f_search=dogs&eh_since=2024-01-01&eh_until=2024-12-31&advsearch=1");
+    expect(parseSearchQuery(new URL(built, BASE))).toEqual(query);
+  });
+
+  test("parses a posted-date range without requiring the other bound", () => {
+    const parsed = parseSearchQuery(
+      new URL("https://e-hentai.org/?eh_since=2024-01-01&advsearch=1"),
+    );
+
+    expect(parsed.since).toBe("2024-01-01");
+    expect(parsed.until).toBe("");
+    expect(buildSearchUrl(parsed)).toBe("/?eh_since=2024-01-01&advsearch=1");
   });
 });
 

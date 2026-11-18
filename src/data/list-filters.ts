@@ -20,6 +20,8 @@ const FILTER_PARAMS = [
   "f_sfl",
   "f_sfu",
   "f_sft",
+  "eh_since",
+  "eh_until",
 ] as const;
 
 function isStoredFilters(value: unknown): value is Partial<SearchFilters> {

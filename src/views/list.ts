@@ -1,3 +1,5 @@
+import type { DateRange } from "../data/list-date";
+import { filterByDateRange, isDateRangeActive, withDateRange } from "../data/list-date";
 import { isListPanelOpen, saveListFilters, setListPanelOpen } from "../data/list-filters";
 import { seekHref } from "../data/list-seek";
 import type { SearchQuery } from "../parse/query";
@@ -131,6 +133,9 @@ function narrowCount(query: SearchQuery): number {
   if (query.pageFrom.trim() || query.pageTo.trim()) {
     count++;
   }
+  if (isDateRangeActive({ since: query.since, until: query.until })) {
+    count++;
+  }
   return count;
 }
 
@@ -179,6 +184,25 @@ function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
     "aria-label": "Maximum pages",
   });
 
+  const sinceDate = el("input", {
+    class: "field-input",
+    type: "date",
+    placeholder: "YYYY-MM-DD",
+    title: "Show galleries posted on or after this day",
+    value: query.since,
+    "aria-label": "Posted since",
+    style: "width: 10rem",
+  });
+  const untilDate = el("input", {
+    class: "field-input",
+    type: "date",
+    placeholder: "YYYY-MM-DD",
+    title: "Show galleries posted on or before this day",
+    value: query.until,
+    "aria-label": "Posted until",
+    style: "width: 10rem",
+  });
+
   const checkbox = (
     label: string,
     checked: boolean,
@@ -202,6 +226,8 @@ function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
       rating: Number.parseInt(rating.read(), 10) || 0,
       pageFrom: pageFrom.value,
       pageTo: pageTo.value,
+      since: sinceDate.value,
+      until: untilDate.value,
       expunged: expunged.input.checked,
       torrent: torrent.input.checked,
       disableLanguage: disableLanguage.input.checked,
@@ -227,6 +253,8 @@ function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
         rating: 0,
         pageFrom: "",
         pageTo: "",
+        since: "",
+        until: "",
         expunged: false,
         torrent: false,
         disableLanguage: false,
@@ -249,6 +277,8 @@ function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
       el("span", { text: "Page count" }),
       el("div", { class: "field-row" }, pageFrom, el("span", { text: "to" }), pageTo),
     ),
+    el("label", { class: "field" }, el("span", { text: "Posted since" }), sinceDate),
+    el("label", { class: "field" }, el("span", { text: "Posted until" }), untilDate),
     el("div", { class: "check-row" }, expunged.wrapper, torrent.wrapper),
     el(
       "div",
@@ -366,15 +396,37 @@ export function renderList(
 
   const narrow = narrowCount(urlQuery);
   const relaxed = relaxedCount(urlQuery);
+
+  // Posted-date ranges are client-side: the site's `seek` starts near `until`, then every page is
+  // filtered here and paging stops once a page reaches past `since`.
+  const range: DateRange = { since: urlQuery.since, until: urlQuery.until };
+  const rangeActive = isDateRangeActive(range);
+  const filtered = rangeActive ? filterByDateRange(data.items, range) : null;
+  const shownItems = filtered?.items ?? data.items;
+  const crossedSince = filtered?.crossedSince ?? false;
+  let nextHref = data.nextHref;
+  if (rangeActive) {
+    nextHref = nextHref !== null && !crossedSince ? withDateRange(nextHref, range) : null;
+  }
+
   // The fallback count has to describe what the grid currently shows, including pages appended
-  // by infinite scroll. A site-provided result line is a total, so it stays fixed.
+  // by infinite scroll. A site-provided result line is a total, so it stays fixed. While a range
+  // filters the page in-app, that total would be a lie: show the number of rendered cards instead.
   const countNode = el("span", {
-    text: data.resultText ?? countText(data.items.length, "item"),
+    text: rangeActive
+      ? `${shownItems.length} shown`
+      : (data.resultText ?? countText(data.items.length, "item")),
   });
   const header = listHeader({
     title: listLabels(urlQuery, scope, pathTag).heading,
     summary: [
       countNode,
+      rangeActive
+        ? el("span", {
+            class: "badge date-filter-note",
+            text: "Approximate while filtered.",
+          })
+        : null,
       narrow > 0 ? el("span", { class: "badge", text: countText(narrow, "filter") }) : null,
       relaxed > 0
         ? el("span", {
@@ -400,11 +452,14 @@ export function renderList(
   );
 
   const grid = createCardGrid(ctx.signal);
-  grid.append(data.items.map((item) => resultCard(item, ctx.signal, { preview: true })));
+  grid.append(shownItems.map((item) => resultCard(item, ctx.signal, { preview: true })));
 
   const syncCount = (): void => {
-    if (data.resultText === null) {
-      countNode.textContent = countText(grid.element.querySelectorAll(".card").length, "item");
+    const cards = grid.element.querySelectorAll(".card").length;
+    if (rangeActive) {
+      countNode.textContent = `${cards} shown`;
+    } else if (data.resultText === null) {
+      countNode.textContent = countText(cards, "item");
     }
   };
 
@@ -420,6 +475,8 @@ export function renderList(
       torrent: false,
       pageFrom: "",
       pageTo: "",
+      since: "",
+      until: "",
       disableLanguage: false,
       disableUploader: false,
       disableTags: false,
@@ -428,9 +485,10 @@ export function renderList(
     ctx.navigate("/");
   };
 
-  const canReset = urlQuery.text !== "" || urlQuery.cats !== 0 || narrow > 0 || relaxed > 0;
+  const canReset =
+    urlQuery.text !== "" || urlQuery.cats !== 0 || narrow > 0 || relaxed > 0 || rangeActive;
   const empty =
-    data.items.length === 0
+    shownItems.length === 0
       ? statePanel({
           text: "No galleries were found on this page.",
           actions: [
@@ -449,7 +507,7 @@ export function renderList(
       : null;
 
   host.append(topbar, note, header, panel);
-  if (data.items.length > 0) {
+  if (shownItems.length > 0) {
     // The cards are articles with no headings of their own; name their region for heading
     // navigation without adding visible chrome.
     host.append(el("h2", { class: "sr-only", text: "Results" }), grid.element);
@@ -462,8 +520,8 @@ export function renderList(
   if (empty === null) {
     createPagedRegion<ListItem>({
       signal: ctx.signal,
-      next: data.nextHref,
-      initial: data.items,
+      next: nextHref,
+      initial: shownItems,
       key: (item) => item.gid,
       noun: "results",
       enabled: (settings) => settings.listInfiniteScroll,
@@ -472,7 +530,7 @@ export function renderList(
         withNext
           ? pager({
               prev: data.prevHref,
-              next: data.nextHref,
+              next: nextHref,
               label: "Result pages",
               seek: {
                 go: (value) => ctx.navigate(seekHref(data.url, value)),
@@ -483,10 +541,20 @@ export function renderList(
         if (pageSource === undefined) {
           return Promise.reject(new Error("No next-page source for this list route."));
         }
-        return pageSource(url, signal);
+        const request = pageSource(rangeActive ? withDateRange(url, range) : url, signal);
+        if (!rangeActive) {
+          return request;
+        }
+        return request.then((page) => {
+          const kept = filterByDateRange(page.items, range);
+          return {
+            items: kept.items,
+            next: kept.crossedSince || page.next === null ? null : withDateRange(page.next, range),
+          };
+        });
       },
-      append: (items) => {
-        const nodes = items.map((item) => resultCard(item, ctx.signal, { preview: true }));
+      append: (incoming) => {
+        const nodes = incoming.map((item) => resultCard(item, ctx.signal, { preview: true }));
         grid.append(nodes);
         return () => grid.remove(nodes);
       },

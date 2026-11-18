@@ -3,8 +3,11 @@
  *
  * This exercises the parts unit tests cannot: the generated bundle boots at document-start, the
  * shell renders, the search field reaches the router, the tag combobox parses the compact
- * vocabulary asset, a gallery mounts from a page shaped like the site's, and axe finds no
- * accessibility violation inside the shell. Run with `bun run test:browser` after `bun run build`.
+ * vocabulary asset, a gallery mounts from a page shaped like the site's, the reader mounts with its
+ * HUD counter, the gallery torrent and My Tags views mount from their pages, a posted-date range
+ * rewrites itself to the site's date cursor and still renders, a page the parser rejects reloads
+ * natively, and axe finds no accessibility violation inside the shell. Run with `bun run
+ * test:browser` after `bun run build`.
  */
 
 import AxeBuilder from "@axe-core/playwright";
@@ -23,10 +26,18 @@ const assets: Record<string, Uint8Array> = {
   "tag-counts.bin": new Uint8Array(await Bun.file(`${ROOT}/assets/tag-counts.bin`).arrayBuffer()),
 };
 
-/** One fixture per route path, so each owned view boots from a page the parser recognizes. */
+/**
+ * One fixture per route path, so each owned view boots from a page the parser recognizes. The
+ * toplist entry is deliberately unparseable so boot must escape to the site's own page.
+ */
 const FIXTURES: Record<string, string> = {
   "/": "list.html",
   "/g/123456/abcdef1234/": "gallery.html",
+  "/gallerytorrents.php": "gallerytorrents.html",
+  "/mytags": "mytags.html",
+  "/s/hash123/987654-2/": "viewer.html",
+  // Served again for the fallback request, whose query keeps this pathname.
+  "/toplist.php": "toplist-broken.html",
 };
 
 const server = Bun.serve({
@@ -64,7 +75,10 @@ const gmShim = `
 `;
 
 /** A fresh page with the manager shim and the built userscript, already navigated to `path`. */
-async function open(path: string): Promise<Page> {
+async function open(
+  path: string,
+  waitUntil: "domcontentloaded" | "commit" = "domcontentloaded",
+): Promise<Page> {
   // axe borrows a page of its own, which playwright only allows inside a context.
   const context = await browser.newContext({ viewport: { width: 1100, height: 900 } });
   const page = await context.newPage();
@@ -72,7 +86,7 @@ async function open(path: string): Promise<Page> {
   await serveAssets(page);
   await page.addInitScript({ content: gmShim });
   await page.addInitScript({ content: userscript });
-  await page.goto(`${base}${path}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${base}${path}`, { waitUntil });
   return page;
 }
 
@@ -138,6 +152,13 @@ try {
   await list.waitForSelector(".card", { timeout: 15_000 });
   await expectAccessible(list, "list");
 
+  // Boot turns the app-owned posted-date range into the site's date cursor: the listing opens at
+  // the end of the range with `seek` set. `commit` returns before that redirect navigates, so the
+  // initial response cannot abort the request under test.
+  const range = await open("/?eh_since=2024-01-01&eh_until=2024-12-31", "commit");
+  await range.waitForURL(/seek=2024-12-31/u, { timeout: 15_000 });
+  await range.waitForSelector(".card", { timeout: 15_000 });
+
   const gallery = await open("/g/123456/abcdef1234/");
   await gallery.waitForSelector(".gallery-cover", { timeout: 15_000 });
   if ((await gallery.locator(".tag-section").count()) !== 1) {
@@ -148,10 +169,46 @@ try {
   }
   await expectAccessible(gallery, "gallery");
 
+  const reader = await open("/s/hash123/987654-2/");
+  await reader.waitForSelector("#reader", { timeout: 15_000 });
+  await reader.waitForFunction(
+    () => (document.querySelector("#hud-counter")?.textContent ?? "").includes("2 / 3"),
+    undefined,
+    { timeout: 15_000 },
+  );
+  const counter = await reader.locator("#hud-counter").innerText();
+  if (!counter.includes("2 / 3")) {
+    fail(`unexpected reader counter: ${counter}`);
+  }
+  await expectAccessible(reader, "reader");
+
+  const galleryTorrents = await open("/gallerytorrents.php?gid=987654&t=abcdef1234");
+  await galleryTorrents.waitForSelector("#gallery-torrents", { timeout: 15_000 });
+  if ((await galleryTorrents.locator(".gallery-torrent-card").count()) === 0) {
+    fail("gallery torrent list did not render");
+  }
+  await expectAccessible(galleryTorrents, "gallery torrents");
+
+  const myTags = await open("/mytags");
+  await myTags.waitForSelector("#my-tags", { timeout: 15_000 });
+  if ((await myTags.locator(".my-tags-row").count()) !== 2) {
+    fail("My Tags rows did not render");
+  }
+  await expectAccessible(myTags, "my tags");
+
+  // A page whose markup the parser rejects must reload itself natively instead of mounting an
+  // empty shell. The fallback request keeps the pathname, so the fixture server serves it again;
+  // `commit` returns before the fallback navigates, so that request cannot abort the initial goto.
+  const broken = await open("/toplist.php", "commit");
+  await broken.waitForURL(/eh_native=1/u, { timeout: 15_000 });
+  await broken.waitForSelector("#native-fallback", { timeout: 15_000 });
+
   if (errors.length > 0) {
     fail(`page errors: ${errors.join(" | ")}`);
   }
-  console.log("browser smoke passed: shell, search, tag combobox, gallery, axe");
+  console.log(
+    "browser smoke passed: list, gallery, reader, gallery torrents, My Tags, range, fallback, axe",
+  );
 } finally {
   await browser.close();
   await server.stop(true);

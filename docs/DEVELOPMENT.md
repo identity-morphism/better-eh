@@ -23,7 +23,7 @@ bun install
 bun run check            # format check + lint + type check
 bun run test             # fixtures across parse, fetch, routes, viewer and ui; one global per file
 bun run test:coverage    # the same suite, then the src/ line-coverage floor CI enforces
-bun run test:browser     # built userscript smoke gate (Playwright, two fixtures, axe)
+bun run test:browser     # built userscript smoke gate (Playwright, local fixtures, axe)
 bun run typecheck        # built-in type checker through the pinned Bun
 bun run lint             # bun lint through scripts/lint.ts
 bun run lint:fix         # bun lint --fix
@@ -59,6 +59,13 @@ injected with `GM_addStyle` together with the viewer stylesheet. `.cache/` is ig
   ([violentmonkey#1020](https://github.com/violentmonkey/violentmonkey/issues/1020)), so
   re-install from the URL after closing the installer tab.
 
+**Release size budget**: the built bundle must stay at or under 680 KiB raw and 165 KiB gzipped,
+the size a userscript manager downloads. `bun run check:size` enforces both and prints the measured
+sizes against each limit; CI runs it after `bun run build`, so a bundle that outgrows either
+ceiling fails the pull request. The core vocabulary (`src/tags/core-vocabulary.ts`) is the only
+generated source in `src/`; `bun run check:generated` verifies it against the checked-in assets,
+and `bun run scripts/update-core-vocabulary.ts` regenerates it.
+
 ## Releasing
 
 ```bash
@@ -82,9 +89,12 @@ A dependency pull request cannot rebuild it, so land that bump with a commit tha
 pin alone: stable Bun resolves `bun lint` back to the `lint` script and exits 0 without linting.
 
 CI also installs Chromium for Playwright and runs the browser smoke gate against the built bundle
-and two local fixtures, a list page and a gallery. It covers the shell, search routing and the tag
-combobox that unit tests cannot boot end to end, then runs axe over `#eh-root` with the WCAG
-A/AA rules, so a new control that fails name, contrast or landmark checks fails CI.
+and local fixtures. It boots the list, gallery, reader, gallery torrents and My Tags views, checks
+the shell, search routing and tag combobox that unit tests cannot boot end to end, follows a
+posted-date range through its rewrite to the site's date cursor, and asserts that a document which
+fails parser sanity reloads through the automatic `?eh_native=1` fallback onto the site's own page.
+It then runs axe over `#eh-root` with the WCAG A/AA rules, so a new control that fails name,
+contrast or landmark checks fails CI.
 
 Sleazy Fork is the public listing: <https://sleazyfork.org/en/scripts/606064-better-eh>. A new
 version must be posted to that listing after the GitHub release; Sleazy Fork rewrites
@@ -103,16 +113,19 @@ this script), and any minifier would break the unminified requirement.
 - Site preferences are **not** ours: `/uconfig.php` renders them in-app, and the model is parsed
   from the live form (`parseUconfig`), so a save posts every field back with only your changes
   applied. Fields the script has never heard of survive the round trip.
+- Posted-date ranges use app-owned listing parameters, `eh_since` and `eh_until`, not the site's
+  filters. Boot rewrites the range to the site's date cursor (`seek`) and bounds the results
+  client-side, so counts are approximate; the pager's own Seek field still uses the site's cursor.
 - The tag index lives in `eh:tag-index:v2` (refreshed weekly from the compact repository asset),
   tag popularity in `eh:tag-counts:v3` (refreshed weekly from the repository asset), tag usage in
-  `eh:tag-usage:v1`,
-  prefix completions in `eh:tag-completions:v1`, recent searches in `eh:search-history:v1`, named
-  searches and quick tags in `eh:saved-expressions:v1` (the old `eh:saved-searches:v1` and
-  `eh:quick-tags:v1` records migrate once), per-gallery reading positions in `eh:resume:v1`, and the
-  tab's current search in `eh:search-context:v1` and its draft in `eh:search-draft:v1`. Remembered
-  listing filters use
-  `eh:list-filters:v1`, and the filter panel's state `eh:list-filters-open:v1`. The bundle embeds
-  neither dataset; both are downloaded and cached on first use.
+  `eh:tag-usage:v1`, prefix completions in `eh:tag-completions:v1`, recent searches in
+  `eh:search-history:v1`, named searches and quick tags in `eh:saved-expressions:v1` (the old
+  `eh:saved-searches:v1` and `eh:quick-tags:v1` records migrate once), per-gallery reading
+  positions in `eh:resume:v1`, and the tab's current search in `eh:search-context:v1` and its draft
+  in `eh:search-draft:v1`. Remembered listing filters use `eh:list-filters:v1`, and the filter
+  panel's state `eh:list-filters-open:v1`. The bundle embeds the core vocabulary, so suggestions
+  work before any download; the full index and the popularity snapshot stay remote, and first use
+  upgrades to the full index in the background, then refreshes it weekly.
 - Picking a suggestion teaches the combobox that tag for the exact typed prefix (namespace-scoped
   searches learn their own prefix). Remembered picks outweigh the popularity prior, halve in weight
   every 30 days, expire after 90 days, and stay in a bounded 200-entry local store.

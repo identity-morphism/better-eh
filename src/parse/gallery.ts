@@ -1,4 +1,4 @@
-import { HttpError } from "../fetch/errors";
+import { ParseMismatchError } from "../fetch/errors";
 import { isSiteHost } from "../site";
 import type {
   FavoriteMark,
@@ -53,21 +53,40 @@ function scriptValue(doc: Document, name: string): string | null {
   return null;
 }
 
+/** Inline-script credentials every mutation API expects. */
+export interface ApiCredentials {
+  apiUrl: string;
+  apiUid: string;
+  apiKey: string;
+}
+
 /**
- * Parse the inline API credentials the gallery page uses for ratings, tag votes and comments.
+ * Parse the inline API credentials pages use for ratings, tag votes and user-tag edits.
  *
  * The site writes these into a `var` block; return null when any piece is missing.
  */
-export function parseGalleryApiConfig(doc: Document): GalleryApiConfig | null {
+export function parseApiCredentials(doc: Document): ApiCredentials | null {
   const apiUrl = scriptValue(doc, "api_url");
   const apiUid = scriptValue(doc, "apiuid");
   const apiKey = scriptValue(doc, "apikey");
-  const gid = scriptValue(doc, "gid");
-  const token = scriptValue(doc, "token");
-  if (!apiUrl || !apiUid || !apiKey || !gid || !token) {
+  if (!apiUrl || !apiUid || !apiKey) {
     return null;
   }
-  return { apiUrl, apiUid, apiKey, gid, token };
+  return { apiUrl, apiUid, apiKey };
+}
+
+/**
+ * Parse the gallery API credentials: the shared pieces plus the gid/token every gallery mutation
+ * must also carry.
+ */
+export function parseGalleryApiConfig(doc: Document): GalleryApiConfig | null {
+  const credentials = parseApiCredentials(doc);
+  const gid = scriptValue(doc, "gid");
+  const token = scriptValue(doc, "token");
+  if (credentials === null || !gid || !token) {
+    return null;
+  }
+  return { ...credentials, gid, token };
 }
 
 function parseTags(doc: Document, url: string): TagGroup[] {
@@ -390,11 +409,12 @@ export function parseGalleryPage(doc: Document, url: string): GalleryData {
   const paging = parsePaging(doc, url);
 
   const heading = cleanText(doc.getElementById("gn")?.textContent);
-  // A gallery that was removed (or a layout the selectors no longer know) leaves neither a title
-  // nor a thumbnail row. Rendering that as `Untitled` with no pages would present a dead page as
-  // real, so hand it to the app's 404 view instead.
+  // A layout the selectors no longer know leaves neither a title nor a thumbnail row. Rendering
+  // that as `Untitled` with no pages would present a dead page as real, so treat it as a layout
+  // break and let the app hand the reader the site's own page. A removed gallery still serves a
+  // real 404 body, which the app's initial-load check catches before parsing.
   if (heading === "" && thumbs.length === 0) {
-    throw new HttpError(404, url);
+    throw new ParseMismatchError("gallery", "the title and page thumbnails are missing");
   }
 
   const title = heading || "Untitled";
