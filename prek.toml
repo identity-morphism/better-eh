@@ -10,7 +10,8 @@ name = "bun lint"
 language = "system"
 # The pinned canary binary: `bun lint` does not exist in stable Bun, and the `lint` script
 # resolves to itself there.
-entry = "./node_modules/.bin/bun lint --no-script --fix"
+entry = "bun run scripts/lint.ts --fix"
+pass_filenames = false
 types_or = ["javascript", "jsx", "ts", "tsx"]
 exclude_types = ["symlink"]
 stages = ["pre-commit"]
