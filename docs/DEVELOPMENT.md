@@ -74,6 +74,11 @@ changes behaviour commits the rebuilt bundle and leaves `version` in `package.js
 `bun run check:pr-version` fails a pull request that moves it. Managers only update on a version
 change, so the rebuilt bundle reaches installed copies at the next release, not at merge.
 
+A dependency that generates the bundle changes it: a Tailwind bump rewrites the CSS inside `dist/`.
+A dependency pull request cannot rebuild it, so land that bump with a commit that runs
+`bun run build`, or CI's dist check fails on the pull request. Dependabot is told to leave the `bun`
+pin alone: stable Bun resolves `bun lint` back to the `lint` script and exits 0 without linting.
+
 CI also installs Chromium for Playwright and runs the browser smoke gate against the built bundle
 and two local fixtures, a list page and a gallery. It covers the shell, search routing and the tag
 combobox that unit tests cannot boot end to end, then runs axe over `#eh-root` with the WCAG
