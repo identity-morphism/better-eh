@@ -130,10 +130,13 @@ export async function getFavoriteNote(
     return "";
   }
   const url = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(gallery.gid)}&t=${encodeURIComponent(gallery.token)}&act=addfav`;
+  // Fresh every time: the dialog is the only place the note is visible, so a cached copy from
+  // before a note edit would post the old text back and overwrite it.
   const { doc } = await loader.document(url, {
     priority: priorityOf("background"),
     tag: "favnote",
     signal,
+    fresh: true,
   });
   return doc.querySelector<HTMLTextAreaElement>('textarea[name="favnote"]')?.value ?? "";
 }

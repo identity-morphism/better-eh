@@ -152,6 +152,21 @@ describe("createRouteViews routing", () => {
   });
 });
 
+describe("settings route", () => {
+  test("loads past the document cache, because a save changes this page", async () => {
+    const route = {
+      kind: "settings",
+      url: "https://e-hentai.org/uconfig.php",
+    } satisfies RouteOf<"settings">;
+    const { views, docCalls } = harness();
+
+    await views.routeView(route).load(route, new AbortController().signal);
+
+    expect(docCalls).toHaveLength(1);
+    expect(docCalls[0]?.options.fresh).toBe(true);
+  });
+});
+
 describe("viewer route", () => {
   test("loads through the injected viewer loader only", async () => {
     const { views, docCalls, viewerCalls } = harness();

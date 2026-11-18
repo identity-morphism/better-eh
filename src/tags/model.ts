@@ -328,7 +328,9 @@ export function toggleTagInSearch(
     if (tagIdentity(term.ns, term.value) !== wanted) {
       continue;
     }
-    if ((term.sign === "-") === (sign === "-")) {
+    // Compare the signs themselves: `~` and no sign are different states, and the menu's
+    // "Make optional" must not read an included term as already optional.
+    if (term.sign === sign) {
       return removeIfPresent ? removeTerm(text, term) : text;
     }
     return setTermSign(text, term, sign);
