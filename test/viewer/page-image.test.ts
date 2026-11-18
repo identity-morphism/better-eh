@@ -184,6 +184,127 @@ describe("showPageImage", () => {
     expect(img.onload).toBeNull();
   });
 
+  test("drops a retry that resolves after the element moved to another page", async () => {
+    const nextSrc = "https://img.example/pages/9.jpg";
+    const img = fakeImage();
+    const first = page();
+    const retriedPage = page({ imgSrc: SECOND_SRC });
+    const gate = Promise.withResolvers<PageData>();
+    const retry = mock(() => gate.promise);
+    const onLoaded = mock(() => {});
+    const onGiveUp = mock(() => {});
+    let current = true;
+
+    showPageImage({
+      img,
+      page: first,
+      retry,
+      maxRetries: 2,
+      onGiveUp,
+      onLoaded,
+      isCurrent: () => current,
+    });
+
+    img.onerror?.(errorEvent);
+    expect(retry).toHaveBeenCalledWith(first);
+    expect(img.onload).toBeNull();
+    expect(img.onerror).toBeNull();
+
+    // A newer page takes over the element while the old retry is still in flight.
+    const newerLoad = mock(() => {});
+    const newerError = mock(() => {});
+    img.src = nextSrc;
+    img.onload = newerLoad;
+    img.onerror = newerError;
+    current = false;
+
+    gate.resolve(retriedPage);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(img.src).toBe(nextSrc);
+    expect(img.onload).toBe(newerLoad);
+    expect(img.onerror).toBe(newerError);
+    expect(onLoaded).not.toHaveBeenCalled();
+    expect(onGiveUp).not.toHaveBeenCalled();
+  });
+
+  test("does not give up when a retry resolves empty after the element moved on", async () => {
+    const img = fakeImage();
+    const gate = Promise.withResolvers<PageData | null>();
+    const onGiveUp = mock(() => {});
+    let current = true;
+
+    showPageImage({
+      img,
+      page: page(),
+      retry: () => gate.promise,
+      maxRetries: 2,
+      onGiveUp,
+      isCurrent: () => current,
+    });
+
+    img.onerror?.(errorEvent);
+    current = false;
+    gate.resolve(null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onGiveUp).not.toHaveBeenCalled();
+    expect(img.onerror).toBeNull();
+  });
+
+  test("does nothing when the page is already stale", () => {
+    const previousSrc = "https://img.example/pages/previous.jpg";
+    const img = fakeImage({ src: previousSrc });
+    const retry = mock(() => Promise.resolve(page()));
+    const onLoaded = mock(() => {});
+    const onGiveUp = mock(() => {});
+    const existingLoad = mock(() => {});
+    const existingError = mock(() => {});
+    img.onload = existingLoad;
+    img.onerror = existingError;
+
+    showPageImage({
+      img,
+      page: page(),
+      retry,
+      maxRetries: 2,
+      onGiveUp,
+      onLoaded,
+      isCurrent: () => false,
+    });
+
+    expect(img.src).toBe(previousSrc);
+    expect(img.onload).toBe(existingLoad);
+    expect(img.onerror).toBe(existingError);
+    expect(retry).not.toHaveBeenCalled();
+    expect(onLoaded).not.toHaveBeenCalled();
+    expect(onGiveUp).not.toHaveBeenCalled();
+  });
+
+  test("does not report a stale instant cache hit", () => {
+    const img = fakeImage({ src: FIRST_SRC, complete: true, naturalWidth: 800 });
+    const onLoaded = mock(() => {});
+    const onGiveUp = mock(() => {});
+
+    showPageImage({
+      img,
+      page: page(),
+      retry: () => Promise.resolve(null),
+      maxRetries: 2,
+      onGiveUp,
+      onLoaded,
+      isCurrent: () => false,
+    });
+
+    expect(img.src).toBe(FIRST_SRC);
+    expect(img.onload).toBeNull();
+    expect(img.onerror).toBeNull();
+    expect(onLoaded).not.toHaveBeenCalled();
+    expect(onGiveUp).not.toHaveBeenCalled();
+  });
+
   test("gives up exactly once when the retry budget is exhausted", async () => {
     const img = fakeImage();
     const first = page();
@@ -229,6 +350,25 @@ describe("createPageImageSlot", () => {
       maxRetries: 2,
     });
   }
+
+  test("does not show a page once the slot is stale", () => {
+    const img = fakeImage();
+    const onLoaded = mock(() => {});
+    const pageSlot = createPageImageSlot(img, {
+      page: page(),
+      retry: () => Promise.resolve(null),
+      maxRetries: 2,
+      onLoaded,
+      isCurrent: () => false,
+    });
+
+    pageSlot.show();
+
+    expect(img.src).toBe("");
+    expect(img.onload).toBeNull();
+    expect(img.onerror).toBeNull();
+    expect(onLoaded).not.toHaveBeenCalled();
+  });
 
   test("reloads with the page's native token and preserves other query parameters", () => {
     const img = fakeImage({ src: `${FIRST_SRC}?download=1&nl=old` });

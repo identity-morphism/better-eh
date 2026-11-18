@@ -66,7 +66,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     viewerPage: (url, options) => loader.viewerPage(url, options),
     preloadImage,
     touchImage,
-    retryWithNl: (page) => loader.retryWithNl(page),
+    retryWithNl: (page, options) => loader.retryWithNl(page, options),
     activeCount: () => net.activeCount,
     concurrency: () => getSettings().netConcurrency,
     depth: () => getSettings().prefetchCount,
@@ -97,6 +97,8 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
   let navigationToken = 0;
   let stack: ContinuousStack<PageImageSlot<HTMLImageElement>> | null = null;
   let continuousIndex = 0;
+  /** Invalidates the slots of a stack that was torn down, so their retries cannot fire. */
+  let continuousGeneration = 0;
   /** Last loaded page's height/width, used to reserve space before a lazy page arrives. */
   let continuousAspect = 1.4;
   let activeMode = getSettings().readerMode;
@@ -158,7 +160,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
   function createMainSlot(data: PageData): PageImageSlot<HTMLImageElement> {
     return createPageImageSlot(ui.elImg, {
       page: data,
-      retry: (page) => loader.retryWithNl(page),
+      retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
       maxRetries: getSettings().maxNlRetry,
       signal: ctx.signal,
       isCurrent: () => current === data && !readerLayout(getSettings().readerMode).continuous,
@@ -438,7 +440,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
         ui.elSpread.alt = `${companion.galleryTitle.primary} — page ${companion.counterText}`;
         companionSlot = createPageImageSlot(ui.elSpread, {
           page: companion,
-          retry: (page) => loader.retryWithNl(page),
+          retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
           maxRetries: getSettings().maxNlRetry,
           signal: ctx.signal,
           isCurrent: () => spreadCompanion === companion,
@@ -487,11 +489,13 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     // each page arrives. Reserve the previous page's aspect until this one can measure itself.
     node.style.minHeight = `${Math.round(window.innerWidth * continuousAspect)}px`;
 
+    const generation = continuousGeneration;
     const slot = createPageImageSlot(img, {
       page: data,
-      retry: (page) => loader.retryWithNl(page),
+      retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
       maxRetries: getSettings().maxNlRetry,
       signal: ctx.signal,
+      isCurrent: () => continuousGeneration === generation,
       onGiveUp: () => {
         node.classList.add("is-failed");
         retry.hidden = false;
@@ -515,6 +519,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
   }
 
   function teardownContinuous(): void {
+    continuousGeneration += 1;
     stack?.stop();
     stack = null;
     continuousIndex = 0;
@@ -933,7 +938,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     () => {
       void (async () => {
         hideError();
-        const retried = await loader.retryWithNl(current);
+        const retried = await loader.retryWithNl(current, { signal: ctx.signal });
         if (ctx.signal.aborted) {
           return;
         }
