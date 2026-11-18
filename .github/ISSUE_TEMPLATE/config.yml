@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install and update help
+    url: https://sleazyfork.org/en/scripts/606064-better-eh
+    about: The listing page for installs, updates and userscript-manager questions.
+  - name: Development and architecture
+    url: https://github.com/identity-morphism/better-eh/blob/master/docs/DEVELOPMENT.md
+    about: Setup, the dev server, releases and the module map.
