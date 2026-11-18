@@ -243,7 +243,7 @@
       if (tagIdentity(term.ns, term.value) !== wanted) {
         continue;
       }
-      if (term.sign === "-" === (sign === "-")) {
+      if (term.sign === sign) {
         return removeIfPresent ? removeTerm(text, term) : text;
       }
       return setTermSign(text, term, sign);
@@ -3233,7 +3233,8 @@ ${defaultKeySummary()}`)) {
     const { doc } = await loader.document(url, {
       priority: priorityOf("background"),
       tag: "favnote",
-      signal
+      signal,
+      fresh: true
     });
     return doc.querySelector('textarea[name="favnote"]')?.value ?? "";
   }
@@ -10527,6 +10528,7 @@ ${defaultKeySummary()}`)) {
       reset.disabled = !dirty || saving;
       dirtyLabel.hidden = !dirty;
     }
+    const posted = new Map;
     const submit = async () => {
       if (saving) {
         return;
@@ -10543,6 +10545,10 @@ ${defaultKeySummary()}`)) {
         syncDirty();
         return;
       }
+      const body = new Map(posted);
+      for (const [key, value] of overrides) {
+        body.set(key, value);
+      }
       saving = true;
       clearError();
       apply.disabled = true;
@@ -10550,9 +10556,12 @@ ${defaultKeySummary()}`)) {
       apply.textContent = "Saving…";
       try {
         if (overrides.size > 0) {
-          await save(uconfigBody(sections, overrides), ctx.signal);
+          await save(uconfigBody(sections, body), ctx.signal);
           if (ctx.signal.aborted) {
             return;
+          }
+          for (const [key, value] of overrides) {
+            posted.set(key, value);
           }
         }
         if (settingsChanged) {
@@ -12537,7 +12546,7 @@ ${defaultKeySummary()}`)) {
       signal,
       priority,
       tag: spec.tag,
-      ...options?.fresh === true ? { fresh: true } : {}
+      ...spec.fresh === true || options?.fresh === true ? { fresh: true } : {}
     });
     const page = spec.page;
     const pageSource = page === undefined ? undefined : async (url, signal) => {
@@ -12659,7 +12668,8 @@ ${defaultKeySummary()}`)) {
           tag: "settings",
           parse: parseUconfig,
           render: (host, data, ctx) => renderSettings(host, data, ctx),
-          title: () => documentTitle("Settings")
+          title: () => documentTitle("Settings"),
+          fresh: true
         })
       }
     };

@@ -145,6 +145,13 @@ describe("adding gallery tags to a search", () => {
     expect(toggleTagInSearch(`-${TOKEN}`, TOKEN)).toBe(TOKEN);
   });
 
+  test("sets an optional tag instead of dropping it", () => {
+    expect(toggleTagInSearch(TOKEN, TOKEN, "~")).toBe(`~${TOKEN}`);
+    expect(toggleTagInSearch(`-${TOKEN}`, TOKEN, "~")).toBe(`~${TOKEN}`);
+    expect(toggleTagInSearch(`~${TOKEN}`, TOKEN, "~")).toBe("");
+    expect(toggleTagInSearch(`~${TOKEN}`, TOKEN)).toBe(TOKEN);
+  });
+
   test("matches different quoting and exact markers", () => {
     expect(toggleTagInSearch('artist:"bob smith"', TOKEN)).toBe("");
     expect(toggleTagInSearch('ARTIST:"BOB SMITH$"', TOKEN)).toBe("");

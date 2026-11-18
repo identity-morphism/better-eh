@@ -187,6 +187,31 @@ describe("renderSettings", () => {
     expect(button(".settings-apply").textContent).toBe("Apply");
   });
 
+  test("a second Apply keeps the values the first one saved", async () => {
+    const calls: URLSearchParams[] = [];
+    const save: Save = (body) => {
+      calls.push(body);
+      return Promise.resolve();
+    };
+
+    renderSettings(host, data, viewContext(), { save });
+    input("rx").value = "640";
+    touch();
+    button(".settings-apply").click();
+    await flushMicrotasks(8);
+
+    input("ry").value = "900";
+    touch();
+    button(".settings-apply").click();
+    await flushMicrotasks(8);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.get("rx")).toBe("640");
+    // The model still holds the page-load value, so the second body has to carry the saved one.
+    expect(calls[1]?.get("rx")).toBe("640");
+    expect(calls[1]?.get("ry")).toBe("900");
+  });
+
   test("disables Apply while saving and restores the label afterwards", async () => {
     const { promise: pending, resolve: release } = Promise.withResolvers<void>();
     const save: Save = () => pending;

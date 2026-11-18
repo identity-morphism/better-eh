@@ -518,6 +518,9 @@ export function renderSettings(
     dirtyLabel.hidden = !dirty;
   }
 
+  /** Site values this visit already saved; a later batch must not resend their page-load value. */
+  const posted = new Map<string, string>();
+
   const submit = async (): Promise<void> => {
     if (saving) {
       return;
@@ -537,6 +540,13 @@ export function renderSettings(
       return;
     }
 
+    // `sections` holds the values parsed when the page mounted, so earlier saves have to be
+    // folded back in; otherwise this body would revert them to their page-load state.
+    const body = new Map(posted);
+    for (const [key, value] of overrides) {
+      body.set(key, value);
+    }
+
     saving = true;
     clearError();
     apply.disabled = true;
@@ -545,9 +555,12 @@ export function renderSettings(
 
     try {
       if (overrides.size > 0) {
-        await save(uconfigBody(sections, overrides), ctx.signal);
+        await save(uconfigBody(sections, body), ctx.signal);
         if (ctx.signal.aborted) {
           return;
+        }
+        for (const [key, value] of overrides) {
+          posted.set(key, value);
         }
       }
       if (settingsChanged) {

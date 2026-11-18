@@ -66,6 +66,8 @@ interface DocumentSpec<K extends OwnedKind, I = unknown> {
     pageSource?: PageSource<I>,
   ): void;
   title(data: RouteDataByKind[K]): string;
+  /** Load past the document cache; the shell can change a page's server state, and then it lies. */
+  fresh?: boolean;
 }
 
 /**
@@ -89,7 +91,7 @@ function documentView<K extends OwnedKind, I = unknown>(
       signal,
       priority,
       tag: spec.tag,
-      ...(options?.fresh === true ? { fresh: true } : {}),
+      ...(spec.fresh === true || options?.fresh === true ? { fresh: true } : {}),
     });
 
   const page = spec.page;
@@ -242,6 +244,8 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
         parse: parseUconfig,
         render: (host, data, ctx) => renderSettings(host, data, ctx),
         title: () => documentTitle("Settings"),
+        // A save changes this page's server state, so the cached copy is the pre-save page.
+        fresh: true,
       }),
     },
   };
