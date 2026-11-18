@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { HttpError } from "../../src/fetch/errors";
+import { ParseMismatchError } from "../../src/fetch/errors";
 import { parseGalleryPage } from "../../src/parse/gallery";
 import { parseDocument } from "../dom";
 
@@ -56,13 +56,7 @@ describe("parseGalleryPage degenerate documents", () => {
   test("rejects a page with neither a title nor a thumbnail", () => {
     const doc = parseDocument("<body></body>");
 
-    expect(() => parseGalleryPage(doc, GALLERY_URL)).toThrow(HttpError);
-    try {
-      parseGalleryPage(doc, GALLERY_URL);
-    } catch (error) {
-      expect((error as HttpError).status).toBe(404);
-      expect((error as HttpError).url).toBe(GALLERY_URL);
-    }
+    expect(() => parseGalleryPage(doc, GALLERY_URL)).toThrow(ParseMismatchError);
   });
 
   test("keeps a page that still has thumbnails but lost its title", () => {

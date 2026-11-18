@@ -6,11 +6,13 @@ Bug reports and pull requests are welcome. This page covers what makes a change 
 
 ## Before opening an issue
 
-- Read [Known Limits](README.md#known-limits). Several native pages are deliberate, and date-range
-  filtering has no cursor to build on.
+- Read [Known Limits](README.md#known-limits). Several native pages are deliberate. Posted-date
+  ranges are app-owned (`eh_since`/`eh_until`) rather than site filters: the range is bounded
+  in-app, so result counts are approximate.
 - Search open and closed issues for the route and symptom.
 - A broken page is usually a site HTML change. Say which route broke (`/s/…` list, `/g/…` gallery,
-  reader, favorites, toplist, torrents, `/uconfig.php`) and what the console says.
+  reader, favorites, toplist, torrents, gallery torrents, My Tags, `/uconfig.php`) and what the
+  console says.
 - The script matches `https://e-hentai.org/*` and `https://exhentai.org/*` only. Problems in another
   manager's sandbox or another userscript belong upstream.
 

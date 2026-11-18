@@ -43,6 +43,27 @@ describe("remembered listing filters", () => {
     expect(search(url, "advsearch")).toBe("1");
   });
 
+  test("adds a remembered posted-date range to a bare listing", () => {
+    saveListFilters({
+      ...emptySearchQuery(),
+      since: "2024-01-01",
+      until: "2024-12-31",
+    });
+
+    const url = applyPersistedListFilters(listing()).url;
+
+    expect(search(url, "eh_since")).toBe("2024-01-01");
+    expect(search(url, "eh_until")).toBe("2024-12-31");
+    expect(search(url, "advsearch")).toBe("1");
+  });
+
+  test("keeps an address that already chose its own posted-date range", () => {
+    saveListFilters({ ...emptySearchQuery(), since: "2020-01-01", until: "2020-12-31" });
+
+    const explicit = "https://e-hentai.org/?eh_since=2024-01-01&eh_until=2024-12-31";
+    expect(applyPersistedListFilters(listing(explicit)).url).toBe(explicit);
+  });
+
   test("keeps an address that chose its own filters", () => {
     saveListFilters({ ...emptySearchQuery(), cats: 6, rating: 5 });
 

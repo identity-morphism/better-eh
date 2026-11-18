@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { applyMyTag, normalizeColor, parseUserTags } from "../../src/data/my-tags";
+import type { GalleryPost } from "../../src/data/gallery-actions";
+import { applyMyTag, normalizeWeight } from "../../src/data/my-tags";
+import type { DocumentOptions, HtmlResponse } from "../../src/fetch/loader";
+import type { UserTagState } from "../../src/parse/my-tags";
+import { normalizeColor, parseUserTags } from "../../src/parse/my-tags";
 import type { GalleryApiConfig } from "../../src/types";
 import { parseDocument } from "../dom";
 
@@ -11,6 +15,8 @@ const CONFIG: GalleryApiConfig = {
   gid: "123456",
   token: "abcdef1234",
 };
+
+const MYTAGS_URL = "https://e-hentai.org/mytags";
 
 function doc(): Document {
   return parseDocument(`
@@ -36,11 +42,19 @@ function doc(): Document {
   `);
 }
 
-function deps(overrides: Record<string, unknown> = {}) {
+interface DepsOverrides {
+  loadDocument?: (url: string, options: DocumentOptions) => Promise<HtmlResponse>;
+  post?: GalleryPost;
+  addTag?: (url: string, body: URLSearchParams, signal?: AbortSignal) => Promise<void>;
+  existing?: UserTagState;
+  signal?: AbortSignal;
+}
+
+function deps(overrides: DepsOverrides = {}) {
   return {
     config: CONFIG,
-    myTagsUrl: "https://e-hentai.org/mytags",
-    loadDocument: () => Promise.resolve({ doc: doc(), url: "https://e-hentai.org/mytags" }),
+    myTagsUrl: MYTAGS_URL,
+    loadDocument: () => Promise.resolve({ doc: doc(), url: MYTAGS_URL }),
     ...overrides,
   };
 }
@@ -77,6 +91,22 @@ describe("My Tags parsing", () => {
   });
 });
 
+describe("normalizeWeight", () => {
+  test("rounds to whole numbers and clamps to the site's range", () => {
+    expect(normalizeWeight(12.6)).toBe(13);
+    expect(normalizeWeight(150)).toBe(99);
+    expect(normalizeWeight(-150)).toBe(-99);
+    expect(normalizeWeight(0)).toBe(0);
+  });
+
+  test("defaults missing or malformed weights to 10", () => {
+    expect(normalizeWeight(undefined)).toBe(10);
+    expect(normalizeWeight(null)).toBe(10);
+    expect(normalizeWeight(Number.NaN)).toBe(10);
+    expect(normalizeWeight(Number.POSITIVE_INFINITY)).toBe(10);
+  });
+});
+
 describe("My Tags mutations", () => {
   test("updates an existing tag through setusertag and preserves other fields", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
@@ -108,6 +138,66 @@ describe("My Tags mutations", () => {
     ]);
   });
 
+  test("updates the weight through setusertag and keeps watch/hide/colour", async () => {
+    let body: Record<string, unknown> = {};
+    await applyMyTag(
+      "language:english",
+      { weight: 30 },
+      deps({
+        post: (_url: string, payload: unknown) => {
+          body = payload as Record<string, unknown>;
+          return Promise.resolve({ tagid: 43 });
+        },
+      }),
+    );
+
+    expect(body).toEqual({
+      method: "setusertag",
+      apiuid: CONFIG.apiUid,
+      apikey: CONFIG.apiKey,
+      tagid: 43,
+      tagwatch: 0,
+      taghide: 1,
+      tagcolor: "",
+      tagweight: 30,
+    });
+  });
+
+  test("uses injected existing state without fetching My Tags", async () => {
+    const existing: UserTagState = {
+      id: 42,
+      name: "female:enema",
+      watched: true,
+      hidden: false,
+      color: "#ff8800",
+      weight: 15,
+    };
+    let fetched = false;
+    let body: Record<string, unknown> = {};
+    const result = await applyMyTag(
+      "female:enema",
+      { weight: 25 },
+      deps({
+        existing,
+        loadDocument: () => {
+          fetched = true;
+          throw new Error("the tag list should not be fetched");
+        },
+        post: (_url: string, payload: unknown) => {
+          body = payload as Record<string, unknown>;
+          return Promise.resolve({ tagid: existing.id });
+        },
+      }),
+    );
+
+    expect(result).toBe("updated");
+    expect(fetched).toBe(false);
+    expect(body.tagwatch).toBe(1);
+    expect(body.taghide).toBe(0);
+    expect(body.tagcolor).toBe("#ff8800");
+    expect(body.tagweight).toBe(25);
+  });
+
   test("changing colour keeps watch/hide state", async () => {
     let body: Record<string, unknown> = {};
     await applyMyTag(
@@ -135,7 +225,7 @@ describe("My Tags mutations", () => {
         loadDocument: () =>
           Promise.resolve({
             doc: parseDocument('<div id="usertags_outer"></div>'),
-            url: "https://e-hentai.org/mytags",
+            url: MYTAGS_URL,
           }),
         addTag: (url: string, body: URLSearchParams) => {
           calls.push({ url, body });
@@ -146,13 +236,40 @@ describe("My Tags mutations", () => {
 
     expect(result).toBe("added");
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe("https://e-hentai.org/mytags");
+    expect(calls[0]?.url).toBe(MYTAGS_URL);
     expect(Object.fromEntries(calls[0]?.body ?? [])).toEqual({
       usertag_action: "add",
       tagname_new: "female:enema",
       tagweight_new: "10",
       usertag_target: "0",
       taghide_new: "on",
+    });
+  });
+
+  test("sends the chosen weight when adding a tag", async () => {
+    const calls: Array<{ url: string; body: URLSearchParams }> = [];
+    await applyMyTag(
+      "artist:someone",
+      { weight: 42, watched: true },
+      deps({
+        loadDocument: () =>
+          Promise.resolve({
+            doc: parseDocument('<div id="usertags_outer"></div>'),
+            url: MYTAGS_URL,
+          }),
+        addTag: (url: string, body: URLSearchParams) => {
+          calls.push({ url, body });
+          return Promise.resolve();
+        },
+      }),
+    );
+
+    expect(Object.fromEntries(calls[0]?.body ?? [])).toEqual({
+      usertag_action: "add",
+      tagname_new: "artist:someone",
+      tagweight_new: "42",
+      usertag_target: "0",
+      tagwatch_new: "on",
     });
   });
 

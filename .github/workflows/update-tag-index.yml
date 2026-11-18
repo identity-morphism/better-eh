@@ -9,6 +9,7 @@ on:
     branches: [master]
     paths:
       - assets/tag-index.bin
+      - src/tags/core-vocabulary.ts
       - .github/workflows/update-tag-index.yml
 
 permissions:
@@ -34,10 +35,11 @@ jobs:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run update:tag-index
-      - name: Detect asset change
+      - run: bun run update:core-vocabulary
+      - name: Detect vocabulary change
         id: asset
         run: |
-          if [ -z "$(git status --porcelain -- assets/tag-index.bin)" ]; then
+          if [ -z "$(git status --porcelain -- assets/tag-index.bin src/tags/core-vocabulary.ts)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -52,6 +54,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add assets/tag-index.bin
+          git add assets/tag-index.bin src/tags/core-vocabulary.ts
           git commit -m "chore: update tag vocabulary data"
           git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:master

@@ -1,9 +1,9 @@
 # Better EH
 
 A full reskin of `e-hentai.org` and `exhentai.org`. Every page the script owns — search and
-category listings, galleries, the reader, favorites, toplists, torrents and settings — renders as
-one consistent, image-first interface instead of the site's legacy tables. Routes it does not own
-stay native.
+category listings, galleries, the reader, favorites, toplists, torrents, gallery torrents, My Tags
+and settings — renders as one consistent, image-first interface instead of the site's legacy
+tables. Routes it does not own stay native.
 
 ![Search results with demo data](docs/screenshots/browse.webp)
 
@@ -21,14 +21,19 @@ stay native.
 - **Search and browse**: a cover grid that keeps each gallery's real thumbnail aspect, with
   category chips, rating/date/page-count metadata, favorite marks, result counts, infinite scroll
   (per view) and the site's own seek/jump. Advanced filters and the panel state are remembered.
+- **Posted-date range**: a posted-since/posted-until bound narrows a listing in-app. The range is
+  app-owned (`eh_since`/`eh_until`) rather than a site filter, and the bound is applied
+  client-side, so result counts are approximate.
 - **Search expressions**: recent queries, named saved searches and quick tags share one store;
   active filter chips can be removed or flipped to include/exclude/optional without retyping.
-- **Tag autocomplete**: namespace-aware suggestions, quoted/exact/signed terms, short aliases
-  (`f:`, `a:`), popularity ranking and local usage learning. Clicking a gallery tag adds it to the
-  current search; `Alt+click` excludes it.
+- **Tag autocomplete**: namespace-aware suggestions that work immediately from an embedded core
+  vocabulary, quoted/exact/signed terms, short aliases (`f:`, `a:`), popularity ranking and local
+  usage learning. Clicking a gallery tag adds it to the current search; `Alt+click` excludes it.
 - **Gallery**: parsed title hierarchy, grouped tags with actions, rating and comments (including
-  editing your own), favorite folders with notes, archive/torrent links, resume position, and a
-  sprite thumbnail grid with the site's pager.
+  editing your own), favorite folders with notes, archive links, the in-app torrent list, resume
+  position, and a sprite thumbnail grid with the site's pager.
+- **Gallery torrents**: the gallery's `/gallerytorrents.php` list renders in-app with its torrent
+  rows instead of the site's legacy page.
 - **Reader**: fit-height/zoom/pan or natural-width scrolling, single/spread/continuous layouts,
   right-to-left direction, prefetching, `nl` retry, original-file fallback on deep zoom, keyboard,
   click zones, edge chevrons and swipes.
@@ -36,6 +41,8 @@ stay native.
   ranked toplist overview and category pages; the torrent index with search, status, only-mine and
   sortable columns; `/uconfig.php` plus a userscript settings panel, keybinding editor and JSON
   backup.
+- **My Tags**: the `/mytags` manager renders in-app: watch or hide a tag, set its colour and
+  weight, and add new tags without leaving the shell.
 - **Fast and robust**: request priorities and caching, rate-limit purge with a banner, result-card
   previews, and a login gate instead of a broken page when a route needs a session.
 - **Accessible**: keyboard paths, managed dialog focus, forced-colors support, reduced-motion
@@ -76,8 +83,10 @@ inserts an exclusion.
      `https://github.com/identity-morphism/better-eh/releases/latest/download/better-eh.user.js`
    - **Raw master:**  
      `https://raw.githubusercontent.com/identity-morphism/better-eh/master/dist/better-eh.user.js`
-3. First use downloads the compact tag vocabulary and popularity assets; suggestions work after
-   those downloads, and search still works without them.
+3. Tag suggestions work on first use from a compact embedded core vocabulary (about 1,500 tags,
+   roughly 22 KB of source). The full roughly 400 KB front-coded vocabulary downloads in the
+   background and replaces it; the popularity snapshot downloads separately. Search works without
+   either download.
 
 ## Development
 
@@ -96,18 +105,18 @@ storage/debugging notes, and [Architecture](docs/ARCHITECTURE.md) for the module
 
 ## Known Limits
 
-- My Tags, My Home, `/mpv/` and `/lofi/` remain native; the gallery tag menu covers individual
-  watch/hide/colour changes, while the full tagset manager stays on the native My Tags page.
-- Toplists exist on e-hentai.org only; ExHentai answers `/toplist.php` with a 404, so the tab is
-  hidden there.
-- Gallery archive, torrent, report and petition actions link to the site's own pages rather than
-  being rebuilt in-app.
-- Date-range filtering stays unsupported: the site's search form exposes no date cursor to build
-  on, so there is no list-side bar for it.
-- Tag suggestions download a roughly 400 KB front-coded vocabulary asset (about 220 KB gzipped on
-  the wire) on first use and cache it for a week. Popularity ranking fetches a roughly 14 KB binary
-  asset and caches it for a week. Nothing is embedded in the bundle, so first use needs a successful
-  download; without it, suggestions fall back to match quality and aliases.
+- My Home and `/lofi/` remain native for now; `/mpv/` no longer exists on the site (it answers
+  404).
+- Toplists are an e-hentai.org feature: the ExHentai site itself answers `/toplist.php` with a 404,
+  so the tab is hidden there.
+- Gallery archive, report and petition actions link to the site's own pages rather than being
+  rebuilt in-app.
+- Tag suggestions start from an embedded compact core vocabulary (about 1,500 popular tags, roughly
+  22 KB of source), so common tags work immediately. The full roughly 400 KB front-coded vocabulary
+  (about 220 KB gzipped on the wire) downloads in the background and replaces that core, and is
+  cached for a week. Popularity ranking fetches a roughly 14 KB binary asset separately and caches
+  it for a week. If the full download fails, the core stays in place and less-common tags stay
+  missing until a later attempt succeeds.
 - Site HTML changes can break parsers; keep the native escape path available.
 
 ## Contributing

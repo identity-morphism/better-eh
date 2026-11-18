@@ -10,6 +10,8 @@
 @import "./torrents.css" layer(components);
 @import "./favorites.css" layer(components);
 @import "./gallery-actions.css" layer(components);
+@import "./gallery-torrents.css" layer(components);
+@import "./my-tags.css" layer(components);
 
 @source "./**/*.{ts,html}";
 /* The build writes utilities-shaped strings into dist; scanning it makes each build depend on the

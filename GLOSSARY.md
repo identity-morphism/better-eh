@@ -19,6 +19,13 @@ locality) is used exactly as defined by the codebase-design skill.
   list (a results table plus `?p=` paging). Parsed into `ToplistPage`.
 - **Torrent index**: `/torrents.php`, the torrent table with `status`/`mine` filters and numeric
   paging. Parsed into `TorrentPage`.
+- **Gallery torrents**: `/gallerytorrents.php?gid=<id>&t=<token>`, one gallery's torrent list,
+  parsed into `GalleryTorrentsPage`. Details reads the site's POST result into `TorrentInfo`.
+- **My Tags**: `/mytags`, the account's per-tag watch/hide, colour and weight settings plus the
+  add/edit form. Parsed into `MyTagsPage`; mutations live in the `my-tags` data module.
+- **Posted-date range**: an app-owned `eh_since`/`eh_until` bound on a listing URL, not a site
+  filter. Boot rewrites it to the site's date cursor (`seek`) and bounds the rows client-side, so
+  counts are approximate.
 - **Uconfig**: `/uconfig.php`, the account's site settings form. Parsed into `UconfigSection[]`;
   saving posts every parsed field back with the changed values applied.
 - **Page**: one image inside a gallery. Its viewer URL is the unit the page cache is keyed on.
@@ -34,7 +41,9 @@ locality) is used exactly as defined by the codebase-design skill.
   site.
 - **Search term**: one whitespace-separated piece of `f_search`, optionally signed (`-`/`~`),
   namespaced (`female:`), quoted, and exact (`$`).
-- **Tag index**: the compact namespace/key vocabulary used for suggestions.
+- **Tag index**: the compact namespace/key vocabulary used for suggestions. The bundle embeds a
+  generated core of its most popular tags (about 1,500); the full roughly 400 KB front-coded index
+  stays remote and upgrades that core in the background on first use.
 - **Tag counts**: the cached gallery-frequency snapshot that ranks popular tags ahead of rare matches; empty until its asset download succeeds.
 - **Search draft**: the tab's committed query plus the free text being edited, kept across list,
   gallery, and reloads. Submitting commits the draft; tag clicks and chip edits change only it.

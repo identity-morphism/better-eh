@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better EH
 // @namespace    https://github.com/identity-morphism/better-eh
-// @version      1.0.1
+// @version      1.0.2
 // @description  A userscript that reskins E-Hentai and ExHentai into one consistent, image-first interface: galleries, listings, favorites, toplists, torrents and the reader, with tag autocomplete, previews and prefetching.
 // @author       identity-morphism
 // @icon         https://api.iconify.design/ph/book-open-bold.svg
@@ -19,6 +19,87 @@
 // ==/UserScript==
 
 (() => {
+  // src/data/list-date.ts
+  var ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  var POSTED_DATE = /^\s*(\d{4})-(\d{2})-(\d{2})(?=\s|$)/;
+  var MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  function isValidDate(value) {
+    const match = ISO_DATE.exec(value.trim());
+    if (!match?.[1] || !match[2] || !match[3]) {
+      return false;
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (month < 1 || month > 12 || day < 1) {
+      return false;
+    }
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const lastDay = month === 2 && leapYear ? 29 : MONTH_DAYS[month - 1] ?? 0;
+    return day <= lastDay;
+  }
+  function isDateRangeActive(range) {
+    return isValidDate(range.since) || isValidDate(range.until);
+  }
+  function postedDate(posted) {
+    const match = POSTED_DATE.exec(posted);
+    if (!match?.[1] || !match[2] || !match[3]) {
+      return null;
+    }
+    const day = `${match[1]}-${match[2]}-${match[3]}`;
+    return isValidDate(day) ? day : null;
+  }
+  function filterByDateRange(items, range) {
+    const since = isValidDate(range.since) ? range.since.trim() : null;
+    const until = isValidDate(range.until) ? range.until.trim() : null;
+    if (since === null && until === null) {
+      return { items: [...items], crossedSince: false };
+    }
+    const kept = [];
+    let crossedSince = false;
+    for (const item of items) {
+      const day = postedDate(item.posted);
+      if (day === null) {
+        continue;
+      }
+      if (since !== null && day < since) {
+        crossedSince = true;
+        continue;
+      }
+      if (until !== null && day > until) {
+        continue;
+      }
+      kept.push(item);
+    }
+    return { items: kept, crossedSince };
+  }
+  function withDateRange(url, range) {
+    const target = new URL(url);
+    setDateParam(target.searchParams, "eh_since", range.since);
+    setDateParam(target.searchParams, "eh_until", range.until);
+    return target.href;
+  }
+  function setDateParam(params, key, value) {
+    const date = value.trim();
+    if (isValidDate(date)) {
+      params.set(key, date);
+    } else {
+      params.delete(key);
+    }
+  }
+  function listRequestUrl(url) {
+    const target = new URL(url);
+    if (target.searchParams.has("seek")) {
+      return url;
+    }
+    const until = (target.searchParams.get("eh_until") ?? "").trim();
+    if (!isValidDate(until)) {
+      return url;
+    }
+    target.searchParams.set("seek", until);
+    return target.href;
+  }
+
   // src/guards.ts
   function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -349,6 +430,8 @@
       torrent: false,
       pageFrom: "",
       pageTo: "",
+      since: "",
+      until: "",
       disableLanguage: false,
       disableUploader: false,
       disableTags: false
@@ -367,13 +450,15 @@
       torrent: params.has("f_sto"),
       pageFrom: params.get("f_spf") ?? "",
       pageTo: params.get("f_spt") ?? "",
+      since: params.get("eh_since") ?? "",
+      until: params.get("eh_until") ?? "",
       disableLanguage: params.has("f_sfl"),
       disableUploader: params.has("f_sfu"),
       disableTags: params.has("f_sft")
     };
   }
   function hasAdvancedFilters(query) {
-    return query.rating > 0 || query.expunged || query.torrent || query.pageFrom.trim() !== "" || query.pageTo.trim() !== "" || query.disableLanguage || query.disableUploader || query.disableTags;
+    return query.rating > 0 || query.expunged || query.torrent || query.pageFrom.trim() !== "" || query.pageTo.trim() !== "" || query.since.trim() !== "" || query.until.trim() !== "" || query.disableLanguage || query.disableUploader || query.disableTags;
   }
   function writeSearchFilters(params, query) {
     if (query.cats !== 0) {
@@ -395,6 +480,14 @@
     const pageTo = query.pageTo.trim();
     if (pageTo) {
       params.set("f_spt", pageTo);
+    }
+    const since = query.since.trim();
+    if (since) {
+      params.set("eh_since", since);
+    }
+    const until = query.until.trim();
+    if (until) {
+      params.set("eh_until", until);
     }
     if (query.disableLanguage) {
       params.set("f_sfl", "on");
@@ -601,7 +694,9 @@
     "f_spt",
     "f_sfl",
     "f_sfu",
-    "f_sft"
+    "f_sft",
+    "eh_since",
+    "eh_until"
   ];
   function isStoredFilters(value) {
     return isRecord(value);
@@ -674,6 +769,15 @@
     constructor() {
       super("Login required");
       this.name = "LoginRequiredError";
+    }
+  }
+
+  class ParseMismatchError extends Error {
+    route;
+    constructor(route, detail) {
+      super(`${route}: ${detail}`);
+      this.name = "ParseMismatchError";
+      this.route = route;
     }
   }
 
@@ -1410,7 +1514,7 @@ ${defaultKeySummary()}`)) {
     const type = response.headers.get("content-type") ?? "";
     return type.includes("html") || /^\s*<(!doctype|html|head|body)/i.test(text);
   }
-  var PAGE_CONTENT_SELECTOR = "#gn, #gdt, #gdd, #i1, #i2, #i3, #profile_form, .itg";
+  var PAGE_CONTENT_SELECTOR = "#gn, #gdt, #gdd, #i1, #i2, #i3, #profile_form, #usertags_outer, #torrentinfo, .itg";
   function hasPageContent(doc) {
     return doc.querySelector(PAGE_CONTENT_SELECTOR) !== null;
   }
@@ -1957,7 +2061,7 @@ ${defaultKeySummary()}`)) {
   }
   function resultSummary(doc) {
     const raw = cleanText(doc.querySelector(".searchtext p")?.textContent);
-    const match = /(?:Found|Showing)[^.]*?\./i.exec(raw);
+    const match = /^(?:Found|Showing)\b[^.]*\./i.exec(raw);
     if (match?.[0]) {
       return match[0];
     }
@@ -2140,16 +2244,23 @@ ${defaultKeySummary()}`)) {
     }
     return null;
   }
-  function parseGalleryApiConfig(doc) {
+  function parseApiCredentials(doc) {
     const apiUrl = scriptValue(doc, "api_url");
     const apiUid = scriptValue(doc, "apiuid");
     const apiKey = scriptValue(doc, "apikey");
-    const gid = scriptValue(doc, "gid");
-    const token = scriptValue(doc, "token");
-    if (!apiUrl || !apiUid || !apiKey || !gid || !token) {
+    if (!apiUrl || !apiUid || !apiKey) {
       return null;
     }
-    return { apiUrl, apiUid, apiKey, gid, token };
+    return { apiUrl, apiUid, apiKey };
+  }
+  function parseGalleryApiConfig(doc) {
+    const credentials = parseApiCredentials(doc);
+    const gid = scriptValue(doc, "gid");
+    const token = scriptValue(doc, "token");
+    if (credentials === null || !gid || !token) {
+      return null;
+    }
+    return { ...credentials, gid, token };
   }
   function parseTags(doc, url) {
     const groups = [];
@@ -2399,7 +2510,7 @@ ${defaultKeySummary()}`)) {
     const paging = parsePaging(doc, url);
     const heading = cleanText(doc.getElementById("gn")?.textContent);
     if (heading === "" && thumbs.length === 0) {
-      throw new HttpError(404, url);
+      throw new ParseMismatchError("gallery", "the title and page thumbnails are missing");
     }
     const title = heading || "Untitled";
     const alternateTitle = cleanText(doc.getElementById("gj")?.textContent) || null;
@@ -2451,6 +2562,185 @@ ${defaultKeySummary()}`)) {
       visible: cleanText(metadata.get("Visible")?.textContent) || null,
       apiConfig
     };
+  }
+
+  // src/parse/gallery-torrents.ts
+  var GID = /^\d+$/;
+  var GALLERY_TOKEN = /^[0-9a-f]+$/i;
+  var DOWNLOAD_LINK = "a[href*='ehtracker.org/get/']";
+  function galleryHrefFrom(url) {
+    const parsed = safeUrl(url);
+    const gid = parsed?.searchParams.get("gid") ?? "";
+    const token = parsed?.searchParams.get("t") ?? "";
+    if (!GID.test(gid) || !GALLERY_TOKEN.test(token)) {
+      return null;
+    }
+    return `/g/${gid}/${token}/`;
+  }
+  function fieldText(form, label) {
+    const prefix = `${label}:`;
+    for (const cell of form.querySelectorAll("td")) {
+      const text = cleanText(cell.textContent);
+      if (text.startsWith(prefix)) {
+        return cleanText(text.slice(prefix.length));
+      }
+    }
+    return "";
+  }
+  function parseTorrent(form, base) {
+    const gtid = (form.querySelector("input[name='gtid']")?.value ?? "").trim();
+    if (gtid === "") {
+      return null;
+    }
+    const link = form.querySelector(DOWNLOAD_LINK);
+    return {
+      gtid,
+      name: cleanText(link?.textContent),
+      posted: fieldText(form, "Posted"),
+      size: fieldText(form, "Size"),
+      seeds: parseNumber(fieldText(form, "Seeds")) ?? 0,
+      peers: parseNumber(fieldText(form, "Peers")) ?? 0,
+      downloads: parseNumber(fieldText(form, "Downloads")) ?? 0,
+      uploader: fieldText(form, "Uploader"),
+      downloadHref: anchorHref(link, base)
+    };
+  }
+  function parseGalleryTorrents(doc, url) {
+    const container = doc.getElementById("torrentinfo");
+    const torrents = [];
+    if (container !== null) {
+      for (const form of container.querySelectorAll("form")) {
+        const torrent = parseTorrent(form, url);
+        if (torrent !== null) {
+          torrents.push(torrent);
+        }
+      }
+    }
+    return {
+      url,
+      title: cleanText(container?.querySelector("h1")?.textContent),
+      galleryHref: galleryHrefFrom(url),
+      torrents
+    };
+  }
+
+  // src/parse/my-tags.ts
+  var DEFAULT_WEIGHT = 10;
+  function normalizeColor(color) {
+    if (color === null || color === undefined) {
+      return "";
+    }
+    const value = color.trim().replace(/^#/, "");
+    return /^[0-9a-f]{3}(?:[0-9a-f]{3})?$/iu.test(value) ? `#${value.toLowerCase()}` : "";
+  }
+  function parseUserTags(doc) {
+    const tags = [];
+    for (const block of doc.querySelectorAll("#usertags_outer > div[id^='usertag_']")) {
+      const rawId = block.id.slice("usertag_".length);
+      const id = Number.parseInt(rawId, 10);
+      if (!Number.isFinite(id) || id <= 0) {
+        continue;
+      }
+      const preview = block.querySelector(`#tagpreview_${id}`);
+      const name = preview?.getAttribute("title")?.trim() ?? "";
+      if (name === "") {
+        continue;
+      }
+      const colorInput = block.querySelector(`#tagcolor_${id}`);
+      const weightInput = block.querySelector(`#tagweight_${id}`);
+      const weight = Number.parseInt(weightInput?.value ?? "", 10);
+      tags.push({
+        id,
+        name,
+        watched: isChecked(block.querySelector(`#tagwatch_${id}`)),
+        hidden: isChecked(block.querySelector(`#taghide_${id}`)),
+        color: normalizeColor(colorInput?.value ?? ""),
+        weight: Number.isFinite(weight) ? weight : DEFAULT_WEIGHT
+      });
+    }
+    return tags;
+  }
+  function parseMyTags(doc, url) {
+    return {
+      url,
+      tags: parseUserTags(doc),
+      api: parseApiCredentials(doc)
+    };
+  }
+
+  // src/parse/sanity.ts
+  var EMPTY_LIST = /no hits|no galleries|found 0|no results/i;
+  var EMPTY_TORRENTS = /no torrents|no results|showing 0\s*-\s*0/i;
+  function assertViewerPage(data) {
+    if (data.imgSrc.trim() === "") {
+      throw new ParseMismatchError("viewer", "the page image is missing");
+    }
+  }
+  function assertGalleryPage(data) {
+    if (data.thumbs.length === 0) {
+      throw new ParseMismatchError("gallery", "the page thumbnails are missing");
+    }
+    if (data.title.primary.trim() === "") {
+      throw new ParseMismatchError("gallery", "the gallery title is empty");
+    }
+  }
+  function assertListPage(data, doc) {
+    if (doc.querySelector(".searchtext, #searchbox, table.itg, .gl1t") === null) {
+      throw new ParseMismatchError("list", "the search and results markup is missing");
+    }
+    if (data.items.length === 0 && !EMPTY_LIST.test(data.resultText ?? "")) {
+      throw new ParseMismatchError("list", "there are no items and no empty-result notice");
+    }
+  }
+  function assertTorrentsPage(data, doc) {
+    if (doc.querySelector("table.itg") === null) {
+      throw new ParseMismatchError("torrents", "the torrent table is missing");
+    }
+    if (data.rows.length > 0) {
+      return;
+    }
+    const summary = data.summary ?? doc.querySelector("p.ip")?.textContent.trim() ?? "";
+    if (!EMPTY_TORRENTS.test(summary)) {
+      throw new ParseMismatchError("torrents", "there are no rows and no empty-result summary");
+    }
+  }
+  function assertFavoritesPage(data) {
+    if (data.folders.length === 0) {
+      throw new ParseMismatchError("favorites", "the favorite-folder tabs are missing");
+    }
+  }
+  function assertToplistPage(data) {
+    if (data.kind === "category") {
+      if (data.entries.length === 0) {
+        throw new ParseMismatchError("toplist", "the ranked entries are missing");
+      }
+      return;
+    }
+    if (data.sections.length === 0) {
+      throw new ParseMismatchError("toplist", "the toplist sections are missing");
+    }
+  }
+  function assertSettingsPage(data) {
+    if (data.length === 0) {
+      throw new ParseMismatchError("settings", "the settings form is missing");
+    }
+  }
+  function assertGalleryTorrentsPage(data, doc) {
+    const container = doc.getElementById("torrentinfo");
+    if (container === null) {
+      throw new ParseMismatchError("galleryTorrents", "the torrent container is missing");
+    }
+    if (data.torrents.length > 0) {
+      return;
+    }
+    if (!EMPTY_TORRENTS.test(container.textContent)) {
+      throw new ParseMismatchError("galleryTorrents", "there are no torrents and no empty notice");
+    }
+  }
+  function assertMyTagsPage(_data, doc) {
+    if (doc.getElementById("usertags_outer") === null) {
+      throw new ParseMismatchError("myTags", "the user-tag container is missing");
+    }
   }
 
   // src/parse/pager.ts
@@ -4398,9 +4688,6 @@ ${defaultKeySummary()}`)) {
       meta.append(el("a", {
         class: "card-torrent",
         href: item.torrentsHref,
-        "data-native": "",
-        target: "_blank",
-        rel: "nofollow noopener",
         title: "Show torrents",
         "aria-label": "Show torrents"
       }, icon("download")));
@@ -5154,6 +5441,115 @@ ${defaultKeySummary()}`)) {
     return bytes;
   }
 
+  // src/tags/core-vocabulary.ts
+  var CORE_VOCABULARY_BASE64 = "RUhUSQEMAAZmZW1hbGXIAAAAAAZhaGVnYW8BBm1wdXRlZQEDbmFsBAwgaW50ZXJjb3Vyc2UBBHByb24ABGJhbGQBAmJ3AQNkc20B" + "CmVhdXR5IG1hcmsCCHN0aWFsaXR5AQppZyBhcmVvbGFlBQJzcwQFYmFsbHMFBnJlYXN0cwQHbmlwcGxlcwQFcGVuaXMCBGtpbmkC" + "BnNleHVhbAEIbGFja21haWwCB2luZGZvbGQCA29vZAQEbWVycwMEd2pvYgcFIGZhY2UBEG9keSBtb2RpZmljYXRpb24FB3dyaXRp" + "bmcEBHN1aXQCBW5kYWdlAQ9yZWFzdCBleHBhbnNpb24HB2ZlZWRpbmcCA2lkZQEGdWtrYWtlAghubnkgZ2lybAILc2luZXNzIHN1" + "aXQAB2NhdGdpcmwBDGhhc3RpdHkgYmVsdAIGZWF0aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0" + "aW9uAghzcGxheWluZwIFd2dpcmwBDHJvc3NkcmVzc2luZwMKdGNoIHRhdHRvbwEJdW1mbGF0aW9uAglubmlsaW5ndXMADGRhcmsg" + "bmlwcGxlcwUEc2tpbgIGdWdodGVyAQllZXB0aHJvYXQCCWZsb3JhdGlvbgIIbW9uIGdpcmwBE2lja2dpcmwgb24gZGlja2dpcmwM" + "BmZlbWFsZQECb2cDBSBnaXJsAhB1YmxlIHBlbmV0cmF0aW9uAQRydWdzAANlbGYBDHhoaWJpdGlvbmlzbQIOcG9zZWQgY2xvdGhp" + "bmcBEHllLWNvdmVyaW5nIGJhbmcDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2VtYWxlcyBvbmx5AwNkb20BBmlsbWlu" + "ZwIHbmdlcmluZwIWcnN0IHBlcnNvbiBwZXJzcGVjdGl2ZQIGc2huZXRzAwR0aW5nAQZvb3Rqb2ICBnggZ2lybAEHcmVja2xlcwEE" + "dXJyeQIGdGFuYXJpAANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQdpYW50ZXNzAQZsYXNzZXMCBG92ZXMBBW9i" + "bGluAgRra3VuAQRyb3VwAQN1cm8BBHlhcnUACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZ2ggaGVl" + "bHMBBG9ybnMDAnNlBQUgZ2lybAIGdHBhbnRzAQt1Z2UgYnJlYXN0cwUFcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGlt" + "cHJlZ25hdGlvbgEFbmNlc3QCB2ZsYXRpb24CDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxhY3Rh" + "dGlvbgIKcmdlIHRhdHRvbwIDdGV4AQRlYXNoAgVvdGFyZAEHaW5nZXJpZQEGb2xpY29uAAxtYWdpY2FsIGdpcmwCAmlkAgRrZXVw" + "Ag5sZSBvbiBkaWNrZ2lybAIJc2tlZCBmYWNlAwl0dXJiYXRpb24BA2lsZgMEa2luZwIIbmQgYnJlYWsFB2NvbnRyb2wBC29uc3Rl" + "ciBnaXJsAgR0aGVyAQV1c2NsZQAJbmFrYWRhc2hpAQdldG9yYXJlAQppcHBsZSBmdWNrBwhwaWVyY2luZwcLc3RpbXVsYXRpb24B" + "AnVuAgNyc2UACm9wcGFpIGxvbGkBAnJjAA1wYWludGVkIG5haWxzAwR6dXJpAgdudHlob3NlAgVzdGllcwEQZW5pcyBlbmxhcmdl" + "bWVudAEHaWVyY2luZwIHeGllIGN1dAEHb255dGFpbAEHcmVnbmFudAIKb3N0aXR1dGlvbgAEcmFwZQEFaW1qb2IBBG9ib3QBBHlv" + "bmEABHNjYXQCDWhvb2wgc3dpbXN1aXQGC2JveSB1bmlmb3JtBgxnaXJsIHVuaWZvcm0BB2V4IHRveXMBBmhlbWFsZQIFaWJhcmkB" + "BWlzdGVyAQRsYXZlAgZlZXBpbmcBDG1hbGwgYnJlYXN0cwYFcGVuaXMCA2VsbAEEbnVmZgEMb2xlIGRpY2tnaXJsBQZmZW1hbGUB" + "B3BhbmtpbmcBCHF1aXJ0aW5nAQh0b2NraW5ncwMQbWFjaCBkZWZvcm1hdGlvbgIGcmFwLW9uAQd3ZWF0aW5nAgZpbXN1aXQABHRh" + "aWwCB2xsIGdpcmwCBm5saW5lcwEGZWFjaGVyAgdudGFjbGVzAQ9oaWdoIGhpZ2ggYm9vdHMBBW9tYm95AgVydHVyZQENcmFuc2Zv" + "cm1hdGlvbgEId2ludGFpbHMADnVudXN1YWwgcHVwaWxzARByZXRocmEgaW5zZXJ0aW9uAgdpbmF0aW9uAA12YWdpbmFsIGJpcnRo" + "AQ1lcnkgbG9uZyBoYWlyAQNvcmUBBXR1YmVyAAV3aW5ncwIDdGNoAAV4LXJheQAEeXVyaQRtYWxlyAAAAAAGYWhlZ2FvAQZtcHV0" + "ZWUBA25hbAQMIGludGVyY291cnNlAQRwcm9uAQtzcGh5eGlhdGlvbgAEYmFsZAECYm0BA2RzbQEKZWF1dHkgbWFyawIIc3RpYWxp" + "dHkBCmlnIGFyZW9sYWUFAnNzBAViYWxscwUGcmVhc3RzBARsaXBzBAduaXBwbGVzBAVwZW5pcwIEa2luaQIGc2V4dWFsAQhsYWNr" + "bWFpbAIHaW5kZm9sZAIDb29kBARtZXJzAwR3am9iBwUgZmFjZQEQb2R5IG1vZGlmaWNhdGlvbgUHd3JpdGluZwQEc3VpdAIFbmRh" + "Z2UBD3JlYXN0IGV4cGFuc2lvbgcHZmVlZGluZwIDaWRlAQZ1a2tha2UCC3NpbmVzcyBzdWl0AAZjYXRib3kBDGhhc3RpdHkgYmVs" + "dAIGZWF0aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0aW9uAghzcGxheWluZwEMcm9zc2RyZXNz" + "aW5nAwp0Y2ggdGF0dG9vAQl1bWZsYXRpb24CCW5uaWxpbmd1cwAMZGFyayBuaXBwbGVzBQRza2luAQllZXB0aHJvYXQCA21vbgEP" + "aWNrZ2lybCBvbiBtYWxlAgJsZgECb2cDBCBib3kCEHVibGUgcGVuZXRyYXRpb24BBHJ1Z3MDAm5rAANlbGYBDHhoaWJpdGlvbmlz" + "bQIOcG9zZWQgY2xvdGhpbmcBEHllLWNvdmVyaW5nIGJhbmcDBG1hc2sDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2Vt" + "aW5pemF0aW9uAQZpbG1pbmcCFnJzdCBwZXJzb24gcGVyc3BlY3RpdmUCBnNobmV0cwMEdGluZwEJb2N1cyBhbmFsAgpvdCBsaWNr" + "aW5nBANqb2ICBXggYm95AQdyZWNrbGVzAQR1cnJ5AANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQZsYXNzZXMC" + "BG92ZXMBBW9ibGluAgRra3VuAQRyb3VwAQN1cm8ACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZGRl" + "biBzZXgCCGdoIGhlZWxzAQRvcm5zAwJzZQIGdHBhbnRzAQl1Z2UgcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGltcHJl" + "Z25hdGlvbgEFbmNlc3QCB2ZsYXRpb24CBHNla2kCDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxh" + "Y3RhdGlvbgIOcmdlIGluc2VydGlvbnMGBnRhdHRvbwIDdGV4AQRlYXNoAgZnIGxvY2sCBW90YXJkAQdpbmdlcmllAgh6YXJkIGd1" + "eQEKb25nIHRvbmd1ZQAMbWFnaWNhbCBnaXJsAgJpZAIEa2V1cAIIbGVzIG9ubHkCCXNrZWQgZmFjZQMJdHVyYmF0aW9uAQNpa28C" + "BWxraW5nAghuZCBicmVhawUHY29udHJvbAEGb25zdGVyAQV1c2NsZQAJbmFrYWRhc2hpAQdldG9yYXJlAQppcHBsZSBmdWNrBwhw" + "aWVyY2luZwcLc3RpbXVsYXRpb24BAnVuAgNyc2UAB29sZCBtYW4BAnJjAA1wYWludGVkIG5haWxzAwR6dXJpAgdudHlob3NlAgVz" + "dGllcwEQZW5pcyBlbmxhcmdlbWVudAIFdHBsYXkBB2llcmNpbmcCB3hpZSBjdXQBB29ueXRhaWwBB3JlZ25hbnQCCm9zdGl0dXRp" + "b24ABHJhcGUBBWltam9iAQRvYm90AQR5b25hAARzY2F0Ag1ob29sIHN3aW1zdWl0Bgtib3kgdW5pZm9ybQYMZ2lybCB1bmlmb3Jt" + "AQdleCB0b3lzAQZoaWJhcmkCBm90YWNvbgEEbGF2ZQIGZWVwaW5nAQptYWxsIHBlbmlzAgNlbGwBBG51ZmYBCG9sZSBtYWxlAQdw" + "YW5raW5nAQh0b2NraW5ncwMQbWFjaCBkZWZvcm1hdGlvbgIGcmFwLW9uAQd3ZWF0aW5nAgZpbXN1aXQABHRhaWwCBmxsIG1hbgIG" + "bmxpbmVzAQZlYWNoZXICB250YWNsZXMBD2hpZ2ggaGlnaCBib290cwEEaWFyYQEGb21naXJsAgVydHVyZQENcmFuc2Zvcm1hdGlv" + "bgEId2ludGFpbHMADnVudXN1YWwgcHVwaWxzARByZXRocmEgaW5zZXJ0aW9uAgdpbmF0aW9uAA12YWdpbmFsIGJpcnRoAQ1lcnkg" + "bG9uZyBoYWlyAQhpcmdpbml0eQEDb3JlAgd5ZXVyaXNtAQV0dWJlcgAFd2luZ3MCA3RjaAEHb2xmIGJveQAFeC1yYXkABHlhb2kF" + "bWl4ZWQXAAAAABBhbmltYWwgb24gYW5pbWFsAAlib2R5IHN3YXAADWZmbSB0aHJlZXNvbWUBB3JvdHRhZ2UACWdhbmcgcmFwZQEE" + "cm91cAAGaW5jZXN0AgRzZWtpAA1rb2RvbW8gZG91c2hpAApsb3cgaW5jZXN0AA1tbWYgdGhyZWVzb21lAgt0IHRocmVlc29tZQEM" + "dGYgdGhyZWVzb21lARF1bHRpbW91dGggYmxvd2pvYgUKcGxlIGFzc2pvYgkHZm9vdGpvYgkHaGFuZGpvYgkIcGFpcmluZ3MABm51" + "ZGlzbQAIb3lha29kb24ACXNoaW1haWRvbgANdHRtIHRocmVlc29tZQEEd2lucwVvdGhlcjwAAAAAAjNkAgkgaW1hZ2VzZXQADGFp" + "IGdlbmVyYXRlZAEPbHJlYWR5IHVwbG9hZGVkAQduYWdseXBoAgZpbWF0ZWQCB3Rob2xvZ3kBBnJ0Ym9vawAHY2FwdGlvbgEEb21p" + "YwMIcGlsYXRpb24ACmRha2ltYWt1cmEBBmVmYWNlZAAOZXh0cmFuZW91cyBhZHMABmZpZ3VyZQEQb3JiaWRkZW4gY29udGVudAEO" + "dWxsIGNlbnNvcnNoaXAGBG9sb3IACWdvdWRvdXNoaQAIaGFyZGNvcmUBBW93IHRvAAppbmNvbXBsZXRlAAtrb2RvbW8gb25seQAN" + "bWlzc2luZyBjb3ZlcgEQb3NhaWMgY2Vuc29yc2hpcAEQdWx0aS13b3JrIHNlcmllcwUOcGFuZWwgc2VxdWVuY2UADm5vIHBlbmV0" + "cmF0aW9uAg9uLWggZ2FtZSBtYW51YWwGCGltYWdlc2V0BARudWRlAgN2ZWwBCnVkaXR5IG9ubHkAFW9iamVjdCBpbnNlcnRpb24g" + "b25seQELdXQgb2Ygb3JkZXIACnBhcGVyY2hpbGQBCGl4ZWwgYXJ0AAhyZWFscG9ybgIEZHJhdwIGcGxhY2VkAQxvdWdoIGdyYW1t" + "YXIGC3RyYW5zbGF0aW9uAAZzYW1wbGUBB2Nhbm1hcmsCCXJlZW5zaG90cwELa2V0Y2ggbGluZXMBCW91c2h1dWhlbgELdGVyZW9z" + "Y29waWMCB29yeSBhcmMACXRhbmtvdWJvbgEIaGVtZWxlc3MBCGltZSBzdG9wAAp1bmNlbnNvcmVkAAt2YXJpYW50IHNldAALd2F0" + "ZXJtYXJrZWQBBmVidG9vbgIIc3Rlcm4gY2cICGltYWdlc2V0CAVub24taAAHeXVra3VyaQhsb2NhdGlvbggAAAAADGJhdGhpbmcg" + "cm9vbQEEZWFjaAAJY2xhc3Nyb29tAAlpbmZpcm1hcnkABW9uc2VuAAVzYXVuYQEFZW50b3UBDHdpbW1pbmcgcG9vbAZwYXJvZHnI" + "AAAAAA5hZHZlbnR1cmUgdGltZQEHbXBoaWJpYQEObmltYWwgY3Jvc3NpbmcBCHJrbmlnaHRzCQkgZW5kZmllbGQBC3RlbGllciBy" + "eXphARh2YXRhciB0aGUgbGFzdCBhaXJiZW5kZXICBmVuZ2VycwEIenVyIGxhbmUADmJha2Vtb25vZ2F0YXJpAghuZyBkcmVhbQIE" + "dG1hbgIHeW9uZXR0YQEFZW4gMTABCGxhY2sgY2F0AgRlYWNoAgp1ZSBhcmNoaXZlAQ5vY2NoaSB0aGUgcm9jawIEcnV0bwARY2Fy" + "ZGNhcHRvciBzYWt1cmEBC2hhaW5zYXcgbWFuAQlvZGUgZ2Vhc3MBCHliZXJwdW5rAAhkYW5kYWRhbgMIZ2Fucm9ucGECCnJrc3Rh" + "bGtlcnMDEmxpbmcgaW4gdGhlIGZyYW54eAIJdGUgYSBsaXZlAQxlYWQgb3IgYWxpdmUCB2x0YXJ1bmUCDXRlY3RpdmUgY29uYW4B" + "BmlnaW1vbgEKcmFnb24gYmFsbAsGIHN1cGVyDAF6BwVxdWVzdAE2dW5nZW9uIG5pIGRlYWkgbyBtb3RvbWVydSBubyB3YSBtYWNo" + "aWdhdHRlaXJ1IGRhcm91IGthAAplbGRlbiByaW5nAQ5xdWVzdHJpYSBnaXJscwAKZmFpcnkgdGFpbAIFbGxvdXQCDnRlIGdyYW5k" + "IG9yZGVyBRlrYWxlaWQgbGluZXIgcHJpc21hIGlsbHlhBQpzdGF5IG5pZ2h0AQxpbmFsIGZhbnRhc3kNBCB2aWkOA3hpdgIJcmUg" + "ZW1ibGVtCwYgZmF0ZXMMDHRocmVlIGhvdXNlcwIUdmUgbmlnaHRzIGF0IGZyZWRkeXMBBXJvemVuARJ1bGxtZXRhbCBhbGNoZW1p" + "c3QADmdlbnNoaW4gaW1wYWN0AQ5pcmxzIGZyb250bGluZQYKdW5kIHBhbnplcgEMb2JsaW4gc2xheWVyAhhjaHV1bW9uIHdhIHVz" + "YWdpIGRlc3Uga2ECFmRkZXNzIG9mIHZpY3Rvcnkgbmlra2UCEnRvdWJ1biBubyBoYW5heW9tZQEPcmFuYmx1ZSBmYW50YXN5Awp2" + "aXR5IGZhbGxzAQp1aWx0eSBnZWFyAgRuZGFtBgUgc2VlZAAEaGFsbwIKcnJ5IHBvdHRlcgIKemJpbiBob3RlbAEIZWxsdGFrZXIE" + "CHV2YSBib3NzAQ1pZ2hzY2hvb2wgZHhkCwtvZiB0aGUgZGVhZAIDbGRhAQdvbG9saXZlAgtua2FpIGdha3VlbgcJc3RhciByYWls" + "ARZ5cGVyZGltZW5zaW9uIG5lcHR1bmlhABdpamlyYW5haWRlIG5hZ2F0b3JvLXNhbgEPbmZpbml0ZSBzdHJhdG9zAgZ1eWFzaGEA" + "Dmp1anV0c3Uga2Fpc2VuAgxzdGljZSBsZWFndWUABGstb24BGWFndXlhLXNhbWEgd2Ega29rdXJhc2V0YWkCEW5vam8gb2thcmlz" + "aGltYXN1Aw50YWkgY29sbGVjdGlvbgENZW1vbm8gZnJpZW5kcwELaWxsIGxhIGtpbGwCCm0gcG9zc2libGUDDWV0c3Ugbm8geWFp" + "YmECDm5nIG9mIGZpZ2h0ZXJzAR9vYmF5YXNoaS1zYW4tY2hpIG5vIG1haWQgZHJhZ29uAgZpa2F0c3UCGW1pLXNhbiB3YSBrb215" + "dXNob3UgZGVzdS4CIm5vIHN1YmFyYXNoaWkgc2VrYWkgbmkgc3l1a3VmdWt1IG8AC2xhc3Qgb3JpZ2luARBlYWd1ZSBvZiBsZWdl" + "bmRzAQhvdmUgbGl2ZQkhIG5pamlnYXNha2kgaGlnaCBzY2hvb2wgaWRvbCBjbHViCghzdW5zaGluZQENeWNvcmlzIHJlY29pbAAb" + "bWFob3Ugc2hvdWpvIGx5cmljYWwgbmFub2hhAglzcyBlZmZlY3QBBmV0cm9pZAEGb25zdGVyBwcgaHVudGVyAQ11c2hva3UgdGVu" + "c2VpAQ95IGhlcm8gYWNhZGVtaWEDH2xpdHRsZSBwb255IGZyaWVuZHNoaXAgaXMgbWFnaWMABm5hcnV0bwEWZW9uIGdlbmVzaXMg" + "ZXZhbmdlbGlvbgEMaWVyIGF1dG9tYXRhAgdqaXNhbmppAAlvbmUgcGllY2UFCHVuY2ggbWFuAStyZSBubyBpbW91dG8gZ2Ega29u" + "bmEgbmkga2F3YWlpIHdha2UgZ2EgbmFpAgZpZ2luYWwBCXNoaSBubyBrbwEHdmVybG9yZAQFd2F0Y2gAInBhbnR5IGFuZCBzdG9j" + "a2luZyB3aXRoIGdhcnRlcmJlbHQBBmVyc29uYQcCIDMIATQIATUBBm9rZW1vbgEKcmV0dHkgY3VyZQIOaW5jZXNzIGNvbm5lY3QB" + "GHVlbGxhIG1hZ2kgbWFkb2thIG1hZ2ljYQAMcXVlZW5zIGJsYWRlAAhyYW5tYSAxMgEkZSB6ZXJvIGthcmEgaGFqaW1lcnUgaXNl" + "a2FpIHNlaWthdHN1AgtzaWRlbnQgZXZpbAIFd3JpdGUBA3dieQALc2FpbG9yIG1vb24BCWNvb2J5LWRvbwEXZW5raSB6ZXNzaG91" + "IHN5bXBob2dlYXIDCnJhbiBrYWd1cmEBBmhhbnRhZQIQaW5nZWtpIG5vIGt5b2ppbgIPb2t1Z2VraSBubyBzb21hARFvbmljIHRo" + "ZSBoZWRnZWhvZwMbbyBiaXNxdWUgZG9sbCB3YSBrb2kgbyBzdXJ1Agl1bGNhbGlidXIDDnNvdSBubyBmcmllcmVuAQlwaWRlci1t" + "YW4CBmxhdG9vbgIKeSB4IGZhbWlseQELc3NzLmdyaWRtYW4BB3RhciBmb3gFFnZzLiB0aGUgZm9yY2VzIG9mIGV2aWwFBHdhcnMC" + "DWV2ZW4gdW5pdmVyc2UCDHJlZXQgZmlnaHRlcgMLaWtlIHdpdGNoZXMBE3VwZXIgbWFyaW8gYnJvdGhlcnMFA21hbgEPd29yZCBh" + "cnQgb25saW5lAA50YWltYW5pbiBhc2FnaQkIeXVraWthemUCGXRlIG5vIHl1dXNoYSBubyBuYXJpYWdhcmkBCmVlbiB0aXRhbnME" + "GGFnZSBtdXRhbnQgbmluamEgdHVydGxlcwIEa2tlbgIYbmdlbiB0b3BwYSBndXJyZW4gbGFnYW5uAxtzZWkgc2hpdGFyYSBzbGlt" + "ZSBkYXR0YSBrZW4BEGhlIGVsZGVyIHNjcm9sbHMEEWZhaXJseSBvZGRwYXJlbnRzBAppZG9sbWFzdGVyBQpuY3JlZGlibGVzBA9s" + "ZWdlbmQgb2Yga29ycmEOBXplbGRhBQlvdWQgaG91c2UEHW1lbGFuY2hvbHkgb2YgaGFydWhpIHN1enVtaXlhBAlvd2wgaG91c2UE" + "CHNpbXBzb25zBAd3aXRjaGVyAQlvIGxvdmUtcnUCC2FydSBwcm9qZWN0AjVraWRva2kgYm9zb3R0byBydXNzaWEtZ28gZGUgZGVy" + "ZXJ1IHRvbmFyaSBubyBhbHlhLXNhbgIJbWIgcmFpZGVyAgx1aG91IHByb2plY3QBCHN1a2loaW1lAAh1bHRyYW1hbgEWbWEgbXVz" + "dW1lIHByZXR0eSBkZXJieQEIbmRlcnRhbGUBFXpha2ktY2hhbiB3YSBhc29iaXRhaQAIdm9jYWxvaWQACXdhcmhhbW1lcgELb25k" + "ZXIgd29tYW4CD3JsZCBvZiB3YXJjcmFmdAEOdXRoZXJpbmcgd2F2ZXMABXgtbWVuARVlbm9ibGFkZSBjaHJvbmljbGVzIDIAMHlh" + "aGFyaSBvcmUgbm8gc2Vpc2h1biBsb3ZlIGNvbWUgd2EgbWFjaGlnYXR0ZWlydQEub3Vrb3NvIGppdHN1cnlva3Ugc2hpam91IHNo" + "dWdpIG5vIGt5b3VzaGl0c3UgZQEHdS1naS1vaAARemVubGVzcyB6b25lIHplcm8BB29vdG9waWEJY2hhcmFjdGVyyAAAAAACMmIA" + "CGFkYSB3b25nARJlcml0aCBnYWluc2Jvcm91Z2gCBHRoZXIBA2hyaQEHa28gYW1hdQEFbGJlZG8CDmljZSBtYXJnYXRyb2lkAQdt" + "eSByb3NlAQluZHJvaWQgMTgCA2dlbAEIcHBsZWphY2sBA3F1YQEJcmxlY2NoaW5vAg90b3JpYSBwZW5kcmFnb24BBnN0b2xmbwIR" + "dWthIGxhbmdsZXkgc29yeXUDC25hIGljaGlub3NlBgV5dXVraQEEdGFnbwENeWEgc2hhbWVpbWFydQMLa2Ega2FtaXNhdG8ADGJh" + "cmJhcmEgcGVnZwIEdG1hbgIHeW9uZXR0YQEEZWxsZQEKb2EgaGFuY29jawEIcmVtZXJ0b24BC3VsbWEgYnJpZWZzAAtjYW1teSB3" + "aGl0ZQEGaGkgY2hpAw5zYXRvIG5pc2hpa2lnaQIFdW4tbGkBBHJvd24BBnludGhpYQAEZC52YQERYXJrIG1hZ2ljaWFuIGdpcmwE" + "BG5lc3MAA2VsZgIHbGVuIGpvZQEFbWlsaWEBC3J6YSBzY2FybGV0AQx1bGEgbGF3cmVuY2UABGZlcm4BBmlyZWZseQEObGFuZHJl" + "IHNjYXJsZXQCCHV0dGVyc2h5AQdvY2Fsb3JzAQZyaWVyZW4ABWdhbnl1AgdyZGV2b2lyAgd3ciBndXJhAQR1ZGFvAQl3ZW4gc3Rh" + "Y3kFCHRlbm55c29uAAxoYXJsZXkgcXVpbm4BBGlsZGECC25hIHNvcmFzYWtpBAh0YSBoeXVnYQIKdG9yaSBnb3RvdQEQb3NoaW1h" + "Y2hpIHN1aXNlaQIMdXNob3UgbWFyaW5lAQV1IHRhbwAXaWxseWFzdmllbCB2b24gZWluemJlcm4BC25vIHlhbWFuYWthAQ16dWt1" + "IG1pZG9yaXlhAAhqYW5lIGRvZQELZWFubmUgYWx0ZXIHBGRhcmMBD2lnb2t1IG5vIGZ1YnVraQIMbGwgdmFsZW50aW5lAgJueAEJ" + "dWR5IGhvcHBzAgZyaSBoYW4ABWthZmthAgJnYQIMcmluIGtha3VkYXRlAgRzdW1pAQVlcWluZwELaW0gcG9zc2libGUCC3Nha2kg" + "cnl1dWdlARFva29taSBzYW5nb25vbWl5YQAKbGFyYSBjcm9mdAEDaW5rAQRvb25hAQ51Y3kgaGVhcnRmaWxpYQIEbWluZQALbWFi" + "ZWwgcGluZXMCCmkgc2hpcmFudWkCDGtpIG5pc2hpa2lubwQCbWECB3JjaCA3dGgDC2luIGtpdGFnYXdhBAtzYSBraXJpc2FtZQIB" + "eQEGZWd1bWluAgNyY3kDBG1haWQBCmlrYSBtaXNvbm8DCm90byBtaXNha2EDCXUgaGF0c3VuZQUGbmFrYW5vAhBsZXMgdGFpbHMg" + "cHJvd2VyAhBuYW1vdG8gbm8gcmFpa291AgNzdHkCDXRzdXJpIGthbnJvamkBDW9tbyB5YW95b3JvenUCC25hIG1lZ2lzdHVzAg9y" + "cmlnYW4gYWVuc2xhbmQABm5haGlkYQICbWkCDHJ1dG8gdXp1bWFraQEJaWNrIHdpbGRlAwdvIHJvYmluBQZ5YXphd2EECWxlIGRl" + "bWFyYQIDbG91AglubyBuYWthbm8ADm9jaGFrbyB1cmFyYWthAQxyaWhpbWUgaW5vdWUAE3BhdGNob3VsaSBrbm93bGVkZ2UBCWlu" + "a2llIHBpZQEEb3dlcgUFIGdpcmwBEHJpbmNlc3MgY2VsZXN0aWEJBGx1bmEJBXBlYWNoCQV6ZWxkYQIGb2R1Y2VyAQN5cmEADXJh" + "aWRlbiBzaG9ndW4DCW5ib3cgZGFzaAIPbmdpa3UgbWF0c3Vtb3RvAgRyaXR5AgN2ZW4BCmVpIGF5YW5hbWkDCm11IGhha3VyZWkC" + "AW0DDGlsaWEgc2NhcmxldAIFbmFtb24CAnplAQtpYXMgZ3JlbW9yeQIIbiB0b3Nha2ECDG8gdHN1a2F0c3VraQEEb2JpbgICc2EC" + "C3VnZSB0aGUgYmF0AQ11bWkgdXNhZ2l5YW1hAAVzYWJlcgIMaWxvciBqdXBpdGVyBwRtYXJzCAZlcmN1cnkIA29vbgcFdmVudXMC" + "C2t1cmEgaGFydW5vBAl5YSBpemF5b2kCCG11cyBhcmFuAgtuYWUga29jaGl5YQEHY2F0aGFjaAEUZW5yaXRzdSBubyB0YXRzdW1h" + "a2kDA3NlaQEFaGVuaGUCBmllbGRlcgMGbWFrYXplAwluamkgaWthcmkECm9idSBrb2Nob3UDD3Jva28gc3VuYW9va2FtaQEKaWx2" + "ZXIgd29sZgERb25pYyB0aGUgaGVkZ2Vob2cBBnBhcmtsZQIIaWRlci1tYW4BB3RhcmZpcmUCDWV2ZW4gdW5pdmVyc2UBDnVndWhh" + "IGtpcmlnYXlhAgdwZXJnaXJsBQNtYW4ABnRhaWhvdQEGZWl0b2t1AQxpZmEgbG9ja2hhcnQBCW9raSBhc3VtYQEFcmFjZXIBBnN1" + "bmFkZQEPd2lsaWdodCBzcGFya2xlAAd2YW1waXJlAQxlbG1hIGRpbmtsZXkBBGlkZWwABHdoaXABCWlkb3dtYWtlcgIDdGNoAQtv" + "bmRlciB3b21hbgAIeWFlIG1pa28CBG1hdG8BBGVsYW4BCW9yIGZvcmdlcgMNdWljaGkgc2hpaG9pbgILdW11IGtvbnBha3UBDHVr" + "YXJpIHlha3VtbwICcmkCCnVrYSBoYXlhc2UABnpvbWJpZQZhcnRpc3TIAAAAAAMwLWcBBGJha2UBBGswajAAHzEgZG90IG1pZ2kg" + "bmkgenVyYXNoaXRlIGt1ZGFzYWkCCGVxdWFscyAyAQQtZ291AQcwLXNoaW9uAgsweWVuIGxvY2tlcgIFOCBnb3UCA2VraQICbW8C" + "A25pbgEDMTAzAQEzAgEuAQI0NAEGOHNhaS00AQJ1cAABMgEJIGVxdWFscyA4AQItZwEBMAECMjIBATMBATQBAjU0AQM4NmMBA2Js" + "cwEPYyBlcXVhbHMgZ2Fsb3JlAQNnb3UBBmwgY29sYQEDbm8uAQF0AAgzMDAwIGtydwEDMTA0AQMyMmcBBDMyOTcBAjQ2AQc1IG1h" + "Y2hpAQk2MG1iIHlhbm8BATgCAmtiAQFlAQRodXJvAQF1AQJ4MwAJNCBjb3Vsb21iAQExAQI0NQEENWFjcAEJN2FnZHJhZ29uAARh" + "ZnJvBARidWxsAQZoZW1hcnUBB2l1ZSBva2EBBGthZ2kDBXRzdWtpAQJscAEFbmRhdmECBWtvbWFuAQZzYW5hZ2kBBHlhbmUAAmJi" + "AQJlYQEEbGluZAIKdWUgc3RyaWtlcgEFb25uaWUCBHNzaGkBB3V0Y2hhLXUABWNsYW1wAgplIG1hc2FoaXJvAQhyYXp5IGRhZAIF" + "aW1zb24CAm9jAQ51dGVzZXh5cm9idXR0cwIDdmllAAZkYWdhc2kCB2lnYWlqaW4CAnRlAQRpa2swAANlbGYBC3JlY3Qgc2F3YXJ1" + "AA1mYW4gbm8gaGl0b3JpAQhlbGxhdHJpeAEJcmVkIHBlcnJ5AQl1ZXRha2lzaGkCBm1paGlrbwIGbmRvc2hpAw5zZXh5ZHJhZ29u" + "YmFsbAIDcnJ5AAlnYXJhYmF0b3oBBmluaGFoYQEFb2JsaW4CCHRvaCBqdWFuAQNyYW4BBXdlZ3dlAARoYWxvAgJyYQEFaW1lbm8D" + "CnVyYSBraXNla2kCBHNhc2kCBHRvbWkBBW9ub2thAgZyb3N1a2UAAmllAQZuYXp1bWECBGNhc2UDCm9nbml0eW1vdXMBBnNoaWtl" + "aQEMdGFiYSBoaXJvc2hpAANqYWICCHkgbmF5bG9yAAZrYWRhdGgCA25vbgIMcm1hIHRhdHN1cm91AghzZSBkYWlraQMDdW1pAQVp" + "cmFyYQIMc2FyYWdpIGd1bm1hAQZvbi1raXQCA3JyYQEHdW5hYm90bwMFb2ljaGkCCXJvaW51IGp1dQQJc3UgZ2F0YXJpAAZsYW1i" + "ZGEBC2VzbGllIGJyb3duAQVpbGl0aAIDbmRhAQdvbGljZXB0AQR1bmNoAANtYWkCAm5hAwlrYWkga2Fpa2ECA3JpbwIEdGVtaQIB" + "eQEJZGEgc3Rhcm91AQJlaQIEbWU1MAIIb3d3aXRobWUBCGljaGlraW5nAgJrbwIFbW9uZWwCAnl1Agl6dXJ5dSBrZWkBBm9ndWRh" + "bgIEbWlqaQEEdXRzdQANbmFrYWppbWEgeXVrYQIGcnVob2RvAQllcm9tYXNoaW4BDmd0dmlzdWFsc3R1ZGlvAQJ1bgAFb2Jvcm8B" + "DGh0b21vIHRha3VqaQADcGFuAQdpZyBraW5nAQlvcml1cmV0YW4ABnJhYmJpdAIJdGF0YXRhdDc0AgN2ZW4BDG9tdWxvIG1hbmNp" + "bgEFdXpoYWkADXNhaGFyYSB3YXRhcnUCBWlnYWRvAgJraQMDdXJhAgtuYnVuIGt5b2RlbgEJaGlndXJlIHVpAwZtYWthemUDBG5k" + "b2wDAm9uAw13YXN1IG5vIG9raW5hAgp1dGVuIGRvdWppAQhpYyBwaHVjawEDb3JhAQZwYXJyb3cADHRha2FzdWdpIGtvdQQDdHN1" + "Aw1lZGEgaGlyb21pdHN1AgZtYWdvcm8BCGVyYXN1IG1jAQdoZSBraXRlAglpY2N3aXRoYXEBCG9tIHNtaXRoAQxzdWtpbm8ganlv" + "Z2kBEHdpc3RlZHNjYXJsZXR0NjABBnlwZS45MAAFdmlja3kCBWt0cmlhAAl4aWVycmEwOTkADHlhaGlybyBwb2NoaQICaXICBm1h" + "bW90bwQCdG8BCnVpZ2EgbmFvaGECC2tpbm8gbWluYXRvAgt6dWtpIG4gZGFzaAAGem91cmlrCWNvc3BsYXllcrMAAAAAFGEgYmFv" + "IHllc2hpIHR1IG5pYW5nAQZiYW42MDUBC2kgbGVpIGppYW5nAghuIG5ndXllbgEMa2FuZSBhcmFyYWdpAgplbWkxMDF4b3hvAQds" + "aWNla3lvAwluYSBiZWNrZXIBB25pbm55YW4BCW9pIG1vbW9rbwEIcXVhIGFyZWEBEHJhc2hpIGhlYXJ0Z3JhbW0CCHR5IGh1YW5n" + "AQV0c3VraQEJeHVuIGthb3JpAQR6YW1pAAxiYWlsaSBzaGlybHkCBm5iYW5rbwMDZ25pAg1vZXIgbXlzdGVyaWFsAwl6b3Vtb3pp" + "YWEBBmxhY3FrbAEEeW9ydQAKY2FvbWVpeXV5aQIHcnJ5IGtleQIKdGljb3JucGxheQMGdGFzaGFhAQpoZXJyeSBuZWtvAgZ1bm1v" + "bW8BC2llbiBjb3NwbGF5ABlkYSBkYSBqdWFuIGp1YW4geGlhbyBqdWFuAQllbW9uIG1pa2EAC2VseSBjb3NwbGF5AQRuYWtvAQly" + "enVvIG5pc2EBBnRzdSBrbwEGdmVuaW5rAA1mYW5ncWlhbyB5ZXBvAQ9lbmcgamlhbmcgamlhbmcBB3Jhbnhjb3MAE2c0NCB3YSBr" + "aXp1dHN1a2FuYWkBEXJlZW4gY2hhY2hhIGppYW5nAQh1YXhpY2hhbgITb3FpIG1peGlhbnhpYW4gbWlhbwAFaGFjaGkCCG5hIGJ1" + "bm55AwVlIGFtZQESZWxseSB2b24gdmFsZW50aW5lAQppZG9yaSByb3NlAQhvc2hpbGlseQEKdWEgcWkgaGFuYQMJbGluZyBoYW5h" + "AAtqZWFuIHdhbndhbgEQaWFvcm91amkgd2Fsa3VyZQIDdXFpBAV1amVhbgMDeWFuAQp1bmtlbnN0ZWluABFrYWd1cmF6YWthIG1h" + "ZnV5dQIJbGlua2EgZm94AgtuZWtvLWthbWlhbwIIdGllY2FrZXkCCHlhIGh1YW5nBQZuaWxzb24BCGlraSByb3NlAgdtbWllIG1p" + "AgpyaWtvIGNlbGlhAgR0YXJvAQZva3VodWkECHJhIGNoaXlvAQZ1dWtvIHcAEWxhcmlzc2Egcm9jaGVmb3J0AQdlbmZyaWVkAQpp" + "bnppIGppYW5nAQZtdXNpY2wBCW9zdHdpbmQxMAIPdmVseXNwYWNla2l0dGVuAQ11ZXIgZGEgbW93YW5nAg1vIHhpYW9saSBtaWFv" + "AgRzdDc3AAVtYWNoaQIGa2FjaGFuAghyaWEgZGVzdQIJc2FrbyB5dW1lAwloaXJvIHl1a2kBCGVubWVudGFuAglyY3VyeWxhbXAC" + "CnNzaWUgaHVhbmcBDmlhbmJpbmcgeGlhbmVyAglrb2ppYW5nd3cECW1pIGhva2luYQINbmF6dWtpIGhpa2FydQINeWFtb3RvIHNh" + "a3VyYQMDb2tpAgl6aGltYW9xaXUBBm9tb2NhdAAGbmEtc2FuAgRnaXNhAgRpdGFvAgVuZ29uZwILdGggc29rb2xvdmEBCmVrb2tv" + "eW9zaGkCBG5la28BCWlhbm5pYW4gZAIEeWV5ZQEIb3JhIGZhd24BBHlha28AC29raXRhIHJpbmthAQRtaW1pAQluaSBoaXRvbWkD" + "D2tzaXlhIHNvZmluaWt1bQEJdG9oYXJhIGFuAAhwZW5rYXJ1aQEEaWdtYQIFcGluYWkBDm90YXRvIGdvZHppbGxhAQl1cmlucHVw" + "cHkADHFpc2lrdWFpIHdpaQIIdWhlIGtlamkACHJha3VyYWt1AgJuMwEFZWZlZW4CAm5nAQxpbmdvIG1pdHN1a2kCBm8tY2hhbgMC" + "a28CBXNzb2Z0AQlvbmdyb25nemkBCnlua2VyYmVsbGUAC3NhZGFrbyBtb21vAgJrdQQGcmEgbm9hAgZuZHUtNjkCCm90b21lIGxv" + "dmUCBHlha28BDWVubHVvIGNhaXR1YW4BCWhhcmtwYXJ0eQINaWthIHhpYW9sdSBsdQMJbWl6dSBuYWdpCAR5dW5vBAZvdHN1a2kD" + "CnJhZ2EgeWFua28DC3p1a3UgaG9uYW1pAg11YW5nIG11IGZ1IHN1AQhpYW8gZGluZwEDb2xhAAh0YW5ndGFuZwINbyBsaWFuZyBh" + "emhhaQEHaW55IGFzYQIKdGkgY29zcGxheQEEb2thcgIKbW95byBqaWFuZwEHc3Vib21pbgMHa2kgZGVzdQMJbm55YW5jaGFuAQ55" + "b3VkdWtpIG1hcnlvdQAHdW1la28gagEGcG1pbmFhAQlydW1pYnVubnkBA3l1eQANdmFsZXJ5IGhpbWVyYQEJZWN0b3JmaXNoAQdp" + "bm5lZ2FsAgxydHVhbCBnZWlzaGEAB3hhbnNvb24BCWlhIHhpYSB6aQIGZGFpZGFpAgZuZyBsYW4BCnVlIHFpLXNhbWEADnlhbWF6" + "YWtpIHJlaW5hAwVpc3VuZwIEbmd5aQIHb3lhb3F3cQEIaW5nIGxpbGkBCXVraSBhc3RyYQIFcmljaGEEBWtvZHhkAgZ1Zm9yaWEA" + "C3podWltaW5neW91BWdyb3VwyAAAAAAQLi4uIG1vdSBpaSBkZXN1LgEBNwEDbWl6AAcwLXBhcnRzAQMwMDABCTEyMzQ1Njc4OQEB" + "MgEGMy0zMjk3AQE0AgRjdXJhAgl0aCBoZWF2ZW4CAXUBBTcyNWNvAQY4NDZuZXQCBGJhc2UBAjk2AAExAQ4wLWppa2FuIHN1aW1p" + "bgMKbWFuIGJhcmlraQIGLjEwbWh6AggwMDAwMDAwMAQCYXADBGFjcmUDB3llbm1vZmECCzIgZ291c2hpdHN1AgQ2Z291AwFtAgRt" + "aWxlAg9wYXNlYyBubyBrYW5hdGECBndhZGF4eAIJeWVuIGpvbmRvAQIxMAMHLWdyb292ZQMBdQIIMSB0b3ViYW4CAjIyAwFrAQcy" + "LWppZ2VuAgNjdXQCCGthZmZlaW5zAQEzAgJjbQEMNDBrbSBzbGFzaCBoAgQ4YnBtAgZsb2xpdGEBBzUyaGVydHoBBTYgc2FpAgcw" + "MDAgYWxsAgVrZW5tZQEKNzU2IHN0dWRpbwICODcCAmluAgF3AQ44MG1pbGxpIGNhbm5vbgMBcgIBMwIHNSBzb3VrbwIKNyBzZWli" + "dXRzdQIGbWFzdGVyAQc5bGxkZGtrAQNiaXQBBGdheWEBA29yOAAHMiBjYXJhdAEIMCBwbHVzIDECETAwa2NhbCBzaGFrZSBjbHVi" + "AgEzAgs5IGdvdXNoaXRzdQIGbGlxdWlkAgJudAICcjACBnR3ZW50eQEFMy40ZG8CCDExNzlyb2NrAQY0IHBhZ2UCBjEgaW5jLgEK" + "NTBwb25vcm9qaQEBNwICM2sBAzk2MQICOTABAWIBBWN2LnNzAQpkIGNyZWF0aXZlAgUtbm90ZQEBaAEIamltdXN1YmkBAW0BAm5k" + "AwUgbGlmZQEHcC1jb2xvcgEGc3Ryb2tlAQl0YWlscXVlZW4BAnZzAQV6aWdlbgAMMyBjb2xvcnMgY2F0CgVvcm9uYQIFb24gMTAB" + "CC0yIGdhZ2VuAgdtZWdhLm5lAQguNXRvdXNpbgEhMCBrb3VoYW4ga2FyYSBoYWppbWVydSBlcm8gZG91amluAgMwY20CCzEgZ291" + "c2hpdHN1AgttaW4tNTAwMHllbgEIMTA0dHlvbWUBBTIwYnBtAgMxZ28BAjMzAQw2MCBkZWdyZWVzIGMCAWsBATgCBC41IGMCBXNo" + "aWtpAQQ5ZG1wAgV4cmVhbQEGZCBsaXZlAgF0AQNlZ2cBA2pvdQEEbGJveAAINC41c3BhY2UBCTAwMTAgMS1nbwICNDACBmRlbmll" + "cgEKMzRub3Rmb3VuZAEINjQ5IGNsdWIBAjcxAgJzcAEJYy1mYW50YXN5AQNkaXABAWgCBGFuZHMBDGsgc2Vpc2FrdXNobwEJb3I1" + "IHdvcmtzAQZzZWFzb24CC3QgaW5qZWN0aW9uAAQ1IDA2AgdzbGFzaCA0AQswIHNlaWtpIHNleAAHYWhlbWFydQEOa2F0c3VraSBz" + "b3VrZW4BEmxpY2Ugbm8gdGFrYXJhYmFrbwACYmIBCGxhY2sgZG9nBQZud2hpdGUDAnplAgVvc3NvbQAIY2F0dGxleWEBCGhyaXN0" + "bWFzAQVpcGhlcgEFbGVzdGEBBnJpbXNvbgIDb3duAQZ5Y2xvbmUCBW50aGlhAA1kaWdpdGFsIGxvdmVyAQZtbS5jb20AA2VsZgAK" + "ZmF0YWxwdWxzZQEGaXJlZmx5AAVnaG9zdAEGbGFzc2VzAAVoYXJlbQMEbmVzcwEIZW50YWlrZXkBBWliaWtpAAxsYXBpcyBsYXp1" + "bGkBBWlsaXRoAQxvbGl0YWNoYW5uZWwABG1hbmECAXkBAmVpAgx0cm9iYXkgY29taXgBBGlzdHkBBm9ub2V5ZQAKbmFydWhvLWRv" + "dQEPb3JhbmVrby1uby10YW1hAQJ1bgIEdGFrdQAFb2Jvcm8BB3lha29kb24ACHBhbGNvbWl4AgdudHlob3NlAQVvaXNvbgAGcmFi" + "Yml0AQZlYmVjY2EAB3NhaWdhZG8BB2hhZ2Jhc2UCBmltYXBhbgEKaWxlbnQgaGlsbAEEbGF2ZQEFdGVsbGECA29ybQEGdXp1cmFu" + "BAJ5YQAEdGFpbAEFb21ib3kABXZlbm9tAAh5YW1hbW90bwhsYW5ndWFnZVcAAAAACWFmcmlrYWFucwEHbGJhbmlhbgEFcmFiaWMD" + "BG1haWMCBm1lbmlhbgAHYmVuZ2FsaQEGb3NuaWFuAQh1bGdhcmlhbgIFcm1lc2UAB2NhdGFsYW4BBmVidWFubwEGaGluZXNlAQNy" + "ZWUDA29sZQIGb2F0aWFuAQR6ZWNoAAZkYW5pc2gBBHV0Y2gAB2VuZ2xpc2gBCHNwZXJhbnRvAgZ0b25pYW4AB2Zpbm5pc2gBBXJl" + "bmNoAAhnZW9yZ2lhbgIEcm1hbgEEcmVlawEHdWphcmF0aQAGaGVicmV3AQRpbmRpAQRtb25nAQh1bmdhcmlhbgAJaWNlbGFuZGlj" + "AQluZG9uZXNpYW4BBHJpc2gBBnRhbGlhbgAIamFwYW5lc2UCBnZhbmVzZQAHa2FubmFkYQIEemFraAEEaG1lcgEFb3JlYW4BBnVy" + "ZGlzaAAGbGFkaW5vAgFvAgN0aW4DBHZpYW4AB21hcmF0aGkBCG9uZ29saWFuAAduZGViZWxlAQVlcGFsaQEIb3J3ZWdpYW4ABW9y" + "b21vAApwYXBpYW1lbnRvAgRzaHRvAQZlcnNpYW4BBW9saXNoAghydHVndWVzZQEGdW5qYWJpAAdyZXdyaXRlAQdvbWFuaWFuAQZ1" + "c3NpYW4ABXNhbmdvAwVza3JpdAEGZXJiaWFuAQRob25hAQVsb3ZhawQFZW5pYW4BBW9tYWxpAQZwYW5pc2gBBndhaGlsaQIFZWRp" + "c2gAB3RhZ2Fsb2cCA21pbAEFZWx1Z3UCCnh0IGNsZWFuZWQEDmxlc3MgbmFycmF0aXZlAQNoYWkBBmliZXRhbgIGZ3JpbnlhAQly" + "YW5zbGF0ZWQBBnVya2lzaAAJdWtyYWluaWFuAQNyZHUACnZpZXRuYW1lc2UABXdlbHNoAAd5aWRkaXNoAAR6dWx1B3JlY2xhc3ML" + "AAAAAAhhcnRpc3RjZwEIc2lhbnBvcm4AB2Nvc3BsYXkACWRvdWppbnNoaQAGZ2FtZWNnAAhpbWFnZXNldAAFbWFuZ2EBA2lzYwAF" + "bm9uLWgAB3ByaXZhdGUAB3dlc3Rlcm4=";
+
+  // src/tags/index-codec.ts
+  var MAGIC = [69, 72, 84, 73];
+  var FORMAT_VERSION = 1;
+  var HEADER_BYTES = 7;
+  var MAX_NAMESPACES = 128;
+  var MAX_KEYS_PER_NAMESPACE = 200000;
+  var MAX_KEY_BYTES = 4096;
+  function readVarint(bytes, offset) {
+    let value = 0;
+    let shift = 0;
+    let position = offset;
+    while (position < bytes.length && shift <= 21) {
+      const byte = bytes[position];
+      position++;
+      if (byte === undefined) {
+        return null;
+      }
+      value |= (byte & 127) << shift;
+      if ((byte & 128) === 0) {
+        return { value, next: position };
+      }
+      shift += 7;
+    }
+    return null;
+  }
+  function decodeTagVocabulary(bytes) {
+    if (bytes.length < HEADER_BYTES) {
+      return null;
+    }
+    for (let index = 0;index < MAGIC.length; index++) {
+      if (bytes[index] !== MAGIC[index]) {
+        return null;
+      }
+    }
+    if (bytes[4] !== FORMAT_VERSION) {
+      return null;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const namespaceCount = view.getUint16(5, true);
+    if (namespaceCount === 0 || namespaceCount > MAX_NAMESPACES) {
+      return null;
+    }
+    let offset = HEADER_BYTES;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const groups = new Map;
+    try {
+      for (let groupIndex = 0;groupIndex < namespaceCount; groupIndex++) {
+        if (offset >= bytes.length) {
+          return null;
+        }
+        const idLength = bytes[offset];
+        offset++;
+        if (idLength === undefined || idLength === 0 || offset + idLength + 4 > bytes.length) {
+          return null;
+        }
+        const namespace = decoder.decode(bytes.subarray(offset, offset + idLength));
+        offset += idLength;
+        const keyCount = view.getUint32(offset, true);
+        offset += 4;
+        if (keyCount > MAX_KEYS_PER_NAMESPACE) {
+          return null;
+        }
+        const keys = [];
+        let previous = "";
+        for (let keyIndex = 0;keyIndex < keyCount; keyIndex++) {
+          if (offset >= bytes.length) {
+            return null;
+          }
+          const prefix = bytes[offset];
+          offset++;
+          const length = readVarint(bytes, offset);
+          if (prefix === undefined || length === null) {
+            return null;
+          }
+          offset = length.next;
+          if (prefix > previous.length || length.value > MAX_KEY_BYTES || offset + length.value > bytes.length) {
+            return null;
+          }
+          const suffix = decoder.decode(bytes.subarray(offset, offset + length.value));
+          offset += length.value;
+          const key = previous.slice(0, prefix) + suffix;
+          if (key === "") {
+            return null;
+          }
+          keys.push(key);
+          previous = key;
+        }
+        groups.set(namespace, keys);
+      }
+    } catch {
+      return null;
+    }
+    return offset === bytes.length ? groups : null;
+  }
+
+  // src/tags/core.ts
+  var groups;
+  function coreVocabularyGroups() {
+    if (groups !== undefined) {
+      return groups;
+    }
+    const bytes = bytesFromBase64(CORE_VOCABULARY_BASE64);
+    groups = bytes === null ? null : decodeTagVocabulary(bytes);
+    return groups;
+  }
+
   // src/tags/mirror.ts
   var ASSET_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   var ASSET_RETRY_MS = 60 * 60 * 1000;
@@ -5342,9 +5738,9 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/tags/tag-counts-codec.ts
-  var MAGIC = [66, 69, 84, 67];
+  var MAGIC2 = [66, 69, 84, 67];
   var VERSION5 = 1;
-  var HEADER_BYTES = 11;
+  var HEADER_BYTES2 = 11;
   var ENTRY_BYTES = 6;
   var QUANT_MAX = 255;
   function hash32(key, seed) {
@@ -5368,11 +5764,11 @@ ${defaultKeySummary()}`)) {
     return Math.round(Math.expm1(quantized / QUANT_MAX * Math.log1p(max)));
   }
   function decodeTagCountsFromBytes(bytes) {
-    if (bytes.length < HEADER_BYTES) {
+    if (bytes.length < HEADER_BYTES2) {
       return null;
     }
-    for (let index = 0;index < MAGIC.length; index++) {
-      if (bytes[index] !== MAGIC[index]) {
+    for (let index = 0;index < MAGIC2.length; index++) {
+      if (bytes[index] !== MAGIC2[index]) {
         return null;
       }
     }
@@ -5382,12 +5778,12 @@ ${defaultKeySummary()}`)) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const max = view.getUint32(5, true);
     const entryCount = view.getUint16(9, true);
-    if (max <= 0 || bytes.length !== HEADER_BYTES + entryCount * ENTRY_BYTES) {
+    if (max <= 0 || bytes.length !== HEADER_BYTES2 + entryCount * ENTRY_BYTES) {
       return null;
     }
     const counts = new Map;
     for (let index = 0;index < entryCount; index++) {
-      const offset = HEADER_BYTES + index * ENTRY_BYTES;
+      const offset = HEADER_BYTES2 + index * ENTRY_BYTES;
       const id = (bytes[offset] ?? 0) + (bytes[offset + 1] ?? 0) * 256 + (bytes[offset + 2] ?? 0) * 65536 + (bytes[offset + 3] ?? 0) * 16777216 + (bytes[offset + 4] ?? 0) * 4294967296;
       const quantized = bytes[offset + 5] ?? 0;
       counts.set(id, dequantiseCount(quantized, max));
@@ -5449,101 +5845,6 @@ ${defaultKeySummary()}`)) {
   }
   function loadTagCounts(force = false) {
     return countsSnapshot.load(force).then((cached) => cached?.counts ?? null);
-  }
-
-  // src/tags/index-codec.ts
-  var MAGIC2 = [69, 72, 84, 73];
-  var FORMAT_VERSION = 1;
-  var HEADER_BYTES2 = 7;
-  var MAX_NAMESPACES = 128;
-  var MAX_KEYS_PER_NAMESPACE = 200000;
-  var MAX_KEY_BYTES = 4096;
-  function readVarint(bytes, offset) {
-    let value = 0;
-    let shift = 0;
-    let position = offset;
-    while (position < bytes.length && shift <= 21) {
-      const byte = bytes[position];
-      position++;
-      if (byte === undefined) {
-        return null;
-      }
-      value |= (byte & 127) << shift;
-      if ((byte & 128) === 0) {
-        return { value, next: position };
-      }
-      shift += 7;
-    }
-    return null;
-  }
-  function decodeTagVocabulary(bytes) {
-    if (bytes.length < HEADER_BYTES2) {
-      return null;
-    }
-    for (let index = 0;index < MAGIC2.length; index++) {
-      if (bytes[index] !== MAGIC2[index]) {
-        return null;
-      }
-    }
-    if (bytes[4] !== FORMAT_VERSION) {
-      return null;
-    }
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const namespaceCount = view.getUint16(5, true);
-    if (namespaceCount === 0 || namespaceCount > MAX_NAMESPACES) {
-      return null;
-    }
-    let offset = HEADER_BYTES2;
-    const decoder = new TextDecoder("utf-8", { fatal: true });
-    const groups = new Map;
-    try {
-      for (let groupIndex = 0;groupIndex < namespaceCount; groupIndex++) {
-        if (offset >= bytes.length) {
-          return null;
-        }
-        const idLength = bytes[offset];
-        offset++;
-        if (idLength === undefined || idLength === 0 || offset + idLength + 4 > bytes.length) {
-          return null;
-        }
-        const namespace = decoder.decode(bytes.subarray(offset, offset + idLength));
-        offset += idLength;
-        const keyCount = view.getUint32(offset, true);
-        offset += 4;
-        if (keyCount > MAX_KEYS_PER_NAMESPACE) {
-          return null;
-        }
-        const keys = [];
-        let previous = "";
-        for (let keyIndex = 0;keyIndex < keyCount; keyIndex++) {
-          if (offset >= bytes.length) {
-            return null;
-          }
-          const prefix = bytes[offset];
-          offset++;
-          const length = readVarint(bytes, offset);
-          if (prefix === undefined || length === null) {
-            return null;
-          }
-          offset = length.next;
-          if (prefix > previous.length || length.value > MAX_KEY_BYTES || offset + length.value > bytes.length) {
-            return null;
-          }
-          const suffix = decoder.decode(bytes.subarray(offset, offset + length.value));
-          offset += length.value;
-          const key = previous.slice(0, prefix) + suffix;
-          if (key === "") {
-            return null;
-          }
-          keys.push(key);
-          previous = key;
-        }
-        groups.set(namespace, keys);
-      }
-    } catch {
-      return null;
-    }
-    return offset === bytes.length ? groups : null;
   }
 
   // src/tags/db.ts
@@ -5662,6 +5963,14 @@ ${defaultKeySummary()}`)) {
     const index = decodeIndex(stored.payload, stored.updated, counts?.counts);
     return index ? { value: { index, counts }, updated: stored.updated } : null;
   }
+  var core;
+  function coreIndex() {
+    if (core === undefined) {
+      const groups = coreVocabularyGroups();
+      core = groups === null ? null : buildTagIndexFromGroups(groups, 0);
+    }
+    return core;
+  }
   async function fetchVocabulary() {
     const { value } = await fetchAsset(INDEX_URLS, decodeTagVocabulary, {
       label: "Tag index mirror",
@@ -5708,12 +6017,26 @@ ${defaultKeySummary()}`)) {
   }
   onTagCountsChange(applyTagCounts);
   function getTagIndex() {
-    return indexSnapshot.get()?.index ?? null;
+    return indexSnapshot.get()?.index ?? coreIndex();
   }
   async function loadTagIndex(force = false) {
     loadTagCounts().catch((error) => {
       warn("Tag popularity refresh failed", error);
     });
+    if (!force) {
+      const cached = indexSnapshot.get();
+      if (cached) {
+        const loaded = await indexSnapshot.load(false);
+        return loaded?.index ?? cached.index;
+      }
+      const fallback = coreIndex();
+      if (fallback) {
+        indexSnapshot.load(false).catch((error) => {
+          warn("Tag index background download failed", error);
+        });
+        return fallback;
+      }
+    }
     const loaded = await indexSnapshot.load(force);
     if (!loaded) {
       throw new Error("Could not load the tag index");
@@ -7536,42 +7859,15 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/data/my-tags.ts
+  var DEFAULT_WEIGHT2 = 10;
   function normalizeName(name) {
     return name.replace(/\s+/gu, " ").trim().toLowerCase();
   }
-  function normalizeColor(color) {
-    if (color === null || color === undefined) {
-      return "";
+  function normalizeWeight(weight) {
+    if (weight === null || weight === undefined || !Number.isFinite(weight)) {
+      return DEFAULT_WEIGHT2;
     }
-    const value = color.trim().replace(/^#/, "");
-    return /^[0-9a-f]{3}(?:[0-9a-f]{3})?$/iu.test(value) ? `#${value.toLowerCase()}` : "";
-  }
-  function parseUserTags(doc) {
-    const tags = [];
-    for (const block of doc.querySelectorAll("#usertags_outer > div[id^='usertag_']")) {
-      const rawId = block.id.slice("usertag_".length);
-      const id = Number.parseInt(rawId, 10);
-      if (!Number.isFinite(id) || id <= 0) {
-        continue;
-      }
-      const preview = block.querySelector(`#tagpreview_${id}`);
-      const name = preview?.getAttribute("title")?.trim() ?? "";
-      if (name === "") {
-        continue;
-      }
-      const colorInput = block.querySelector(`#tagcolor_${id}`);
-      const weightInput = block.querySelector(`#tagweight_${id}`);
-      const weight = Number.parseInt(weightInput?.value ?? "", 10);
-      tags.push({
-        id,
-        name,
-        watched: isChecked(block.querySelector(`#tagwatch_${id}`)),
-        hidden: isChecked(block.querySelector(`#taghide_${id}`)),
-        color: normalizeColor(colorInput?.value ?? ""),
-        weight: Number.isFinite(weight) ? weight : 10
-      });
-    }
-    return tags;
+    return Math.min(99, Math.max(-99, Math.round(weight)));
   }
   function throwIfFailed2(data) {
     if (typeof data === "object" && data !== null && "error" in data) {
@@ -7598,12 +7894,18 @@ ${defaultKeySummary()}`)) {
     if (name === "") {
       throw new Error("Missing tag name.");
     }
-    const response = await deps.loadDocument(deps.myTagsUrl, { fresh: true, signal: deps.signal });
+    let existing = deps.existing;
+    if (existing === undefined) {
+      const response = await deps.loadDocument(deps.myTagsUrl, { fresh: true, signal: deps.signal });
+      if (deps.signal?.aborted) {
+        return "updated";
+      }
+      existing = parseUserTags(response.doc).find((entry) => normalizeName(entry.name) === name);
+    }
     if (deps.signal?.aborted) {
       return "updated";
     }
-    const existing = parseUserTags(response.doc).find((entry) => normalizeName(entry.name) === name);
-    if (existing) {
+    if (existing !== undefined) {
       let watched = change.watched ?? existing.watched;
       let hidden = change.hidden ?? existing.hidden;
       if (change.watched === true) {
@@ -7614,7 +7916,8 @@ ${defaultKeySummary()}`)) {
       const next = {
         watched,
         hidden,
-        color: change.color === undefined ? existing.color : normalizeColor(change.color)
+        color: change.color === undefined ? existing.color : normalizeColor(change.color),
+        weight: change.weight === undefined ? existing.weight : normalizeWeight(change.weight)
       };
       const post = deps.post ?? ((url, body) => postTagJson(url, body, deps.signal));
       const data = await post(deps.config.apiUrl, {
@@ -7625,15 +7928,16 @@ ${defaultKeySummary()}`)) {
         tagwatch: next.watched ? 1 : 0,
         taghide: next.hidden ? 1 : 0,
         tagcolor: next.color,
-        tagweight: existing.weight
+        tagweight: next.weight
       });
       throwIfFailed2(data);
       return "updated";
     }
+    const weight = change.weight === undefined ? DEFAULT_WEIGHT2 : normalizeWeight(change.weight);
     const body = new URLSearchParams({
       usertag_action: "add",
       tagname_new: name,
-      tagweight_new: "10",
+      tagweight_new: String(weight),
       usertag_target: "0"
     });
     if (change.watched === true) {
@@ -8883,12 +9187,7 @@ ${defaultKeySummary()}`)) {
       });
     }
     if (torrentsHref !== null) {
-      items.push({
-        label: "Torrent Download",
-        href: torrentsHref,
-        native: true,
-        popup: { width: 610, height: 590 }
-      });
+      items.push({ label: "Torrent Download", href: torrentsHref });
     }
     if (reportHref !== null) {
       items.push({ label: "Report Gallery", href: reportHref, native: true });
@@ -9317,6 +9616,181 @@ ${defaultKeySummary()}`)) {
     });
   }
 
+  // src/data/gallery-torrents.ts
+  function fieldPairs(table) {
+    const fields = new Map;
+    for (const row of table.querySelectorAll("tr")) {
+      const cells = [...row.children].filter((cell) => cell.tagName === "TD");
+      for (let index = 0;index + 1 < cells.length; index += 2) {
+        const label = cleanText(cells[index]?.textContent).toLowerCase();
+        if (label !== "") {
+          fields.set(label, cleanText(cells[index + 1]?.textContent));
+        }
+      }
+    }
+    return fields;
+  }
+  function labeledHref(root, label, base) {
+    for (const anchor of root.querySelectorAll("a[href]")) {
+      if (label.test(cleanText(anchor.textContent))) {
+        const href = anchorHref(anchor, base);
+        if (href !== null) {
+          return href;
+        }
+      }
+    }
+    return null;
+  }
+  function parseTorrentInfo(doc, base) {
+    const container = doc.getElementById("torrentinfo");
+    const table = container?.querySelector("#ett") ?? null;
+    if (container === null || table === null) {
+      return null;
+    }
+    const fields = fieldPairs(table);
+    return {
+      name: cleanText(container.querySelector("h1")?.textContent),
+      posted: fields.get("posted") ?? "",
+      size: fields.get("size") ?? "",
+      seeds: parseNumber(fields.get("seeds")) ?? 0,
+      peers: parseNumber(fields.get("dlers")) ?? 0,
+      completes: parseNumber(fields.get("completes")) ?? 0,
+      uploader: fields.get("uploader") ?? "",
+      personalizedHref: labeledHref(container, /personalized/iu, base),
+      redistributableHref: labeledHref(container, /redistributable/iu, base),
+      comments: cleanText(container.querySelector("#etd")?.textContent)
+    };
+  }
+  async function loadTorrentInfo(pageUrl, gtid, signal) {
+    const response = await postForm(pageUrl, new URLSearchParams({ gtid, torrent_info: "Information" }), {
+      tag: "gallery-torrents",
+      failure: "Torrent information request failed",
+      signal
+    });
+    const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+    const info = parseTorrentInfo(doc, pageUrl);
+    if (info === null) {
+      throw new Error("The torrent information could not be read.");
+    }
+    return info;
+  }
+
+  // src/views/gallery-torrents.ts
+  function metaItem(label, value) {
+    return el("div", { class: "gallery-torrent-meta-item" }, el("span", { class: "gallery-torrent-meta-label", text: label }), el("span", { class: "gallery-torrent-meta-value", text: value === "" ? "—" : value }));
+  }
+  function infoRow(label, href) {
+    return el("div", { class: "gallery-torrent-info-row" }, el("span", { class: "gallery-torrent-info-label", text: label }), href === null ? el("span", { class: "gallery-torrent-info-unavailable", text: "Not available" }) : el("a", {
+      class: "gallery-torrent-info-link",
+      href,
+      rel: "nofollow",
+      text: "Download torrent"
+    }));
+  }
+  function infoNodes(info) {
+    const nodes = [];
+    nodes.push(el("div", { class: "gallery-torrent-info" }, infoRow("Personalized torrent", info.personalizedHref), infoRow("Redistributable torrent", info.redistributableHref)));
+    if (info.comments !== "") {
+      nodes.push(el("p", { class: "gallery-torrent-comments", text: info.comments }));
+    }
+    return nodes;
+  }
+  function loadingPanel() {
+    return el("div", { class: "gallery-torrent-details", "aria-busy": "true" }, el("p", { class: "gallery-torrent-loading", text: "Loading torrent details…" }));
+  }
+  function torrentCard(page, torrent, ctx, loadInfo) {
+    const name = torrent.name === "" ? "Torrent" : torrent.name;
+    const title = torrent.downloadHref === null ? el("span", { class: "gallery-torrent-name", text: name }) : el("a", {
+      class: "gallery-torrent-name",
+      href: torrent.downloadHref,
+      rel: "nofollow",
+      title: name,
+      text: name
+    });
+    const detailsSlot = el("div", { class: "gallery-torrent-details-slot", hidden: "" });
+    const button = el("button", {
+      class: "btn btn-small gallery-torrent-details-button",
+      type: "button",
+      "aria-expanded": "false",
+      text: "Details"
+    });
+    let requested = false;
+    let open = false;
+    const show = (visible) => {
+      open = visible;
+      detailsSlot.toggleAttribute("hidden", !visible);
+      button.setAttribute("aria-expanded", String(visible));
+      button.textContent = visible ? "Hide details" : "Details";
+    };
+    button.addEventListener("click", () => {
+      if (requested) {
+        show(!open);
+        return;
+      }
+      requested = true;
+      show(true);
+      button.disabled = true;
+      const panel = loadingPanel();
+      detailsSlot.replaceChildren(panel);
+      loadInfo(page.url, torrent.gtid, ctx.signal).then((info) => {
+        if (ctx.signal.aborted) {
+          return;
+        }
+        panel.removeAttribute("aria-busy");
+        panel.replaceChildren(...infoNodes(info));
+        button.disabled = false;
+      }, (error) => {
+        if (ctx.signal.aborted) {
+          return;
+        }
+        panel.removeAttribute("aria-busy");
+        panel.replaceChildren(el("p", {
+          class: "gallery-torrent-error",
+          role: "alert",
+          text: errorText(error, "Torrent details could not be loaded.")
+        }));
+        button.disabled = false;
+      });
+    }, { signal: ctx.signal });
+    return el("article", { class: "gallery-torrent-card" }, el("div", { class: "gallery-torrent-head" }, title, button), el("div", { class: "gallery-torrent-meta" }, metaItem("Posted", torrent.posted), metaItem("Size", torrent.size), metaItem("Seeds", String(torrent.seeds)), metaItem("Peers", String(torrent.peers)), metaItem("Downloads", String(torrent.downloads)), metaItem("Uploader", torrent.uploader)), detailsSlot);
+  }
+  function backLink(page) {
+    if (page.galleryHref === null) {
+      return null;
+    }
+    return el("a", {
+      class: "gallery-torrents-back",
+      href: page.galleryHref,
+      text: "Back to gallery"
+    });
+  }
+  function renderGalleryTorrents(host, data, ctx, deps = {}) {
+    host.replaceChildren();
+    const loadInfo = deps.loadInfo ?? loadTorrentInfo;
+    const root = el("div", { id: "gallery-torrents", class: "gallery-torrents" }, siteNav(ctx.signal));
+    root.append(listHeader({
+      title: data.title === "" ? "Gallery torrents" : data.title,
+      summary: [el("span", { text: countText(data.torrents.length, "torrent") })]
+    }));
+    const back = backLink(data);
+    if (back !== null) {
+      root.append(back);
+    }
+    if (data.torrents.length === 0) {
+      root.append(statePanel({
+        text: "No torrents were found for this gallery.",
+        actions: [nativePageAction()]
+      }));
+    } else {
+      const list = el("div", { class: "gallery-torrent-list" });
+      for (const torrent of data.torrents) {
+        list.append(torrentCard(data, torrent, ctx, loadInfo));
+      }
+      root.append(list);
+    }
+    host.append(root);
+  }
+
   // src/data/list-seek.ts
   function seekHref(baseUrl, value) {
     const target = new URL(baseUrl);
@@ -9533,6 +10007,9 @@ ${defaultKeySummary()}`)) {
     if (query.pageFrom.trim() || query.pageTo.trim()) {
       count++;
     }
+    if (isDateRangeActive({ since: query.since, until: query.until })) {
+      count++;
+    }
     return count;
   }
   function relaxedCount(query) {
@@ -9575,6 +10052,24 @@ ${defaultKeySummary()}`)) {
       value: query.pageTo,
       "aria-label": "Maximum pages"
     });
+    const sinceDate = el("input", {
+      class: "field-input",
+      type: "date",
+      placeholder: "YYYY-MM-DD",
+      title: "Show galleries posted on or after this day",
+      value: query.since,
+      "aria-label": "Posted since",
+      style: "width: 10rem"
+    });
+    const untilDate = el("input", {
+      class: "field-input",
+      type: "date",
+      placeholder: "YYYY-MM-DD",
+      title: "Show galleries posted on or before this day",
+      value: query.until,
+      "aria-label": "Posted until",
+      style: "width: 10rem"
+    });
     const checkbox = (label, checked) => {
       const input = el("input", { type: "checkbox", checked: checked ? "checked" : null });
       return {
@@ -9593,6 +10088,8 @@ ${defaultKeySummary()}`)) {
         rating: Number.parseInt(rating.read(), 10) || 0,
         pageFrom: pageFrom.value,
         pageTo: pageTo.value,
+        since: sinceDate.value,
+        until: untilDate.value,
         expunged: expunged.input.checked,
         torrent: torrent.input.checked,
         disableLanguage: disableLanguage.input.checked,
@@ -9614,6 +10111,8 @@ ${defaultKeySummary()}`)) {
         rating: 0,
         pageFrom: "",
         pageTo: "",
+        since: "",
+        until: "",
         expunged: false,
         torrent: false,
         disableLanguage: false,
@@ -9623,7 +10122,7 @@ ${defaultKeySummary()}`)) {
       saveListFilters(next);
       ctx.navigate(buildSearchUrl(next));
     }, { signal: ctx.signal });
-    const form = el("form", { class: "filters-grid" }, el("label", { class: "field" }, el("span", { text: "Minimum rating" }), rating.element), el("div", { class: "field" }, el("span", { text: "Page count" }), el("div", { class: "field-row" }, pageFrom, el("span", { text: "to" }), pageTo)), el("div", { class: "check-row" }, expunged.wrapper, torrent.wrapper), el("div", { class: "check-row" }, disableLanguage.wrapper, disableUploader.wrapper, disableTags.wrapper), el("div", { class: "filters-actions" }, activeCount > 0 ? reset : null, applyButton, el("a", {
+    const form = el("form", { class: "filters-grid" }, el("label", { class: "field" }, el("span", { text: "Minimum rating" }), rating.element), el("div", { class: "field" }, el("span", { text: "Page count" }), el("div", { class: "field-row" }, pageFrom, el("span", { text: "to" }), pageTo)), el("label", { class: "field" }, el("span", { text: "Posted since" }), sinceDate), el("label", { class: "field" }, el("span", { text: "Posted until" }), untilDate), el("div", { class: "check-row" }, expunged.wrapper, torrent.wrapper), el("div", { class: "check-row" }, disableLanguage.wrapper, disableUploader.wrapper, disableTags.wrapper), el("div", { class: "filters-actions" }, activeCount > 0 ? reset : null, applyButton, el("a", {
       class: "filters-native",
       href: `https://upld.${location.hostname}/image_lookup.php`,
       "data-native": "",
@@ -9676,13 +10175,26 @@ ${defaultKeySummary()}`)) {
     ctx.signal.addEventListener("abort", unsubscribe, { once: true });
     const narrow = narrowCount(urlQuery);
     const relaxed = relaxedCount(urlQuery);
+    const range = { since: urlQuery.since, until: urlQuery.until };
+    const rangeActive = isDateRangeActive(range);
+    const filtered = rangeActive ? filterByDateRange(data.items, range) : null;
+    const shownItems = filtered?.items ?? data.items;
+    const crossedSince = filtered?.crossedSince ?? false;
+    let nextHref = data.nextHref;
+    if (rangeActive) {
+      nextHref = nextHref !== null && !crossedSince ? withDateRange(nextHref, range) : null;
+    }
     const countNode = el("span", {
-      text: data.resultText ?? countText(data.items.length, "item")
+      text: rangeActive ? `${shownItems.length} shown` : data.resultText ?? countText(data.items.length, "item")
     });
     const header = listHeader({
       title: listLabels(urlQuery, scope, pathTag).heading,
       summary: [
         countNode,
+        rangeActive ? el("span", {
+          class: "badge date-filter-note",
+          text: "Approximate while filtered."
+        }) : null,
         narrow > 0 ? el("span", { class: "badge", text: countText(narrow, "filter") }) : null,
         relaxed > 0 ? el("span", {
           class: "badge",
@@ -9697,10 +10209,13 @@ ${defaultKeySummary()}`)) {
     });
     const panel = el("section", { class: "search-panel" }, categoryChips(draftQuery, ctx), quickTags.element, advancedPanel(draftQuery, ctx));
     const grid = createCardGrid(ctx.signal);
-    grid.append(data.items.map((item) => resultCard(item, ctx.signal, { preview: true })));
+    grid.append(shownItems.map((item) => resultCard(item, ctx.signal, { preview: true })));
     const syncCount = () => {
-      if (data.resultText === null) {
-        countNode.textContent = countText(grid.element.querySelectorAll(".card").length, "item");
+      const cards = grid.element.querySelectorAll(".card").length;
+      if (rangeActive) {
+        countNode.textContent = `${cards} shown`;
+      } else if (data.resultText === null) {
+        countNode.textContent = countText(cards, "item");
       }
     };
     const footer = el("div");
@@ -9714,6 +10229,8 @@ ${defaultKeySummary()}`)) {
         torrent: false,
         pageFrom: "",
         pageTo: "",
+        since: "",
+        until: "",
         disableLanguage: false,
         disableUploader: false,
         disableTags: false
@@ -9721,8 +10238,8 @@ ${defaultKeySummary()}`)) {
       saveListFilters(cleared);
       ctx.navigate("/");
     };
-    const canReset = urlQuery.text !== "" || urlQuery.cats !== 0 || narrow > 0 || relaxed > 0;
-    const empty = data.items.length === 0 ? statePanel({
+    const canReset = urlQuery.text !== "" || urlQuery.cats !== 0 || narrow > 0 || relaxed > 0 || rangeActive;
+    const empty = shownItems.length === 0 ? statePanel({
       text: "No galleries were found on this page.",
       actions: [
         ...canReset ? [
@@ -9736,7 +10253,7 @@ ${defaultKeySummary()}`)) {
       ]
     }) : null;
     host.append(topbar, note, header, panel);
-    if (data.items.length > 0) {
+    if (shownItems.length > 0) {
       host.append(el("h2", { class: "sr-only", text: "Results" }), grid.element);
       grid.refresh();
     }
@@ -9745,15 +10262,15 @@ ${defaultKeySummary()}`)) {
     if (empty === null) {
       createPagedRegion({
         signal: ctx.signal,
-        next: data.nextHref,
-        initial: data.items,
+        next: nextHref,
+        initial: shownItems,
         key: (item) => item.gid,
         noun: "results",
         enabled: (settings) => settings.listInfiniteScroll,
         slot: footer,
         pager: (withNext) => withNext ? pager({
           prev: data.prevHref,
-          next: data.nextHref,
+          next: nextHref,
           label: "Result pages",
           seek: {
             go: (value) => ctx.navigate(seekHref(data.url, value))
@@ -9763,10 +10280,20 @@ ${defaultKeySummary()}`)) {
           if (pageSource === undefined) {
             return Promise.reject(new Error("No next-page source for this list route."));
           }
-          return pageSource(url, signal);
+          const request = pageSource(rangeActive ? withDateRange(url, range) : url, signal);
+          if (!rangeActive) {
+            return request;
+          }
+          return request.then((page) => {
+            const kept = filterByDateRange(page.items, range);
+            return {
+              items: kept.items,
+              next: kept.crossedSince || page.next === null ? null : withDateRange(page.next, range)
+            };
+          });
         },
-        append: (items) => {
-          const nodes = items.map((item) => resultCard(item, ctx.signal, { preview: true }));
+        append: (incoming) => {
+          const nodes = incoming.map((item) => resultCard(item, ctx.signal, { preview: true }));
           grid.append(nodes);
           return () => grid.remove(nodes);
         },
@@ -9774,6 +10301,272 @@ ${defaultKeySummary()}`)) {
         onSync: syncCount
       });
     }
+  }
+
+  // src/views/my-tags.ts
+  function writableApi(data) {
+    const api = data.api;
+    return api !== null && api.apiUid !== "-1" ? api : null;
+  }
+  function describeTag(tag) {
+    const parts = [];
+    if (tag.watched) {
+      parts.push("Watched");
+    }
+    if (tag.hidden) {
+      parts.push("Hidden");
+    }
+    parts.push(`Weight ${tag.weight}`);
+    if (tag.color !== "") {
+      parts.push(tag.color);
+    }
+    return parts.join(" · ");
+  }
+  function tagInputs(tag, readOnly, signal) {
+    const watched = el("input", {
+      type: "checkbox",
+      class: "my-tags-watch",
+      checked: tag?.watched === true ? "checked" : null
+    });
+    const hidden = el("input", {
+      type: "checkbox",
+      class: "my-tags-hide",
+      checked: tag?.hidden === true ? "checked" : null
+    });
+    const weight = el("input", {
+      type: "number",
+      class: "field-input my-tags-weight",
+      min: "-99",
+      max: "99",
+      step: "1",
+      inputmode: "numeric",
+      value: String(tag?.weight ?? 10)
+    });
+    const initialColor = tag?.color ?? "";
+    const colorEnabled = el("input", {
+      type: "checkbox",
+      class: "my-tags-color-enable",
+      checked: initialColor !== "" ? "checked" : null
+    });
+    const color = el("input", {
+      type: "color",
+      class: "my-tags-color",
+      value: initialColor === "" ? "#ff8800" : initialColor,
+      "aria-label": "Tag colour"
+    });
+    color.disabled = readOnly || !isChecked(colorEnabled);
+    for (const control of [watched, hidden, weight, colorEnabled]) {
+      control.disabled = readOnly;
+    }
+    watched.addEventListener("change", () => {
+      if (isChecked(watched)) {
+        hidden.checked = false;
+      }
+    }, { signal });
+    hidden.addEventListener("change", () => {
+      if (isChecked(hidden)) {
+        watched.checked = false;
+      }
+    }, { signal });
+    colorEnabled.addEventListener("change", () => {
+      color.disabled = readOnly || !isChecked(colorEnabled);
+    }, { signal });
+    const node = el("div", { class: "my-tags-fields" }, el("label", { class: "check" }, watched, el("span", { text: "Watched" })), el("label", { class: "check" }, hidden, el("span", { text: "Hidden" })), el("label", { class: "field my-tags-weight-field" }, el("span", { text: "Weight" }), weight), el("label", { class: "check" }, colorEnabled, el("span", { text: "Colour" })), color);
+    return { node, watched, hidden, weight, colorEnabled, color };
+  }
+  function readChange(inputs) {
+    const rawWeight = inputs.weight.value.trim();
+    return {
+      watched: isChecked(inputs.watched),
+      hidden: isChecked(inputs.hidden),
+      weight: rawWeight === "" ? undefined : Number(rawWeight),
+      color: isChecked(inputs.colorEnabled) ? inputs.color.value : null
+    };
+  }
+  function readOnlyNote(data) {
+    return el("p", { class: "my-tags-readonly", role: "status" }, "Editing is unavailable on this page. ", el("a", {
+      class: "my-tags-native",
+      href: nativeUrl(data.url),
+      "data-native": "",
+      text: "Open the native My Tags page"
+    }), ".");
+  }
+  function renderMyTags(host, data, ctx, deps) {
+    host.replaceChildren();
+    const api = writableApi(data);
+    const load = deps?.loadDocument ?? ((url, options) => loader.document(url, options));
+    const filter = searchInput({
+      class: "field-input my-tags-filter",
+      placeholder: "Filter tags",
+      "aria-label": "Filter tags"
+    });
+    const toolbar = el("div", { class: "my-tags-toolbar" }, el("label", { class: "field my-tags-filter-field" }, el("span", { text: "Filter" }), filter));
+    const list = el("div", { class: "my-tags-list" });
+    const noMatch = el("p", {
+      class: "my-tags-no-match",
+      text: "No tags match this filter."
+    });
+    noMatch.hidden = true;
+    const filterRows = () => {
+      const needle = filter.value.trim().toLowerCase();
+      let shown = 0;
+      for (const row of list.querySelectorAll(".my-tags-row")) {
+        const match = needle === "" || (row.dataset.tagName ?? "").includes(needle);
+        row.hidden = !match;
+        if (match) {
+          shown += 1;
+        }
+      }
+      noMatch.hidden = needle === "" || shown > 0 || data.tags.length === 0;
+    };
+    filter.addEventListener("input", filterRows, { signal: ctx.signal });
+    const buildAddForm = (credentials) => {
+      const name = textInput({
+        class: "field-input my-tags-add-name",
+        placeholder: "namespace:tag",
+        "aria-label": "Tag name"
+      });
+      const inputs = tagInputs(null, false, ctx.signal);
+      const error = el("p", { class: "my-tags-error", role: "alert" });
+      error.hidden = true;
+      const submit = el("button", {
+        class: "btn btn-primary my-tags-add-submit",
+        type: "submit",
+        text: "Add tag"
+      });
+      const form = el("form", { id: "my-tags-add", class: "my-tags-add", autocomplete: "off" }, el("h2", { class: "my-tags-add-title", text: "Add a tag" }), el("div", { class: "my-tags-add-fields" }, el("label", { class: "field my-tags-name-field" }, el("span", { text: "Tag" }), name), inputs.node), el("p", {
+        class: "my-tags-hint",
+        text: "Use the site's namespace:tag form. Weight runs from -99 to 99."
+      }), el("div", { class: "my-tags-add-actions" }, submit), error);
+      let adding = false;
+      const add = async () => {
+        if (adding) {
+          return;
+        }
+        const tag = name.value.trim();
+        error.hidden = true;
+        if (tag === "") {
+          error.textContent = "Enter a tag name.";
+          error.hidden = false;
+          name.focus();
+          return;
+        }
+        adding = true;
+        submit.disabled = true;
+        submit.textContent = "Adding…";
+        try {
+          const result = await applyMyTag(tag, readChange(inputs), {
+            config: credentials,
+            myTagsUrl: data.url,
+            loadDocument: load,
+            post: deps?.post,
+            addTag: deps?.addTag,
+            signal: ctx.signal
+          });
+          showToast(result === "added" ? "Tag added to My Tags" : "My Tags updated");
+          form.reset();
+          inputs.weight.value = "10";
+          inputs.color.disabled = true;
+          ctx.reload();
+        } catch (failure) {
+          error.textContent = errorText(failure, "Could not save tag.");
+          error.hidden = false;
+        } finally {
+          adding = false;
+          submit.disabled = false;
+          submit.textContent = "Add tag";
+        }
+      };
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        add();
+      }, { signal: ctx.signal });
+      return form;
+    };
+    const buildRow = (tag, credentials) => {
+      const inputs = tagInputs(tag, credentials === null, ctx.signal);
+      const state = { ...tag };
+      const summary = el("span", { class: "my-tags-row-state", text: describeTag(state) });
+      const error = el("p", { class: "my-tags-error", role: "alert" });
+      error.hidden = true;
+      const row = el("div", {
+        class: "my-tags-row",
+        "data-tag-id": String(tag.id),
+        "data-tag-name": tag.name.toLowerCase()
+      }, el("div", { class: "my-tags-row-head" }, el("span", { class: "my-tags-row-name", text: tag.name }), summary), inputs.node, error);
+      if (credentials !== null) {
+        const save = el("button", {
+          class: "btn btn-small my-tags-save",
+          type: "button",
+          text: "Save"
+        });
+        const actions = el("div", { class: "my-tags-row-actions" }, save);
+        row.append(actions);
+        let busy = false;
+        const saveRow = async () => {
+          if (busy) {
+            return;
+          }
+          busy = true;
+          save.disabled = true;
+          save.textContent = "Saving…";
+          error.hidden = true;
+          try {
+            const change = readChange(inputs);
+            await applyMyTag(tag.name, change, {
+              config: credentials,
+              myTagsUrl: data.url,
+              existing: state,
+              loadDocument: load,
+              post: deps?.post,
+              addTag: deps?.addTag,
+              signal: ctx.signal
+            });
+            const rawWeight = inputs.weight.value.trim();
+            Object.assign(state, {
+              watched: isChecked(inputs.watched),
+              hidden: isChecked(inputs.hidden),
+              color: isChecked(inputs.colorEnabled) ? normalizeColor(inputs.color.value) : "",
+              weight: rawWeight === "" ? state.weight : normalizeWeight(Number(rawWeight))
+            });
+            summary.textContent = describeTag(state);
+            showToast("My Tags updated");
+          } catch (failure) {
+            error.textContent = errorText(failure, "Could not save tag.");
+            error.hidden = false;
+          } finally {
+            busy = false;
+            save.disabled = false;
+            save.textContent = "Save";
+          }
+        };
+        save.addEventListener("click", () => {
+          saveRow();
+        }, { signal: ctx.signal });
+      }
+      return row;
+    };
+    for (const tag of data.tags) {
+      list.append(buildRow(tag, api));
+    }
+    const page = el("div", { id: "my-tags", class: "my-tags-page" }, toolbar);
+    if (api === null) {
+      page.append(readOnlyNote(data));
+    } else {
+      page.append(buildAddForm(api));
+    }
+    page.append(list);
+    if (data.tags.length === 0) {
+      page.append(el("p", {
+        class: "my-tags-empty",
+        text: api === null ? "No saved tags." : "No tags yet. Add your first tag above."
+      }));
+    }
+    page.append(noMatch);
+    host.append(siteNav(ctx.signal), listHeader({
+      title: "My Tags",
+      summary: [el("span", { class: "my-tags-count", text: countText(data.tags.length, "tag") })]
+    }), page);
   }
 
   // src/ui/settings-draft.ts
@@ -12662,10 +13455,16 @@ ${defaultKeySummary()}`)) {
     };
     return {
       load: async (route, signal, options) => {
-        const { doc, url } = await fetchDocument(route.url, signal, priorityOf("navigation"), options);
-        return spec.parse(doc, url, route);
+        const { doc, url } = await fetchDocument(spec.request?.(route) ?? route.url, signal, priorityOf("navigation"), options);
+        const data = spec.parse(doc, url, route);
+        spec.sanity?.(data, doc);
+        return data;
       },
-      parse: (doc, route) => spec.parse(doc, route.url, route),
+      parse: (doc, route) => {
+        const data = spec.parse(doc, route.url, route);
+        spec.sanity?.(data, doc);
+        return data;
+      },
       render: (host, data, ctx) => spec.render(host, data, ctx, pageSource),
       title: (data) => spec.title(data),
       pageSource
@@ -12675,9 +13474,17 @@ ${defaultKeySummary()}`)) {
     const table = {
       viewer: {
         match: (url) => VIEWER_PATH.test(url.pathname) ? { kind: "viewer", url: url.href } : null,
-        load: (route, signal) => deps.viewerPage(route.url, { signal, priority: priorityOf("navigation") }),
+        load: async (route, signal) => {
+          const data = await deps.viewerPage(route.url, {
+            signal,
+            priority: priorityOf("navigation")
+          });
+          assertViewerPage(data);
+          return data;
+        },
         parse: (doc, route) => {
           const data = parseViewer(doc, route.url);
+          assertViewerPage(data);
           deps.seedViewerPage(data.viewerUrl, data);
           return data;
         },
@@ -12689,6 +13496,7 @@ ${defaultKeySummary()}`)) {
         ...documentView(deps, {
           tag: "gallery",
           parse: parseGalleryPage,
+          sanity: assertGalleryPage,
           page: (doc, url) => {
             const page = parseGalleryPage(doc, url);
             return { items: page.thumbs, next: page.nextHref };
@@ -12726,11 +13534,13 @@ ${defaultKeySummary()}`)) {
         },
         ...documentView(deps, {
           tag: "list",
+          request: (route) => listRequestUrl(route.url),
           parse: (doc, url, route) => ({
             page: parseListPage(doc, url),
             query: route.query,
             scope: route.scope
           }),
+          sanity: (data, doc) => assertListPage(data.page, doc),
           page: (doc, url) => {
             const page = parseListPage(doc, url);
             return { items: page.items, next: page.nextHref };
@@ -12747,8 +13557,29 @@ ${defaultKeySummary()}`)) {
         ...documentView(deps, {
           tag: "torrents",
           parse: parseTorrents2,
+          sanity: assertTorrentsPage,
           render: renderTorrents,
           title: () => documentTitle("Torrents")
+        })
+      },
+      galleryTorrents: {
+        match: (url) => url.pathname === "/gallerytorrents.php" ? { kind: "galleryTorrents", url: url.href } : null,
+        ...documentView(deps, {
+          tag: "gallery-torrents",
+          parse: parseGalleryTorrents,
+          sanity: assertGalleryTorrentsPage,
+          render: (host, data, ctx) => renderGalleryTorrents(host, data, ctx),
+          title: (data) => documentTitle(data.title === "" ? "Torrents" : `Torrents for ${data.title}`)
+        })
+      },
+      myTags: {
+        match: (url) => /^\/mytags\/?$/u.test(url.pathname) ? { kind: "myTags", url: url.href } : null,
+        ...documentView(deps, {
+          tag: "my-tags",
+          parse: parseMyTags,
+          sanity: assertMyTagsPage,
+          render: (host, data, ctx) => renderMyTags(host, data, ctx),
+          title: () => documentTitle("My Tags")
         })
       },
       favorites: {
@@ -12756,6 +13587,7 @@ ${defaultKeySummary()}`)) {
         ...documentView(deps, {
           tag: "favorites",
           parse: parseFavorites,
+          sanity: assertFavoritesPage,
           render: (host, data, ctx) => renderFavorites(host, data, ctx),
           title: (data) => documentTitle(...favoritesLabels(data).title)
         })
@@ -12765,6 +13597,7 @@ ${defaultKeySummary()}`)) {
         ...documentView(deps, {
           tag: "toplist",
           parse: parseToplist,
+          sanity: assertToplistPage,
           render: renderToplist,
           title: (data) => data.kind === "category" ? documentTitle(data.title) : documentTitle("Toplists")
         })
@@ -12774,6 +13607,7 @@ ${defaultKeySummary()}`)) {
         ...documentView(deps, {
           tag: "settings",
           parse: parseUconfig,
+          sanity: assertSettingsPage,
           render: (host, data, ctx) => renderSettings(host, data, ctx),
           title: () => documentTitle("Settings"),
           fresh: true
@@ -13418,6 +14252,10 @@ ${defaultKeySummary()}`)) {
   }
   .rounded {
     border-radius: 0.25rem;
+  }
+  .border {
+    border-style: var(--tw-border-style);
+    border-width: 1px;
   }
   .text-control {
     font-size: var(--text-control);
@@ -16871,6 +17709,298 @@ ${defaultKeySummary()}`)) {
     padding: calc(var(--spacing) * 0.5);
     border-radius: var(--radius-control);
   }
+  .gallery-torrents {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 900px;
+    padding-bottom: calc(var(--spacing) * 10);
+  }
+  .gallery-torrents-back {
+    margin-top: calc(var(--spacing) * 3);
+    display: inline-flex;
+    align-items: center;
+    font-size: var(--text-control);
+    color: var(--color-link);
+    text-decoration-line: none;
+  }
+  .gallery-torrents-back:hover {
+    text-decoration-line: underline;
+  }
+  .gallery-torrent-list {
+    margin-top: calc(var(--spacing) * 4);
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+  }
+  .gallery-torrent-card {
+    border-radius: var(--radius-card);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line);
+    background-color: var(--color-panel);
+    padding: calc(var(--spacing) * 3.5);
+  }
+  .gallery-torrent-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    column-gap: calc(var(--spacing) * 3);
+    row-gap: calc(var(--spacing) * 2);
+  }
+  .gallery-torrent-name {
+    min-width: 0px;
+    font-size: var(--text-control);
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+    overflow-wrap: break-word;
+    color: var(--color-fg);
+    text-decoration-line: none;
+  }
+  a.gallery-torrent-name:hover {
+    color: var(--color-link);
+    text-decoration-line: underline;
+  }
+  .gallery-torrent-details-button {
+    flex-shrink: 0;
+  }
+  .gallery-torrent-meta {
+    margin-top: calc(var(--spacing) * 2);
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: calc(var(--spacing) * 4);
+    row-gap: var(--spacing);
+    font-size: var(--text-meta);
+  }
+  .gallery-torrent-meta-item {
+    display: flex;
+    align-items: baseline;
+    gap: var(--spacing);
+  }
+  .gallery-torrent-meta-label {
+    color: var(--color-muted);
+  }
+  .gallery-torrent-meta-value {
+    color: var(--color-fg);
+    --tw-numeric-spacing: tabular-nums;
+    font-variant-numeric: var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, );
+  }
+  .gallery-torrent-details {
+    margin-top: calc(var(--spacing) * 3);
+    border-top-style: var(--tw-border-style);
+    border-top-width: 1px;
+    border-color: var(--color-line);
+    padding-top: calc(var(--spacing) * 3);
+  }
+  .gallery-torrent-info {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+  }
+  .gallery-torrent-info-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: calc(var(--spacing) * 2);
+    row-gap: var(--spacing);
+    font-size: var(--text-control);
+  }
+  .gallery-torrent-info-label {
+    color: var(--color-muted);
+  }
+  .gallery-torrent-info-link {
+    color: var(--color-link);
+  }
+  .gallery-torrent-info-unavailable {
+    color: var(--color-muted);
+  }
+  .gallery-torrent-comments {
+    margin-top: calc(var(--spacing) * 2);
+    font-size: var(--text-control);
+    white-space: pre-line;
+    color: var(--color-muted);
+  }
+  .gallery-torrent-error {
+    font-size: var(--text-control);
+    color: var(--color-danger-text);
+  }
+  .gallery-torrent-loading {
+    font-size: var(--text-control);
+    color: var(--color-muted);
+  }
+  @media (max-width: 720px) {
+    .gallery-torrent-card {
+      padding: calc(var(--spacing) * 3);
+    }
+    .gallery-torrent-head {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .gallery-torrent-details-button {
+      align-self: flex-start;
+    }
+  }
+  .my-tags-page {
+    margin-top: calc(var(--spacing) * 4);
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 4);
+  }
+  .my-tags-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: calc(var(--spacing) * 3);
+  }
+  .my-tags-filter-field {
+    width: 220px;
+    max-width: 100%;
+  }
+  .my-tags-filter {
+    width: 100%;
+  }
+  .my-tags-count {
+    font-size: var(--text-control);
+    color: var(--color-muted);
+    --tw-numeric-spacing: tabular-nums;
+    font-variant-numeric: var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, );
+  }
+  .my-tags-readonly {
+    margin: 0px;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line);
+    background-color: var(--color-panel);
+    padding-inline: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 2);
+    font-size: var(--text-control);
+    color: var(--color-muted);
+  }
+  .my-tags-native {
+    margin-left: var(--spacing);
+    color: var(--color-accent-text);
+  }
+  .my-tags-add {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 2);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line);
+    background-color: var(--color-panel);
+    padding: calc(var(--spacing) * 3);
+  }
+  .my-tags-add-title {
+    margin: 0px;
+    font-size: var(--text-section);
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-fg);
+  }
+  .my-tags-add-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: calc(var(--spacing) * 3);
+  }
+  .my-tags-name-field {
+    width: 220px;
+    max-width: 100%;
+  }
+  .my-tags-name-field .field-input {
+    width: 100%;
+  }
+  .my-tags-hint {
+    margin: 0px;
+    font-size: var(--text-meta);
+    color: var(--color-muted);
+  }
+  .my-tags-add-actions {
+    display: flex;
+  }
+  .my-tags-list {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 2);
+  }
+  .my-tags-row {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 2);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line);
+    background-color: var(--color-panel);
+    padding: calc(var(--spacing) * 3);
+  }
+  .my-tags-row-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: calc(var(--spacing) * 2);
+  }
+  .my-tags-row-name {
+    font-size: var(--text-control);
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-fg);
+  }
+  .my-tags-row-state {
+    font-size: var(--text-meta);
+    color: var(--color-muted);
+    --tw-numeric-spacing: tabular-nums;
+    font-variant-numeric: var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, );
+  }
+  .my-tags-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: calc(var(--spacing) * 3);
+    font-size: var(--text-control);
+    color: var(--color-fg);
+  }
+  .my-tags-weight-field {
+    width: 84px;
+  }
+  .my-tags-weight-field .field-input {
+    width: 100%;
+  }
+  .my-tags-color {
+    height: calc(var(--spacing) * 8);
+    width: calc(var(--spacing) * 12);
+    cursor: pointer;
+    border-radius: var(--radius-control);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line);
+    background-color: var(--color-canvas);
+    padding: calc(var(--spacing) * 0.5);
+    border-color: var(--color-field-line);
+  }
+  .my-tags-color:disabled {
+    cursor: not-allowed;
+    opacity: 40%;
+  }
+  .my-tags-row-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .my-tags-error {
+    margin: 0px;
+    font-size: var(--text-control);
+    color: var(--color-danger-text);
+  }
+  .my-tags-empty, .my-tags-no-match {
+    margin: 0px;
+    font-size: var(--text-control);
+    color: var(--color-muted);
+  }
+  @media (max-width: 720px) {
+    .my-tags-filter-field, .my-tags-name-field {
+      width: 100%;
+    }
+    .my-tags-add-fields {
+      align-items: stretch;
+    }
+  }
 }
 :root {
   --scrim-control: rgb(0 0 0 / 0.7);
@@ -16907,6 +18037,11 @@ ${defaultKeySummary()}`)) {
 @property --tw-skew-y {
   syntax: "*";
   inherits: false;
+}
+@property --tw-border-style {
+  syntax: "*";
+  inherits: false;
+  initial-value: solid;
 }
 @property --tw-outline-style {
   syntax: "*";
@@ -16965,11 +18100,6 @@ ${defaultKeySummary()}`)) {
 @property --tw-drop-shadow-size {
   syntax: "*";
   inherits: false;
-}
-@property --tw-border-style {
-  syntax: "*";
-  inherits: false;
-  initial-value: solid;
 }
 @property --tw-font-weight {
   syntax: "*";
@@ -17178,6 +18308,7 @@ ${defaultKeySummary()}`)) {
       --tw-rotate-z: initial;
       --tw-skew-x: initial;
       --tw-skew-y: initial;
+      --tw-border-style: solid;
       --tw-outline-style: solid;
       --tw-blur: initial;
       --tw-brightness: initial;
@@ -17192,7 +18323,6 @@ ${defaultKeySummary()}`)) {
       --tw-drop-shadow-color: initial;
       --tw-drop-shadow-alpha: 100%;
       --tw-drop-shadow-size: initial;
-      --tw-border-style: solid;
       --tw-font-weight: initial;
       --tw-tracking: initial;
       --tw-duration: initial;
@@ -18093,6 +19223,11 @@ body.fit-h.reader-continuous #reader {
       if (id !== navId || isAbortError(error)) {
         return;
       }
+      if (error instanceof ParseMismatchError) {
+        console.error(LOG_TAG, "parse mismatch, opening the native page", error);
+        location.replace(nativeUrl(route.url));
+        return;
+      }
       console.error(LOG_TAG, "navigation failed", error);
       errorView(error, route);
     } finally {
@@ -18199,11 +19334,23 @@ body.fit-h.reader-continuous #reader {
       return;
     }
     route = effective;
+    if (route.kind === "list") {
+      const requestUrl = listRequestUrl(route.url);
+      if (requestUrl !== route.url) {
+        location.replace(requestUrl);
+        return;
+      }
+    }
     const start = () => {
       try {
         startOwned(route);
       } catch (error) {
         console.error(LOG_TAG, "startup failed", error);
+        if (error instanceof ParseMismatchError) {
+          revealDocument();
+          location.replace(nativeUrl(location.href));
+          return;
+        }
         if (error instanceof LoginRequiredError) {
           ensureShell();
           errorView(error, route);

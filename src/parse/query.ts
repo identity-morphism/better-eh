@@ -34,6 +34,9 @@ export interface SearchFilters {
   torrent: boolean;
   pageFrom: string;
   pageTo: string;
+  /** App-owned posted-date range; `YYYY-MM-DD` or empty for no bound. */
+  since: string;
+  until: string;
   disableLanguage: boolean;
   disableUploader: boolean;
   disableTags: boolean;
@@ -52,6 +55,8 @@ export function emptySearchFilters(): SearchFilters {
     torrent: false,
     pageFrom: "",
     pageTo: "",
+    since: "",
+    until: "",
     disableLanguage: false,
     disableUploader: false,
     disableTags: false,
@@ -73,6 +78,8 @@ export function parseSearchQuery(url: URL): SearchQuery {
     torrent: params.has("f_sto"),
     pageFrom: params.get("f_spf") ?? "",
     pageTo: params.get("f_spt") ?? "",
+    since: params.get("eh_since") ?? "",
+    until: params.get("eh_until") ?? "",
     disableLanguage: params.has("f_sfl"),
     disableUploader: params.has("f_sfu"),
     disableTags: params.has("f_sft"),
@@ -87,6 +94,8 @@ function hasAdvancedFilters(query: SearchFilters): boolean {
     query.torrent ||
     query.pageFrom.trim() !== "" ||
     query.pageTo.trim() !== "" ||
+    query.since.trim() !== "" ||
+    query.until.trim() !== "" ||
     query.disableLanguage ||
     query.disableUploader ||
     query.disableTags
@@ -114,6 +123,14 @@ export function writeSearchFilters(params: URLSearchParams, query: SearchFilters
   const pageTo = query.pageTo.trim();
   if (pageTo) {
     params.set("f_spt", pageTo);
+  }
+  const since = query.since.trim();
+  if (since) {
+    params.set("eh_since", since);
+  }
+  const until = query.until.trim();
+  if (until) {
+    params.set("eh_until", until);
   }
   if (query.disableLanguage) {
     params.set("f_sfl", "on");

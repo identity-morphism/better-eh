@@ -26,12 +26,14 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - run: bun run check:generated
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
       - name: Tests with the src/ coverage floor
         run: bun run test:coverage
       - run: bun run build
+      - run: bun run check:size
       - run: git diff --exit-code dist/
       - name: Pull requests leave the release version alone
         # Releases own the number: `bun run release` bumps it after the pull request merges.

@@ -26,6 +26,23 @@ export class LoginRequiredError extends Error {
   }
 }
 
+/**
+ * The site's markup no longer matches what an owned view parses.
+ *
+ * The app answers this by handing the reader the site's own page instead of an empty view; a real
+ * navigation problem is an `HttpError` and stays on the error panel.
+ */
+export class ParseMismatchError extends Error {
+  /** The owned route whose page did not parse: `viewer`, `gallery`, `list`, and so on. */
+  readonly route: string;
+
+  constructor(route: string, detail: string) {
+    super(`${route}: ${detail}`);
+    this.name = "ParseMismatchError";
+    this.route = route;
+  }
+}
+
 /** The site throttled us; `text` carries the notice it answered with. */
 export class RateLimitedError extends Error {
   readonly text: string;

@@ -1,11 +1,25 @@
+import { listRequestUrl } from "../data/list-date";
 import type { HtmlResponse } from "../fetch/loader";
 import { loader } from "../fetch/loader";
 import type { Priority } from "../net/priority";
 import { priorityOf } from "../net/priority";
 import { parseFavorites } from "../parse/favorites";
 import { parseGalleryPage } from "../parse/gallery";
+import { parseGalleryTorrents } from "../parse/gallery-torrents";
 import { parseListPage } from "../parse/list";
+import { parseMyTags } from "../parse/my-tags";
 import { parseSearchQuery, tagTokenFromHref, uploaderTokenFromHref } from "../parse/query";
+import {
+  assertFavoritesPage,
+  assertGalleryPage,
+  assertGalleryTorrentsPage,
+  assertListPage,
+  assertMyTagsPage,
+  assertSettingsPage,
+  assertToplistPage,
+  assertTorrentsPage,
+  assertViewerPage,
+} from "../parse/sanity";
 import { parseToplist } from "../parse/toplist";
 import { parseTorrents } from "../parse/torrents";
 import { parseUconfig } from "../parse/uconfig";
@@ -16,7 +30,9 @@ import type { CursorPage } from "../ui/page-cursor";
 import type { PageSource, ViewContext } from "../views/context";
 import { favoritesLabels, renderFavorites } from "../views/favorites";
 import { renderGallery } from "../views/gallery";
+import { renderGalleryTorrents } from "../views/gallery-torrents";
 import { listLabels, renderList } from "../views/list";
+import { renderMyTags } from "../views/my-tags";
 import { renderSettings } from "../views/settings";
 import { renderToplist } from "../views/toplist";
 import { renderTorrents } from "../views/torrents";
@@ -55,8 +71,15 @@ export interface RouteViews {
 interface DocumentSpec<K extends OwnedKind, I = unknown> {
   /** Queue tag the document load carries. */
   tag: string;
+  /**
+   * Address to fetch instead of the route's own, when the route has to be translated before the
+   * site sees it (e.g. the app's date range becomes the site's `seek` cursor).
+   */
+  request?: (route: RouteOf<K>) => string;
   /** Parse the document; `url` is the loader's final address, not the requested one. */
   parse(doc: Document, url: string, route: RouteOf<K>): RouteDataByKind[K];
+  /** Reject a page whose markup no longer matches the view; the app then opens the native page. */
+  sanity?: (data: RouteDataByKind[K], doc: Document) => void;
   /** Parse one appended page from the same document; omitted when the route does not paginate. */
   page?: (doc: Document, url: string) => CursorPage<I>;
   render(
@@ -106,14 +129,20 @@ function documentView<K extends OwnedKind, I = unknown>(
   return {
     load: async (route, signal, options) => {
       const { doc, url } = await fetchDocument(
-        route.url,
+        spec.request?.(route) ?? route.url,
         signal,
         priorityOf("navigation"),
         options,
       );
-      return spec.parse(doc, url, route);
+      const data = spec.parse(doc, url, route);
+      spec.sanity?.(data, doc);
+      return data;
     },
-    parse: (doc, route) => spec.parse(doc, route.url, route),
+    parse: (doc, route) => {
+      const data = spec.parse(doc, route.url, route);
+      spec.sanity?.(data, doc);
+      return data;
+    },
     render: (host, data, ctx) => spec.render(host, data, ctx, pageSource),
     title: (data) => spec.title(data),
     pageSource,
@@ -129,10 +158,17 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     viewer: {
       match: (url) => (VIEWER_PATH.test(url.pathname) ? { kind: "viewer", url: url.href } : null),
       // The loader returns parsed pages itself, so only the initial document needs a parse call.
-      load: (route, signal) =>
-        deps.viewerPage(route.url, { signal, priority: priorityOf("navigation") }),
+      load: async (route, signal) => {
+        const data = await deps.viewerPage(route.url, {
+          signal,
+          priority: priorityOf("navigation"),
+        });
+        assertViewerPage(data);
+        return data;
+      },
       parse: (doc, route) => {
         const data = parseViewer(doc, route.url);
+        assertViewerPage(data);
         // The initial document never went through the page loader; seed it for prefetch.
         deps.seedViewerPage(data.viewerUrl, data);
         return data;
@@ -145,6 +181,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       ...documentView<"gallery", GalleryThumb>(deps, {
         tag: "gallery",
         parse: parseGalleryPage,
+        sanity: assertGalleryPage,
         page: (doc, url) => {
           const page = parseGalleryPage(doc, url);
           return { items: page.thumbs, next: page.nextHref };
@@ -188,11 +225,13 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       },
       ...documentView<"list", ListItem>(deps, {
         tag: "list",
+        request: (route) => listRequestUrl(route.url),
         parse: (doc, url, route) => ({
           page: parseListPage(doc, url),
           query: route.query,
           scope: route.scope,
         }),
+        sanity: (data, doc) => assertListPage(data.page, doc),
         page: (doc, url) => {
           const page = parseListPage(doc, url);
           return { items: page.items, next: page.nextHref };
@@ -211,8 +250,32 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       ...documentView<"torrents">(deps, {
         tag: "torrents",
         parse: parseTorrents,
+        sanity: assertTorrentsPage,
         render: renderTorrents,
         title: () => documentTitle("Torrents"),
+      }),
+    },
+    galleryTorrents: {
+      match: (url) =>
+        url.pathname === "/gallerytorrents.php" ? { kind: "galleryTorrents", url: url.href } : null,
+      ...documentView<"galleryTorrents">(deps, {
+        tag: "gallery-torrents",
+        parse: parseGalleryTorrents,
+        sanity: assertGalleryTorrentsPage,
+        render: (host, data, ctx) => renderGalleryTorrents(host, data, ctx),
+        title: (data) =>
+          documentTitle(data.title === "" ? "Torrents" : `Torrents for ${data.title}`),
+      }),
+    },
+    myTags: {
+      match: (url) =>
+        /^\/mytags\/?$/u.test(url.pathname) ? { kind: "myTags", url: url.href } : null,
+      ...documentView<"myTags">(deps, {
+        tag: "my-tags",
+        parse: parseMyTags,
+        sanity: assertMyTagsPage,
+        render: (host, data, ctx) => renderMyTags(host, data, ctx),
+        title: () => documentTitle("My Tags"),
       }),
     },
     favorites: {
@@ -221,6 +284,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       ...documentView<"favorites">(deps, {
         tag: "favorites",
         parse: parseFavorites,
+        sanity: assertFavoritesPage,
         render: (host, data, ctx) => renderFavorites(host, data, ctx),
         title: (data) => documentTitle(...favoritesLabels(data).title),
       }),
@@ -230,6 +294,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       ...documentView<"toplist">(deps, {
         tag: "toplist",
         parse: parseToplist,
+        sanity: assertToplistPage,
         render: renderToplist,
         title: (data) =>
           data.kind === "category" ? documentTitle(data.title) : documentTitle("Toplists"),
@@ -242,6 +307,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
         tag: "settings",
         // The settings page reads no URL.
         parse: parseUconfig,
+        sanity: assertSettingsPage,
         render: (host, data, ctx) => renderSettings(host, data, ctx),
         title: () => documentTitle("Settings"),
         // A save changes this page's server state, so the cached copy is the pre-save page.

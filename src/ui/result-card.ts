@@ -123,16 +123,13 @@ function cardMeta(item: ListItem): HTMLElement {
     }),
   );
   if (item.torrentsHref) {
-    // The site's green arrow: rows with torrents link to the torrent popup, the rest stay plain.
+    // The site's green arrow: rows with torrents link to the torrent page, the rest stay plain.
     meta.append(
       el(
         "a",
         {
           class: "card-torrent",
           href: item.torrentsHref,
-          "data-native": "",
-          target: "_blank",
-          rel: "nofollow noopener",
           title: "Show torrents",
           "aria-label": "Show torrents",
         },

@@ -213,7 +213,8 @@ describe("renderList", () => {
     expect(torrent?.getAttribute("href")).toBe(
       "https://e-hentai.org/gallerytorrents.php?gid=111&t=aaaa",
     );
-    expect(torrent?.getAttribute("data-native")).toBe("");
+    expect(torrent?.getAttribute("data-native")).toBeNull();
+    expect(torrent?.getAttribute("target")).toBeNull();
     const cover = host.querySelector<HTMLImageElement>(".card-cover img");
     expect([cover?.getAttribute("width"), cover?.getAttribute("height")]).toEqual(["250", "353"]);
   });
