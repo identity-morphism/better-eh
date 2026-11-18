@@ -9,6 +9,11 @@ updates:
       dev-toolchain:
         patterns:
           - "*"
+    ignore:
+      # The canary pin is load-bearing: stable Bun has no `lint` subcommand, so `bun lint`
+      # resolves back to the `lint` package script, recurses, and exits 0 without linting
+      # anything. See prek.toml and docs/DEVELOPMENT.md.
+      - dependency-name: bun
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
