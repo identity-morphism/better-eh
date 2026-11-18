@@ -1,0 +1,113 @@
+name: Bug report
+description: A page renders wrong, throws, or stays native when it should not.
+labels: ["bug"]
+title: "[bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Replace gallery ids, tokens and anything from the address bar with zeros before posting.
+        `ipb_member_id`, `ipb_pass_hash`, `sk` and `igneous` are your account.
+
+        Check [Known Limits](https://github.com/identity-morphism/better-eh#known-limits) first.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The route, what you saw, and what you expected instead.
+      placeholder: The gallery page shows an empty thumbnail grid, but `?eh_native=1` lists 24 thumbs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open https://e-hentai.org/g/0000000/0000000000/
+        2. Scroll to the sprites
+        3. Reload
+    validations:
+      required: true
+
+  - type: input
+    id: url
+    attributes:
+      label: Page URL, tokens zeroed
+      placeholder: https://e-hentai.org/s/0000000000/0000000-1
+    validations:
+      required: false
+
+  - type: dropdown
+    id: route
+    attributes:
+      label: Which view
+      options:
+        - Search or category list
+        - Gallery
+        - Reader
+        - Favorites
+        - Toplist
+        - Torrents
+        - Settings or /uconfig.php
+        - Top bar, navigation or the shell
+        - Something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: manager
+    attributes:
+      label: Userscript manager
+      options:
+        - Violentmonkey
+        - Tampermonkey
+        - Userscripts (Safari)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: manager-version
+    attributes:
+      label: Manager version
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Firefox 145.0
+    validations:
+      required: true
+
+  - type: input
+    id: script-version
+    attributes:
+      label: Better EH version
+      description: Shown in your manager's script list and in the settings page header.
+      placeholder: 1.0.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: signed-in
+    attributes:
+      label: Signed in to the site
+      options:
+        - Signed in
+        - Not signed in
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: |
+        Turn on debug logging from the Better EH userscript menu, reload, then copy console errors.
+      render: shell
+    validations:
+      required: false

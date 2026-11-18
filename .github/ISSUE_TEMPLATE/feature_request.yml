@@ -1,0 +1,45 @@
+name: Feature request
+description: A page or interaction the reskin should own or handle differently.
+labels: ["enhancement"]
+title: "[feat] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read [Known Limits](https://github.com/identity-morphism/better-eh#known-limits) and the
+        scope section of [CONTRIBUTING.md](https://github.com/identity-morphism/better-eh/blob/master/CONTRIBUTING.md)
+        first. Several native pages are deliberate.
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What the page does today
+      placeholder: The My Tags page stays native, so hiding a tagset means leaving the shell.
+    validations:
+      required: true
+
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What you want instead
+      validations:
+        required: true
+
+  - type: textarea
+    id: native
+    attributes:
+      label: Does the site's own page already do it
+      description: If the native page does the job, link it. The reskin prefers building on what the site serves.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: offer
+    attributes:
+      label: Would you send the pull request
+      options:
+        - Yes, with guidance
+        - Maybe, for the parser or the CSS
+        - No, reporting only
+    validations:
+      required: true

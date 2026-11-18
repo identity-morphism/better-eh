@@ -39,7 +39,8 @@ stay native.
 - **Fast and robust**: request priorities and caching, rate-limit purge with a banner, result-card
   previews, and a login gate instead of a broken page when a route needs a session.
 - **Accessible**: keyboard paths, managed dialog focus, forced-colors support, reduced-motion
-  handling and touch targets that grow on coarse pointers.
+  handling and touch targets that grow on coarse pointers. The smoke gate runs axe over the shell
+  with the WCAG A/AA rules, so a control that fails name, contrast or landmark checks fails CI.
 
 ## Controls
 
@@ -108,6 +109,17 @@ storage/debugging notes, and [Architecture](docs/ARCHITECTURE.md) for the module
   asset and caches it for a week. Nothing is embedded in the bundle, so first use needs a successful
   download; without it, suggestions fall back to match quality and aliases.
 - Site HTML changes can break parsers; keep the native escape path available.
+
+## Contributing
+
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the local
+checks, the fixture and parser rules, and the `dist/` rebuild rule CI enforces.
+[Development](docs/DEVELOPMENT.md) has setup and release detail.
+
+If you report a broken page, say which route broke and paste the console error with debug logging
+on. Zero out gallery ids, tokens, and any `ipb_member_id`, `ipb_pass_hash`, `sk` or `igneous` value
+before posting; they are account credentials. Report security problems through
+[advisories](https://github.com/identity-morphism/better-eh/security/advisories/new), not an issue.
 
 ## Data attribution
 
