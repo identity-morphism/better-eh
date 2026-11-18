@@ -5,7 +5,7 @@ import { priorityOf } from "../net/priority";
 import { net } from "../net/queue";
 import { parseViewer } from "../parse/viewer";
 import type { PageData } from "../types";
-import { HttpError, LoginRequiredError, RateLimitedError } from "./errors";
+import { HttpError, isAbortError, LoginRequiredError, RateLimitedError } from "./errors";
 import { createLru } from "./lru";
 
 const DOC_CACHE_LIMIT = 24;
@@ -34,6 +34,11 @@ export interface ViewerPageOptions {
    * prefetch sets this: a navigation that shares the request always wins over the warm.
    */
   cancel?: boolean;
+}
+
+export interface RetryWithNlOptions {
+  /** View or prefetch-window lifetime; an aborted retry makes no request and returns null. */
+  signal?: AbortSignal;
 }
 
 interface TransportOptions {
@@ -65,7 +70,7 @@ export interface PageLoader {
   /** Cache already-parsed viewer data, as the shell does after the initial render. */
   seedViewerPage(url: string, data: PageData): void;
   /** Re-fetch a viewer page with its no-limit token; null when it has none or fails. */
-  retryWithNl(page: PageData): Promise<PageData | null>;
+  retryWithNl(page: PageData, options?: RetryWithNlOptions): Promise<PageData | null>;
 }
 
 /** Normalise an abort reason to an Error, so `transition` can recognise a cancelled load. */
@@ -257,8 +262,11 @@ export function createPageLoader(deps: PageLoaderDeps): PageLoader {
       cachePage(data, url);
     },
 
-    async retryWithNl(page) {
+    async retryWithNl(page, { signal } = {}) {
       if (!page.nlToken) {
+        return null;
+      }
+      if (signal?.aborted) {
         return null;
       }
       const retryUrl = `${page.viewerUrl.split("?")[0]}?nl=${page.nlToken}`;
@@ -268,9 +276,14 @@ export function createPageLoader(deps: PageLoaderDeps): PageLoader {
           fresh: true,
           priority: priorityOf("critical"),
           tag: "viewer",
+          signal,
         });
         return cachePage(parseViewer(doc, page.viewerUrl), page.viewerUrl);
       } catch (error) {
+        // A cancelled retry (page teardown, prefetch moving on) is not a failure worth a warning.
+        if (isAbortError(error)) {
+          return null;
+        }
         warn("nl retry fetch failed", error);
         return null;
       }

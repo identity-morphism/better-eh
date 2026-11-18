@@ -1895,8 +1895,11 @@ ${defaultKeySummary()}`)) {
       seedViewerPage(url, data) {
         cachePage(data, url);
       },
-      async retryWithNl(page) {
+      async retryWithNl(page, { signal } = {}) {
         if (!page.nlToken) {
+          return null;
+        }
+        if (signal?.aborted) {
           return null;
         }
         const retryUrl = `${page.viewerUrl.split("?")[0]}?nl=${page.nlToken}`;
@@ -1905,10 +1908,14 @@ ${defaultKeySummary()}`)) {
           const { doc } = await loadDocument(retryUrl, {
             fresh: true,
             priority: priorityOf("critical"),
-            tag: "viewer"
+            tag: "viewer",
+            signal
           });
           return cachePage(parseViewer(doc, page.viewerUrl), page.viewerUrl);
         } catch (error) {
+          if (isAbortError(error)) {
+            return null;
+          }
           warn("nl retry fetch failed", error);
           return null;
         }
@@ -12029,13 +12036,13 @@ ${defaultKeySummary()}`)) {
         }
       });
     }
-    function preloadPageImage(page, mine) {
+    function preloadPageImage(page, mine, signal) {
       const img = deps.preloadImage(page.imgSrc);
       img.addEventListener("error", () => {
-        if (generation !== mine) {
+        if (generation !== mine || signal.aborted) {
           return;
         }
-        deps.retryWithNl(page).then((retried) => {
+        deps.retryWithNl(page, { signal }).then((retried) => {
           if (retried !== null && retried.imgSrc !== "" && generation === mine) {
             deps.preloadImage(retried.imgSrc);
           }
@@ -12058,7 +12065,7 @@ ${defaultKeySummary()}`)) {
           break;
         }
         if (next.imgSrc) {
-          preloadPageImage(next, mine);
+          preloadPageImage(next, mine, signal);
           images.push(next.imgSrc);
         }
         page = next;
@@ -12298,25 +12305,35 @@ ${defaultKeySummary()}`)) {
     retry,
     maxRetries,
     onGiveUp,
-    onLoaded
+    onLoaded,
+    isCurrent
   }) {
     let gaveUp = false;
+    const stale = () => isCurrent?.() === false;
     const clearHandlers = () => {
       img.onload = null;
       img.onerror = null;
     };
     const render = (data, attempt) => {
+      if (stale()) {
+        return;
+      }
       clearHandlers();
       if (img.src === data.imgSrc && img.complete && img.naturalWidth > 0) {
         log("instant from cache", data.imgSrc);
-        onLoaded?.(data);
+        if (!stale()) {
+          onLoaded?.(data);
+        }
         return;
       }
       img.onload = () => {
+        if (stale()) {
+          return;
+        }
         onLoaded?.(data);
       };
       img.onerror = () => {
-        if (gaveUp) {
+        if (gaveUp || stale()) {
           return;
         }
         clearHandlers();
@@ -12324,10 +12341,15 @@ ${defaultKeySummary()}`)) {
         if (attempt >= maxRetries) {
           gaveUp = true;
           warn("giving up");
-          onGiveUp();
+          if (!stale()) {
+            onGiveUp();
+          }
           return;
         }
         retry(data).then((retried) => {
+          if (stale()) {
+            return;
+          }
           if (retried) {
             render(retried, attempt + 1);
             return;
@@ -12335,10 +12357,12 @@ ${defaultKeySummary()}`)) {
           if (!gaveUp) {
             gaveUp = true;
             warn("image retry unavailable");
-            onGiveUp();
+            if (!stale()) {
+              onGiveUp();
+            }
           }
         }).catch((error) => {
-          if (gaveUp) {
+          if (gaveUp || stale()) {
             return;
           }
           gaveUp = true;
@@ -12376,7 +12400,8 @@ ${defaultKeySummary()}`)) {
         onLoaded: (loaded) => {
           page = loaded;
           onLoaded?.(loaded);
-        }
+        },
+        isCurrent
       });
     };
     const reload = () => {
@@ -12648,7 +12673,7 @@ ${defaultKeySummary()}`)) {
       viewerPage: (url, options) => loader.viewerPage(url, options),
       preloadImage,
       touchImage,
-      retryWithNl: (page) => loader.retryWithNl(page),
+      retryWithNl: (page, options) => loader.retryWithNl(page, options),
       activeCount: () => net.activeCount,
       concurrency: () => getSettings().netConcurrency,
       depth: () => getSettings().prefetchCount,
@@ -12672,6 +12697,7 @@ ${defaultKeySummary()}`)) {
     let navigationToken = 0;
     let stack = null;
     let continuousIndex = 0;
+    let continuousGeneration = 0;
     let continuousAspect = 1.4;
     let activeMode = getSettings().readerMode;
     let resumeTimer;
@@ -12700,7 +12726,7 @@ ${defaultKeySummary()}`)) {
     function createMainSlot(data) {
       return createPageImageSlot(ui.elImg, {
         page: data,
-        retry: (page) => loader.retryWithNl(page),
+        retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
         maxRetries: getSettings().maxNlRetry,
         signal: ctx.signal,
         isCurrent: () => current === data && !readerLayout(getSettings().readerMode).continuous,
@@ -12939,7 +12965,7 @@ ${defaultKeySummary()}`)) {
         ui.elSpread.alt = `${companion.galleryTitle.primary} — page ${companion.counterText}`;
         companionSlot = createPageImageSlot(ui.elSpread, {
           page: companion,
-          retry: (page) => loader.retryWithNl(page),
+          retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
           maxRetries: getSettings().maxNlRetry,
           signal: ctx.signal,
           isCurrent: () => spreadCompanion === companion,
@@ -12979,11 +13005,13 @@ ${defaultKeySummary()}`)) {
       retry.hidden = true;
       node.append(img, retry);
       node.style.minHeight = `${Math.round(window.innerWidth * continuousAspect)}px`;
+      const generation = continuousGeneration;
       const slot = createPageImageSlot(img, {
         page: data,
-        retry: (page) => loader.retryWithNl(page),
+        retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
         maxRetries: getSettings().maxNlRetry,
         signal: ctx.signal,
+        isCurrent: () => continuousGeneration === generation,
         onGiveUp: () => {
           node.classList.add("is-failed");
           retry.hidden = false;
@@ -13006,6 +13034,7 @@ ${defaultKeySummary()}`)) {
       return { node, view: slot };
     }
     function teardownContinuous() {
+      continuousGeneration += 1;
       stack?.stop();
       stack = null;
       continuousIndex = 0;
@@ -13336,7 +13365,7 @@ ${defaultKeySummary()}`)) {
     ui.elErrorRetry.addEventListener("click", () => {
       (async () => {
         hideError();
-        const retried = await loader.retryWithNl(current);
+        const retried = await loader.retryWithNl(current, { signal: ctx.signal });
         if (ctx.signal.aborted) {
           return;
         }

@@ -24,6 +24,8 @@ interface ShowPageImageOptions {
   onGiveUp: () => void;
   /** Called each time an image loads, including after a successful retry. */
   onLoaded?: (page: PageData) => void;
+  /** False once the element belongs to a newer page; suppresses stale sources and callbacks. */
+  isCurrent?: () => boolean;
 }
 
 /**
@@ -39,8 +41,11 @@ export function showPageImage({
   maxRetries,
   onGiveUp,
   onLoaded,
+  isCurrent,
 }: ShowPageImageOptions): void {
   let gaveUp = false;
+
+  const stale = (): boolean => isCurrent?.() === false;
 
   const clearHandlers = (): void => {
     img.onload = null;
@@ -48,21 +53,31 @@ export function showPageImage({
   };
 
   const render = (data: PageData, attempt: number): void => {
+    // A retry may resolve after the element moved on; never clear the newer page's handlers or
+    // assign its source back to the old page.
+    if (stale()) {
+      return;
+    }
     clearHandlers();
 
     // Only the *same* source can be reported as an instant cache hit; a fresh `src` resets the
     // element, so `complete` would describe the previous page, not this one.
     if (img.src === data.imgSrc && img.complete && img.naturalWidth > 0) {
       log("instant from cache", data.imgSrc);
-      onLoaded?.(data);
+      if (!stale()) {
+        onLoaded?.(data);
+      }
       return;
     }
 
     img.onload = () => {
+      if (stale()) {
+        return;
+      }
       onLoaded?.(data);
     };
     img.onerror = () => {
-      if (gaveUp) {
+      if (gaveUp || stale()) {
         return;
       }
       clearHandlers();
@@ -70,11 +85,16 @@ export function showPageImage({
       if (attempt >= maxRetries) {
         gaveUp = true;
         warn("giving up");
-        onGiveUp();
+        if (!stale()) {
+          onGiveUp();
+        }
         return;
       }
       void retry(data)
         .then((retried) => {
+          if (stale()) {
+            return;
+          }
           if (retried) {
             render(retried, attempt + 1);
             return;
@@ -82,11 +102,13 @@ export function showPageImage({
           if (!gaveUp) {
             gaveUp = true;
             warn("image retry unavailable");
-            onGiveUp();
+            if (!stale()) {
+              onGiveUp();
+            }
           }
         })
         .catch((error: unknown) => {
-          if (gaveUp) {
+          if (gaveUp || stale()) {
             return;
           }
           gaveUp = true;
@@ -121,7 +143,7 @@ interface PageImageSlotOptions {
   onGiveUp?: () => void;
   /** View lifetime; a probe that resolves after abort must not swap the source. */
   signal?: AbortSignal;
-  /** Guards a stale original probe when the element is reused by a newer page. */
+  /** Guards stale probes and retries when the element is reused by a newer page. */
   isCurrent?: () => boolean;
   /** Probe factory, injectable so tests can drive the load without a network. */
   probe?: () => PageImage;
@@ -163,6 +185,7 @@ export function createPageImageSlot<Img extends PageImage>(
         page = loaded;
         onLoaded?.(loaded);
       },
+      isCurrent,
     });
   };
 

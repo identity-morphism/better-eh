@@ -2,7 +2,7 @@ import { warn } from "../log";
 import { priorityOf } from "../net/priority";
 import type { PageData } from "../types";
 import { isAbortError, RateLimitedError } from "./errors";
-import type { ViewerPageOptions } from "./loader";
+import type { RetryWithNlOptions, ViewerPageOptions } from "./loader";
 
 /** Navigation bursts are common; only the page the reader settles on is worth warming. */
 export const PREFETCH_IDLE_MS = 150;
@@ -24,7 +24,7 @@ interface PrefetcherDeps {
   viewerPage: (url: string, options: ViewerPageOptions) => Promise<PageData>;
   preloadImage: (src: string) => PreloadedImage;
   touchImage: (src: string) => void;
-  retryWithNl: (page: PageData) => Promise<PageData | null>;
+  retryWithNl: (page: PageData, options?: RetryWithNlOptions) => Promise<PageData | null>;
   /** Requests currently on the wire, excluding queued work. */
   activeCount: () => number;
   /** The queue's configured concurrency. */
@@ -119,15 +119,15 @@ export function createPrefetcher(deps: PrefetcherDeps): Prefetcher {
   }
 
   /** Warm one page's image and let a failed image trigger a single no-limit retry. */
-  function preloadPageImage(page: PageData, mine: number): void {
+  function preloadPageImage(page: PageData, mine: number, signal: AbortSignal): void {
     const img = deps.preloadImage(page.imgSrc);
     img.addEventListener(
       "error",
       () => {
-        if (generation !== mine) {
+        if (generation !== mine || signal.aborted) {
           return;
         }
-        void deps.retryWithNl(page).then((retried) => {
+        void deps.retryWithNl(page, { signal }).then((retried) => {
           if (retried !== null && retried.imgSrc !== "" && generation === mine) {
             deps.preloadImage(retried.imgSrc);
           }
@@ -159,7 +159,7 @@ export function createPrefetcher(deps: PrefetcherDeps): Prefetcher {
         break;
       }
       if (next.imgSrc) {
-        preloadPageImage(next, mine);
+        preloadPageImage(next, mine, signal);
         images.push(next.imgSrc);
       }
       page = next;

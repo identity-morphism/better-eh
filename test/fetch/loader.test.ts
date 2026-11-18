@@ -58,12 +58,12 @@ function page(url: string, nlToken: string | null = null): PageData {
 
 function harness(respond: (url: string) => Response) {
   const calls: string[] = [];
-  const requests: { priority?: number }[] = [];
+  const requests: { priority?: number; signal?: AbortSignal }[] = [];
   let purges = 0;
   const loader = createPageLoader({
     request: (url, options) => {
       calls.push(url);
-      requests.push({ priority: options.priority });
+      requests.push({ priority: options.priority, signal: options.signal });
       return Promise.resolve(respond(url));
     },
     parseHtml: (text) => parseDocument(text),
@@ -337,6 +337,34 @@ describe("PageLoader.retryWithNl", () => {
 
     expect(await h.loader.viewerPage(VIEWER_URL)).toBe(retried);
     expect(h.calls).toHaveLength(1);
+  });
+
+  test("passes the retry signal to the transport", async () => {
+    const html = await fixtureHtml("viewer.html");
+    const h = harness(() => htmlResponse(html));
+    const controller = new AbortController();
+
+    const retried = await h.loader.retryWithNl(page(VIEWER_URL, "777"), {
+      signal: controller.signal,
+    });
+
+    expect(retried?.viewerUrl).toBe(VIEWER_URL);
+    expect(h.calls).toEqual([`${VIEWER_URL}?nl=777`]);
+    expect(h.requests).toHaveLength(1);
+    expect(h.requests[0]?.signal).toBe(controller.signal);
+  });
+
+  test("returns null without a request when the signal is already aborted", async () => {
+    const h = harness(() => htmlResponse("unused"));
+    const controller = new AbortController();
+    controller.abort();
+
+    const retried = await h.loader.retryWithNl(page(VIEWER_URL, "777"), {
+      signal: controller.signal,
+    });
+
+    expect(retried).toBeNull();
+    expect(h.calls).toEqual([]);
   });
 
   test("returns null when the retry itself fails", async () => {
