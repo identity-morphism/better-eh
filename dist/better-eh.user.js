@@ -1381,7 +1381,13 @@ ${defaultKeySummary()}`)) {
     if (!response.ok) {
       throw new Error(`${options.failure} (${response.status}).`);
     }
+    if (isLoginWall(await response.clone().text())) {
+      throw new LoginRequiredError;
+    }
     return response;
+  }
+  function isLoginWall(body) {
+    return /<input[^>]+type=["']?password/i.test(body);
   }
   function postForm(url, body, options) {
     return post(url, body, "application/x-www-form-urlencoded", options);
@@ -4129,7 +4135,9 @@ ${defaultKeySummary()}`)) {
       content.replaceChildren();
       status.announce("Saving…");
       try {
-        await noteLoad;
+        if (await noteLoad === null) {
+          throw new Error("Could not read the saved note.");
+        }
         await save(state, folder === null ? null : folder.slot, note.value.trim());
         state.set(folder !== null, folder);
         syncHeader();
@@ -4146,9 +4154,9 @@ ${defaultKeySummary()}`)) {
       }
     };
     status.announce("Loading folders…");
-    const noteLoad = state.get().favorited === true ? loadNote(controller.signal).catch(() => "") : Promise.resolve("");
+    const noteLoad = state.get().favorited === true ? loadNote(controller.signal).catch(() => null) : Promise.resolve("");
     noteLoad.then((savedNote) => {
-      if (!controller.signal.aborted && note.value === "") {
+      if (!controller.signal.aborted && note.value === "" && savedNote !== null) {
         note.value = savedNote;
       }
     });
@@ -5136,6 +5144,35 @@ ${defaultKeySummary()}`)) {
       `https://cdn.jsdelivr.net/gh/${DATA_REPO}@master/assets/${name}`
     ];
   }
+  var MAX_ASSET_BYTES = 2 * 1024 * 1024;
+  async function readCapped(response, limit) {
+    if (Number(response.headers.get("content-length") ?? "0") > limit) {
+      return null;
+    }
+    if (response.body === null) {
+      return new Uint8Array(await response.arrayBuffer());
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    let read = await reader.read();
+    while (!read.done) {
+      total += read.value.byteLength;
+      if (total > limit) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(read.value);
+      read = await reader.read();
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  }
   async function fetchAsset(urls, decode, { label, timeoutMs }) {
     for (const url of urls) {
       const controller = timeoutMs === undefined ? null : new AbortController;
@@ -5152,7 +5189,11 @@ ${defaultKeySummary()}`)) {
           warn(`${label} returned ${response.status}`, url);
           continue;
         }
-        const bytes = new Uint8Array(await response.arrayBuffer());
+        const bytes = await readCapped(response, MAX_ASSET_BYTES);
+        if (bytes === null) {
+          warn(`${label} is larger than ${MAX_ASSET_BYTES} bytes`, url);
+          continue;
+        }
         const value = decode(bytes);
         if (value === null) {
           warn(`${label} returned invalid data`, url);
@@ -11293,6 +11334,11 @@ ${defaultKeySummary()}`)) {
       this.panY = Math.max(-limitY, Math.min(this.panY, limitY));
       surface.style.transform = this.zoomLevel === 1 && this.panX === 0 && this.panY === 0 ? "" : `translate(${this.panX}px, ${this.panY}px) scale(${this.zoomLevel})`;
     }
+    syncSurface() {
+      if (this.zoomLevel !== 1 || this.panX !== 0 || this.panY !== 0) {
+        this.updateTransform();
+      }
+    }
     updateZoom(delta, isFitHeight) {
       if (delta === null) {
         this.reset();
@@ -11635,6 +11681,7 @@ ${defaultKeySummary()}`)) {
   <div id="img-error" role="alert" hidden>
     <p id="img-error-text">This page could not be loaded.</p>
     <button id="img-error-retry" class="img-error-retry" type="button">Retry</button>
+    <a id="img-error-native" class="img-error-native" href=""></a>
   </div>
 </div>
 `;
@@ -11741,7 +11788,8 @@ ${defaultKeySummary()}`)) {
       elHelp: requireShell("hud-help"),
       elError: requireShell("img-error"),
       elErrorText: requireShell("img-error-text"),
-      elErrorRetry: requireShell("img-error-retry")
+      elErrorRetry: requireShell("img-error-retry"),
+      elErrorNative: requireShell("img-error-native")
     };
     ui.elGallery.append(icon("back"));
     ui.elFirst.append(icon("first"));
@@ -11870,6 +11918,8 @@ ${defaultKeySummary()}`)) {
     };
     const showError = () => {
       ui.elErrorText.textContent = `Page ${current.counterText} could not be loaded.`;
+      ui.elErrorNative.href = nativeUrl(current.viewerUrl);
+      ui.elErrorNative.textContent = "Open native page";
       ui.elError.hidden = false;
     };
     const syncNav = (data) => {
@@ -11929,8 +11979,8 @@ ${defaultKeySummary()}`)) {
       if (token !== navigationToken || ctx.signal.aborted) {
         return;
       }
-      const target = back ? back.prevHref : current.prevHref;
-      if (target) {
+      const target = back ? back.prevHref ?? back.viewerUrl : current.prevHref;
+      if (target !== null && target !== current.viewerUrl) {
         ctx.navigate(target, { replace: true });
         return;
       }
@@ -11953,6 +12003,7 @@ ${defaultKeySummary()}`)) {
       entry.node.scrollIntoView({ block: "start" });
       continuousIndex = index;
       refreshSurface();
+      zoom.syncSurface();
       ui.elCounter.textContent = entry.view.page.counterText;
       ui.elFileInfo.textContent = entry.view.page.fileInfo;
       syncContinuousNav();
@@ -12151,6 +12202,7 @@ ${defaultKeySummary()}`)) {
       continuousIndex = best;
       if (best !== previous) {
         refreshSurface();
+        zoom.syncSurface();
       }
       const visible = pages[best];
       if (visible) {
@@ -12392,7 +12444,7 @@ ${defaultKeySummary()}`)) {
       panPoint = null;
     }, { signal: ctx.signal });
     ui.elReader.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest("#hud, #page-info, #page-nav, #hud-help, #img-error")) {
+      if (event.target instanceof Element && event.target.closest("#hud, #page-info, #page-nav, #hud-help, #img-error, button, a, input, select, textarea, label")) {
         return;
       }
       if (zoom.consumePanned() || suppressClick) {
@@ -17480,6 +17532,24 @@ body.hud-pinned #page-nav button {
   transition: border-color 0.15s;
 }
 .img-error-retry:hover {
+  border-color: var(--color-accent);
+}
+
+.img-error-native {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+  padding: 0 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-panel);
+  color: var(--color-fg);
+  font-size: var(--text-control);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.img-error-native:hover {
   border-color: var(--color-accent);
 }
 

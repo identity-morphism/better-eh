@@ -25,6 +25,7 @@ export const SHELL_IDS = [
   "img-error",
   "img-error-text",
   "img-error-retry",
+  "img-error-native",
 ] as const;
 
 type ShellIds = (typeof SHELL_IDS)[number];
@@ -55,6 +56,7 @@ interface ShellElements {
   "img-error": HTMLElement;
   "img-error-text": HTMLElement;
   "img-error-retry": HTMLButtonElement;
+  "img-error-native": HTMLAnchorElement;
 }
 
 /** Look up one shell element, failing loudly when `shell.html` and its contract drift apart. */

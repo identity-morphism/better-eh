@@ -1,3 +1,4 @@
+import { LoginRequiredError } from "../fetch/errors";
 import { priorityOf } from "./priority";
 import { net } from "./queue";
 
@@ -39,7 +40,17 @@ async function post(
   if (!response.ok) {
     throw new Error(`${options.failure} (${response.status}).`);
   }
+  // The site answers a dead session with HTTP 200 and its login form, so a status check alone
+  // reports success for a mutation that never ran. A success body never carries a password field.
+  if (isLoginWall(await response.clone().text())) {
+    throw new LoginRequiredError();
+  }
   return response;
+}
+
+/** True when the body is the site's login page rather than the result of the mutation. */
+export function isLoginWall(body: string): boolean {
+  return /<input[^>]+type=["']?password/i.test(body);
 }
 
 /**

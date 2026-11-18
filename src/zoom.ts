@@ -102,6 +102,18 @@ export class ZoomController {
         : `translate(${this.panX}px, ${this.panY}px) scale(${this.zoomLevel})`;
   }
 
+  /**
+   * Re-apply the current zoom to whatever surface is active now.
+   *
+   * Continuous scrolling swaps the surface under the controller; without this the new page paints
+   * at 1x while the level stays zoomed, and the next step jumps.
+   */
+  public syncSurface(): void {
+    if (this.zoomLevel !== 1.0 || this.panX !== 0 || this.panY !== 0) {
+      this.updateTransform();
+    }
+  }
+
   public updateZoom(delta: number | null, isFitHeight: boolean): void {
     if (delta === null) {
       this.reset();

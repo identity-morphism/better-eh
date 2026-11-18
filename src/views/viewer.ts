@@ -9,6 +9,7 @@ import { net } from "../net/queue";
 import type { PageImageSlot } from "../page-image";
 import { createPageImageSlot } from "../page-image";
 import { clickIntent, readerLayout, swipeIntent } from "../reader-mode";
+import { nativeUrl } from "../routes/identity";
 import { getSettings, onSettingsChange, updateSetting } from "../settings";
 import shellHtml from "../shell.html" with { type: "text" };
 import type { PageData } from "../types";
@@ -50,6 +51,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     elError: requireShell("img-error"),
     elErrorText: requireShell("img-error-text"),
     elErrorRetry: requireShell("img-error-retry"),
+    elErrorNative: requireShell("img-error-native"),
   };
   // The shell ships empty containers; the icons come from the shared set, not text glyphs.
   ui.elGallery.append(icon("back"));
@@ -231,6 +233,9 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
 
   const showError = (): void => {
     ui.elErrorText.textContent = `Page ${current.counterText} could not be loaded.`;
+    // Retry cannot help when the page carries no `nl` token, so the native view is the way out.
+    ui.elErrorNative.href = nativeUrl(current.viewerUrl);
+    ui.elErrorNative.textContent = "Open native page";
     ui.elError.hidden = false;
   };
 
@@ -303,8 +308,9 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     if (token !== navigationToken || ctx.signal.aborted) {
       return;
     }
-    const target = back ? back.prevHref : current.prevHref;
-    if (target) {
+    // Page 1 has no previous, so stepping back from page 2 means page 1 itself.
+    const target = back ? (back.prevHref ?? back.viewerUrl) : current.prevHref;
+    if (target !== null && target !== current.viewerUrl) {
       ctx.navigate(target, { replace: true });
       return;
     }
@@ -330,6 +336,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     entry.node.scrollIntoView({ block: "start" });
     continuousIndex = index;
     refreshSurface();
+    zoom.syncSurface();
     ui.elCounter.textContent = entry.view.page.counterText;
     ui.elFileInfo.textContent = entry.view.page.fileInfo;
     syncContinuousNav();
@@ -555,6 +562,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     continuousIndex = best;
     if (best !== previous) {
       refreshSurface();
+      zoom.syncSurface();
     }
     const visible = pages[best];
     if (visible) {
@@ -856,7 +864,9 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     (event) => {
       if (
         event.target instanceof Element &&
-        event.target.closest("#hud, #page-info, #page-nav, #hud-help, #img-error")
+        event.target.closest(
+          "#hud, #page-info, #page-nav, #hud-help, #img-error, button, a, input, select, textarea, label",
+        )
       ) {
         return;
       }
