@@ -243,7 +243,9 @@ export function openFavoriteMenu(options: FavoriteMenuOptions): void {
     content.replaceChildren();
     status.announce("Saving…");
     try {
-      await noteLoad;
+      if ((await noteLoad) === null) {
+        throw new Error("Could not read the saved note.");
+      }
       await save(state, folder === null ? null : folder.slot, note.value.trim());
       state.set(folder !== null, folder);
       syncHeader();
@@ -266,12 +268,14 @@ export function openFavoriteMenu(options: FavoriteMenuOptions): void {
 
   // The note has to be known before any folder click can submit it, or a move would blank it, so
   // `apply` waits on this promise; the folder grid renders without waiting.
-  const noteLoad =
+  // `null` means the read failed, which is not the same as "no note": posting an empty note would
+  // erase the saved one, so a move waits and then refuses.
+  const noteLoad: Promise<string | null> =
     state.get().favorited === true
-      ? loadNote(controller.signal).catch(() => "")
+      ? loadNote(controller.signal).catch(() => null)
       : Promise.resolve("");
   void noteLoad.then((savedNote) => {
-    if (!controller.signal.aborted && note.value === "") {
+    if (!controller.signal.aborted && note.value === "" && savedNote !== null) {
       note.value = savedNote;
     }
   });

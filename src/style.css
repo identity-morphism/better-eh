@@ -352,6 +352,24 @@ body.hud-pinned #page-nav button {
   border-color: var(--color-accent);
 }
 
+.img-error-native {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+  padding: 0 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-panel);
+  color: var(--color-fg);
+  font-size: var(--text-control);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.img-error-native:hover {
+  border-color: var(--color-accent);
+}
+
 /* ---------------------------------------------------------- shortcut help */
 
 #hud-help {

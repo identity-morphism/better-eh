@@ -24,6 +24,39 @@ export function assetUrls(name: string): readonly [string, string] {
   ];
 }
 
+/** Both assets are a few hundred KB; anything past this is a bad mirror, not a slow download. */
+const MAX_ASSET_BYTES = 2 * 1024 * 1024;
+
+/** Read a response body up to `limit` bytes, or null when it declares or delivers more. */
+async function readCapped(response: Response, limit: number): Promise<Uint8Array | null> {
+  if (Number(response.headers.get("content-length") ?? "0") > limit) {
+    return null;
+  }
+  if (response.body === null) {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let read = await reader.read();
+  while (!read.done) {
+    total += read.value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(read.value);
+    read = await reader.read();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 export interface AssetOptions {
   /** Sentence the per-mirror warnings start with, e.g. `"Tag count mirror"`. */
   label: string;
@@ -57,7 +90,11 @@ export async function fetchAsset<T>(
         warn(`${label} returned ${response.status}`, url);
         continue;
       }
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      const bytes = await readCapped(response, MAX_ASSET_BYTES);
+      if (bytes === null) {
+        warn(`${label} is larger than ${MAX_ASSET_BYTES} bytes`, url);
+        continue;
+      }
       const value = decode(bytes);
       if (value === null) {
         warn(`${label} returned invalid data`, url);
