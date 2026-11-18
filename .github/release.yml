@@ -1,0 +1,16 @@
+changelog:
+  categories:
+    - title: Reader and gallery
+      labels: ["reader", "gallery"]
+    - title: Listings and search
+      labels: ["list", "search", "tags"]
+    - title: Account pages
+      labels: ["favorites", "toplist", "torrents", "settings"]
+    - title: Accessibility
+      labels: ["accessibility"]
+    - title: Internal
+      labels: ["documentation", "test", "dependencies"]
+    - title: Everything else
+      labels: ["*"]
+  exclude:
+    labels: ["skip-changelog"]

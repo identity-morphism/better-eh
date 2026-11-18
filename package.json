@@ -9,7 +9,6 @@
     "update:tag-counts": "bun run scripts/update-tag-counts.ts",
     "update:tag-index": "bun run scripts/update-tag-index.ts",
     "release": "bun run scripts/release.ts",
-    "check:version": "bun run scripts/check-version-bump.ts",
     "verify:release": "bun run scripts/verify-release.ts",
     "dev": "bun run build.ts --watch --serve",
     "typecheck": "./node_modules/.bin/bun check --no-script",
@@ -20,9 +19,12 @@
     "format": "./node_modules/.bin/bun fmt",
     "format:check": "./node_modules/.bin/bun fmt --check",
     "check": "bun run format:check && bun run lint && bun run typecheck",
-    "prek": "prek run --all-files"
+    "prek": "prek run --all-files",
+    "check:pr-version": "bun run scripts/check-pr-version.ts",
+    "test:coverage": "bun run scripts/check-coverage.ts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@tailwindcss/cli": "^4.3.3",
     "@types/bun": "latest",
     "@types/tampermonkey": "^5.5.0",

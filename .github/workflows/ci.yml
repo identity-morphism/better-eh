@@ -29,17 +29,18 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
-      - run: bun run test
+      - name: Tests with the src/ coverage floor
+        run: bun run test:coverage
       - run: bun run build
       - run: git diff --exit-code dist/
+      - name: Pull requests leave the release version alone
+        # Releases own the number: `bun run release` bumps it after the pull request merges.
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bun run check:pr-version "$BASE_SHA"
       - run: bunx playwright install --with-deps chromium
       - run: bun run test:browser
-      - name: Check version bump
-        # A force push rewrites history; ordinary forward pushes are the ones that need a bump.
-        if: github.event_name == 'push' && github.event.forced != true
-        env:
-          BASE_REF: ${{ github.event.before }}
-        run: bun run check:version "$BASE_REF"
       - uses: actions/upload-artifact@v7
         with:
           name: better-eh.user.js

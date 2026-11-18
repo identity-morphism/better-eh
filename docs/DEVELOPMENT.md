@@ -18,14 +18,16 @@ bun install
 ## Static Checks
 
 ```bash
-bun run check        # format check + lint + type check
-bun run test         # fixture tests (parse, fetch, routes, viewer, ui), one isolated global per file
-bun run test:browser # built userscript smoke gate (Playwright + local fixture)
-bun run typecheck    # built-in type checker through the pinned Bun
-bun run lint         # bun lint
-bun run lint:fix     # bun lint --fix
-bun run format       # bun fmt
-bun run format:check # bun fmt --check
+bun run check            # format check + lint + type check
+bun run test             # fixtures across parse, fetch, routes, viewer and ui; one global per file
+bun run test:coverage    # the same suite, then the src/ line-coverage floor CI enforces
+bun run test:browser     # built userscript smoke gate (Playwright, two fixtures, axe)
+bun run typecheck        # built-in type checker through the pinned Bun
+bun run lint             # bun lint
+bun run lint:fix         # bun lint --fix
+bun run format           # bun fmt
+bun run format:check     # bun fmt --check
+bun run check:pr-version # fails when a pull request moves the release version
 ```
 
 Lint and format options live in [`bunfig.toml`](../bunfig.toml).
@@ -67,11 +69,15 @@ The release script requires a clean tree, bumps `package.json`, rebuilds `dist/`
 and tags `vX.Y.Z`. `--push` also runs `git push --follow-tags`; without it the script prints the
 command to run.
 
-CI fails when `dist/` changes without `@version` moving (`bun run check:version`). Managers only
-update on a version change, so an unbumped rebuild never reaches installed copies. CI also installs
-Chromium for Playwright and runs the browser smoke gate against the built bundle and a local
-E-Hentai list fixture; failures there cover the shell, search routing, and tag combobox that unit
-tests cannot boot end to end.
+Releases own the version. CI rebuilds `dist/` and fails on any diff, so a pull request that
+changes behaviour commits the rebuilt bundle and leaves `version` in `package.json` alone;
+`bun run check:pr-version` fails a pull request that moves it. Managers only update on a version
+change, so the rebuilt bundle reaches installed copies at the next release, not at merge.
+
+CI also installs Chromium for Playwright and runs the browser smoke gate against the built bundle
+and two local fixtures, a list page and a gallery. It covers the shell, search routing and the tag
+combobox that unit tests cannot boot end to end, then runs axe over `#eh-root` with the WCAG
+A/AA rules, so a new control that fails name, contrast or landmark checks fails CI.
 
 Sleazy Fork is the public listing: <https://sleazyfork.org/en/scripts/606064-better-eh>. A new
 version must be posted to that listing after the GitHub release; Sleazy Fork rewrites
