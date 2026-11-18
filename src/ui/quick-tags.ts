@@ -33,6 +33,12 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
   const refresh = (next?: string): void => {
     text = next ?? options.getText();
     for (const entry of entries) {
+      if (entry.tag.mode === "run") {
+        // A run expression replaces the search; there is no on/off state to report.
+        entry.node.removeAttribute("aria-pressed");
+        entry.node.title = `Run ${entry.tag.name}`;
+        continue;
+      }
       const on = containsExpression(text, entry.tag.query);
       entry.node.setAttribute("aria-pressed", String(on));
       entry.node.title = on ? `Remove ${entry.tag.query}` : `Add ${entry.tag.query}`;
@@ -50,8 +56,11 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
       );
       node.addEventListener(
         "click",
-        () => {
-          options.search(toggleExpressionInSearch(options.getText(), tag.query));
+        (event) => {
+          // The saved mode decides the click; Alt asks for the other verb. `click()` synthesizes an
+          // event with no modifier state, so compare against the boolean rather than the value.
+          const run = (tag.mode === "run") !== (event.altKey === true);
+          options.search(run ? tag.query : toggleExpressionInSearch(options.getText(), tag.query));
         },
         { signal },
       );

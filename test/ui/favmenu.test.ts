@@ -141,6 +141,40 @@ describe("favorite menu status region", () => {
     expect(node?.textContent).toBe("Sign in to use favorites.");
   });
 
+  test("a failed note read blocks the move instead of blanking the note", async () => {
+    document.cookie = "ipb_member_id=1";
+    const anchor = document.createElement("button");
+    document.body.append(anchor);
+    const writes: unknown[] = [];
+
+    openFavoriteMenu({
+      anchor,
+      state: favoriteState({ folder: "Good Stuff", slot: 1 }),
+      loadFolders: () =>
+        Promise.resolve([
+          { slot: 1, name: "Good Stuff", color: "#c8c8c8" },
+          { slot: 2, name: "Plan to Read", color: "#ff7b7b" },
+        ]),
+      loadNote: () => Promise.reject(new Error("rate limited")),
+      save: (...args) => {
+        writes.push(args);
+        return Promise.resolve();
+      },
+    });
+
+    await flushMicrotasks(2);
+    const target = [...document.querySelectorAll<HTMLButtonElement>(".fav-item")].find((item) =>
+      item.textContent.includes("Plan to Read"),
+    );
+    target?.click();
+    await flushMicrotasks(4);
+
+    // Posting an empty note here would erase the saved one, so nothing is posted at all.
+    expect(writes).toEqual([]);
+    expect(document.querySelector(".fav-link")?.textContent).toContain("native");
+    expect(document.querySelector("[role='status']")?.textContent).toContain("note");
+  });
+
   test("loads the saved note and submits it with the folder change", async () => {
     document.cookie = "ipb_member_id=1";
     const anchor = document.createElement("button");

@@ -2095,6 +2095,21 @@ ${defaultKeySummary()}`)) {
     };
   }
 
+  // src/site.ts
+  var SITE_DOMAINS = ["e-hentai.org", "exhentai.org"];
+  function isSiteHost(hostname) {
+    return SITE_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+  }
+  function siteLabel() {
+    if (typeof location === "undefined") {
+      return "E-Hentai";
+    }
+    return /(^|\.)exhentai\.org$/i.test(location.hostname) ? "ExHentai" : "E-Hentai";
+  }
+  function documentTitle(...parts) {
+    return [...parts, siteLabel()].filter((part) => part !== "").join(" - ");
+  }
+
   // src/parse/gallery.ts
   function backgroundUrl(node) {
     if (!node || !("style" in node)) {
@@ -2277,11 +2292,18 @@ ${defaultKeySummary()}`)) {
     }
     return safeUrl(match[2].replace(/&amp;/g, "&"), url)?.href ?? null;
   }
+  function popupBase(declared, pageUrl) {
+    const resolved = declared === null ? null : safeUrl(declared, pageUrl);
+    if (resolved !== null && resolved.protocol === "https:" && isSiteHost(resolved.hostname)) {
+      return resolved.href;
+    }
+    return new URL("/", pageUrl).href;
+  }
   function parseActions(doc, url) {
     const report = doc.querySelector("a[href*='report=select']");
     const expunge = doc.querySelector("a[href*='act=expunge']");
     const rename = doc.getElementById("renamelink");
-    const base = scriptValue(doc, "base_url") ?? url;
+    const base = popupBase(scriptValue(doc, "base_url"), url);
     const identity = galleryIdentity(url);
     const popup = rename ? safeUrl("gallerypopups.php", base) : null;
     let renameHref = null;
@@ -3140,17 +3162,6 @@ ${defaultKeySummary()}`)) {
     }
     body.append("apply", "Apply");
     return body;
-  }
-
-  // src/site.ts
-  function siteLabel() {
-    if (typeof location === "undefined") {
-      return "E-Hentai";
-    }
-    return /(^|\.)exhentai\.org$/i.test(location.hostname) ? "ExHentai" : "E-Hentai";
-  }
-  function documentTitle(...parts) {
-    return [...parts, siteLabel()].filter((part) => part !== "").join(" - ");
   }
 
   // src/data/favorites.ts
@@ -5036,18 +5047,27 @@ ${defaultKeySummary()}`)) {
           const row = el("div", { class: "search-history-saved" });
           row.append(queryButton(entry.query, entry.name, () => {
             close();
-            options.onPick(entry.query);
+            if (entry.mode === "toggle") {
+              options.onToggle(entry.query);
+            } else {
+              options.onPick(entry.query);
+            }
           }));
+          const keepsTerms = entry.mode === "toggle";
           const toggle = el("button", {
             class: "search-history-toggle",
             type: "button",
-            text: entry.mode === "toggle" ? "±" : "+",
-            "aria-label": `Toggle terms of ${entry.name}`,
-            title: "Add or remove these terms"
+            text: keepsTerms ? "▶" : "±",
+            "aria-label": `${keepsTerms ? "Run" : "Toggle terms of"} ${entry.name}`,
+            title: keepsTerms ? "Replace the search with these terms" : "Add or remove these terms"
           });
           toggle.addEventListener("click", () => {
             close();
-            options.onToggle(entry.query);
+            if (keepsTerms) {
+              options.onPick(entry.query);
+            } else {
+              options.onToggle(entry.query);
+            }
           });
           const remove = el("button", {
             class: "search-history-remove",
@@ -7142,7 +7162,7 @@ ${defaultKeySummary()}`)) {
   function folderHref(baseUrl, active) {
     const url = new URL(FAVORITES_PATH, baseUrl);
     for (const [key, value] of new URL(baseUrl).searchParams) {
-      if (key !== "favcat" && key !== "next" && key !== "prev") {
+      if (key !== "favcat" && key !== "next" && key !== "prev" && key !== "page") {
         url.searchParams.set(key, value);
       }
     }
@@ -7456,8 +7476,18 @@ ${defaultKeySummary()}`)) {
       throw new Error(`${context}: ${error}`);
     }
   }
+  function siteUrl(url) {
+    const resolved = new URL(url, location.href);
+    if (resolved.protocol !== "https:" || !isSiteHost(resolved.hostname)) {
+      throw new Error("Gallery request refused: the endpoint is not on this site.");
+    }
+    return resolved.href;
+  }
   function postJson2(url, body) {
-    return postJson(url, body, { tag: "gallery-action", failure: "Gallery request failed" });
+    return postJson(siteUrl(url), body, {
+      tag: "gallery-action",
+      failure: "Gallery request failed"
+    });
   }
   async function send(config, payload, deps) {
     const post = deps.post ?? postJson2;
@@ -8288,6 +8318,15 @@ ${defaultKeySummary()}`)) {
     binding.open();
   }
 
+  // src/ui/page-advance.ts
+  var advance = null;
+  function setPageAdvance(next) {
+    advance = next;
+  }
+  function advancePage() {
+    return advance?.() ?? Promise.resolve(false);
+  }
+
   // src/ui/page-cursor.ts
   function createPageCursor({
     next,
@@ -8516,6 +8555,7 @@ ${defaultKeySummary()}`)) {
         return;
       }
       stopped = true;
+      setPageAdvance(null);
       cursor.stop();
       listeners.abort();
       observer.disconnect();
@@ -8533,6 +8573,7 @@ ${defaultKeySummary()}`)) {
     } else {
       observer.observe(element);
     }
+    setPageAdvance(loadNext);
     return {
       element,
       loadNext,
@@ -9379,6 +9420,11 @@ ${defaultKeySummary()}`)) {
     const refresh = (next) => {
       text = next ?? options.getText();
       for (const entry of entries) {
+        if (entry.tag.mode === "run") {
+          entry.node.removeAttribute("aria-pressed");
+          entry.node.title = `Run ${entry.tag.name}`;
+          continue;
+        }
         const on = containsExpression(text, entry.tag.query);
         entry.node.setAttribute("aria-pressed", String(on));
         entry.node.title = on ? `Remove ${entry.tag.query}` : `Add ${entry.tag.query}`;
@@ -9389,8 +9435,9 @@ ${defaultKeySummary()}`)) {
       row.replaceChildren();
       for (const tag of tags) {
         const node = el("button", { class: "quick-tag", type: "button", "aria-pressed": "false" }, el("span", { class: "quick-tag-label", text: tag.name }));
-        node.addEventListener("click", () => {
-          options.search(toggleExpressionInSearch(options.getText(), tag.query));
+        node.addEventListener("click", (event) => {
+          const run = tag.mode === "run" !== (event.altKey === true);
+          options.search(run ? tag.query : toggleExpressionInSearch(options.getText(), tag.query));
         }, { signal });
         row.append(node);
         entries.push({ tag, node });
@@ -9764,8 +9811,16 @@ ${defaultKeySummary()}`)) {
         }
         onChange?.();
       },
-      rebase: () => {
-        capture();
+      rebase: (saved) => {
+        if (saved === undefined) {
+          capture();
+        } else {
+          for (const [key, value] of saved) {
+            if (baseline.has(key)) {
+              baseline.set(key, value);
+            }
+          }
+        }
         onChange?.();
       }
     };
@@ -10608,7 +10663,7 @@ ${defaultKeySummary()}`)) {
         if (settingsChanged) {
           panel.apply();
         }
-        draft.rebase();
+        draft.rebase(changed);
         showToast("Settings saved");
       } catch (cause) {
         if (!ctx.signal.aborted) {
@@ -12947,7 +13002,8 @@ ${defaultKeySummary()}`)) {
     now = () => performance.now(),
     frame = (callback) => window.requestAnimationFrame(callback),
     cancelFrame = (handle) => window.cancelAnimationFrame(handle),
-    timeoutMs = SCROLL_RESTORE_TIMEOUT_MS
+    timeoutMs = SCROLL_RESTORE_TIMEOUT_MS,
+    advance = () => Promise.resolve(false)
   } = {}) {
     if (target <= 0) {
       scrollTo(0);
@@ -12958,6 +13014,7 @@ ${defaultKeySummary()}`)) {
     const deadline = now() + timeoutMs;
     let pending = null;
     let stopped = false;
+    let growing = false;
     let lastHeight = scrollHeight();
     let lastGrowth = now();
     const stop = () => {
@@ -12987,6 +13044,12 @@ ${defaultKeySummary()}`)) {
       if (reached || stalled || at >= deadline) {
         stopped = true;
         return;
+      }
+      if (!growing) {
+        growing = true;
+        advance().catch(() => false).finally(() => {
+          growing = false;
+        });
       }
       pending = frame(tick);
     };
@@ -17836,7 +17899,7 @@ body.fit-h.reader-continuous #reader {
   var stopScrollRestore = null;
   function restoreScroll(y) {
     stopScrollRestore?.();
-    const restore = restoreScrollWhenReady(y);
+    const restore = restoreScrollWhenReady(y, { advance: advancePage });
     const controller = new AbortController;
     const stop = () => {
       controller.abort();

@@ -20,6 +20,7 @@ import { showBanner } from "./ui/banner";
 import { el } from "./ui/dom";
 import { closeFavoriteMenu } from "./ui/favmenu";
 import { loginGate } from "./ui/login-gate";
+import { advancePage } from "./ui/page-advance";
 import { restoreScrollWhenReady } from "./ui/scroll-restore";
 import { nativePageAction, statePanel } from "./ui/state-panel";
 import { trackStickyChrome } from "./ui/sticky";
@@ -44,7 +45,7 @@ let stopScrollRestore: (() => void) | null = null;
  */
 function restoreScroll(y: number): () => void {
   stopScrollRestore?.();
-  const restore = restoreScrollWhenReady(y);
+  const restore = restoreScrollWhenReady(y, { advance: advancePage });
   const controller = new AbortController();
   const stop = (): void => {
     controller.abort();

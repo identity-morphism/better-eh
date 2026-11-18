@@ -1,4 +1,5 @@
 import { el } from "./dom";
+import { setPageAdvance } from "./page-advance";
 import type { CursorPage, PageCursorState } from "./page-cursor";
 import { createPageCursor } from "./page-cursor";
 
@@ -202,6 +203,7 @@ export function infiniteScroll<T>({
       return;
     }
     stopped = true;
+    setPageAdvance(null);
     cursor.stop();
     listeners.abort();
     observer.disconnect();
@@ -222,6 +224,9 @@ export function infiniteScroll<T>({
   } else {
     observer.observe(element);
   }
+
+  // One page per call, so a history restore can pull as far down as the saved position needs.
+  setPageAdvance(loadNext);
 
   return {
     element,

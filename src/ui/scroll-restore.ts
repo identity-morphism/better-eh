@@ -13,6 +13,8 @@ export interface ScrollRestoreDeps {
   frame?: (callback: () => void) => number;
   cancelFrame?: (handle: number) => void;
   timeoutMs?: number;
+  /** Ask the mounted endless-scroll region for one more page. */
+  advance?: () => Promise<boolean>;
 }
 
 /**
@@ -36,6 +38,7 @@ export function restoreScrollWhenReady(
     frame = (callback: () => void) => window.requestAnimationFrame(callback),
     cancelFrame = (handle: number) => window.cancelAnimationFrame(handle),
     timeoutMs = SCROLL_RESTORE_TIMEOUT_MS,
+    advance = () => Promise.resolve(false),
   }: ScrollRestoreDeps = {},
 ): () => void {
   if (target <= 0) {
@@ -46,6 +49,7 @@ export function restoreScrollWhenReady(
   const deadline = now() + timeoutMs;
   let pending: number | null = null;
   let stopped = false;
+  let growing = false;
   let lastHeight = scrollHeight();
   let lastGrowth = now();
 
@@ -80,6 +84,17 @@ export function restoreScrollWhenReady(
     if (reached || stalled || at >= deadline) {
       stopped = true;
       return;
+    }
+    // The region stops chaining after a few pages to keep one scroll gesture cheap; a restore is
+    // not a gesture, so ask for the next page itself rather than waiting for a sentinel that is
+    // disarmed at the cap.
+    if (!growing) {
+      growing = true;
+      void advance()
+        .catch(() => false)
+        .finally(() => {
+          growing = false;
+        });
     }
     pending = frame(tick);
   };

@@ -65,6 +65,13 @@ describe("quick tags", () => {
     pin.checked = true;
     pin.dispatchEvent(new Event("change", { bubbles: true }));
 
+    const mode = panel.querySelector<HTMLSelectElement>(".expression-mode");
+    if (!mode) {
+      throw new Error("editor mode select missing");
+    }
+    mode.selectedIndex = 1;
+    mode.dispatchEvent(new Event("change", { bubbles: true }));
+
     const form = panel.querySelector("form");
     if (!form) {
       throw new Error("editor form missing");
@@ -73,7 +80,7 @@ describe("quick tags", () => {
 
     expect(document.querySelector(".expression-editor-panel")).toBeNull();
     expect(savedExpressions()).toMatchObject([
-      { name: "LOLI", query: "f:lolicon$", mode: "run", pinned: true },
+      { name: "LOLI", query: "f:lolicon$", mode: "toggle", pinned: true },
     ]);
 
     const pill = handle.element.querySelector<HTMLButtonElement>(".quick-tag");
@@ -84,8 +91,29 @@ describe("quick tags", () => {
     expect(searched).toEqual(["cat f:lolicon$"]);
   });
 
-  test("restores pinned expressions in a later view and marks them active", () => {
+  test("a run expression replaces the search, and Alt toggles its terms", () => {
     replaceExpressions([expression()]);
+    const searched: string[] = [];
+    const handle = renderQuickTags({
+      getText: () => "cat",
+      search: (text) => searched.push(text),
+      signal: new AbortController().signal,
+    });
+
+    const pill = handle.element.querySelector<HTMLButtonElement>(".quick-tag");
+    // A run expression has no on/off state to report.
+    expect(pill?.getAttribute("aria-pressed")).toBeNull();
+
+    pill?.click();
+    const alt = new Event("click", { bubbles: true, cancelable: true });
+    Object.assign(alt, { altKey: true });
+    pill?.dispatchEvent(alt);
+
+    expect(searched).toEqual(["f:lolicon$", "cat f:lolicon$"]);
+  });
+
+  test("restores pinned expressions in a later view and marks them active", () => {
+    replaceExpressions([expression({ mode: "toggle" })]);
 
     const handle = renderQuickTags({
       getText: () => "f:lolicon$ other",

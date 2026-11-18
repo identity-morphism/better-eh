@@ -70,6 +70,29 @@ function fakeEnvironment(
 }
 
 describe("restoreScrollWhenReady", () => {
+  test("drives the endless region itself instead of stalling at one page", async () => {
+    // 2000px of document, a 900px viewport, and a saved position four pages down.
+    const env = fakeEnvironment(2000, 0, 0);
+    let pages = 0;
+    restoreScrollWhenReady(9000, {
+      ...env.deps,
+      advance: () => {
+        pages += 1;
+        env.setHeight(2000 + pages * 1000);
+        return Promise.resolve(true);
+      },
+    });
+
+    for (let step = 0; step < 24; step += 1) {
+      env.setNow(step * 100);
+      env.runNext();
+      await Promise.resolve();
+    }
+
+    expect(pages).toBeGreaterThan(3);
+    expect(env.scroll()).toBe(9000);
+  });
+
   test("restores a reachable target in one frame", () => {
     const env = fakeEnvironment(5000);
     restoreScrollWhenReady(480, env.deps);

@@ -8,6 +8,32 @@ const GALLERY_URL = "https://e-hentai.org/g/123456/abcdef1234/";
 const doc = await loadFixture("gallery.html");
 const data = parseGalleryPage(doc, GALLERY_URL);
 
+describe("parseGalleryPage actions", () => {
+  test("a rename link only follows base_url while it stays on the site", async () => {
+    const onSite = await loadFixture("gallery-comments.html");
+    for (const script of onSite.querySelectorAll("script")) {
+      if (script.textContent.includes("base_url")) {
+        script.textContent = script.textContent.replace(
+          "https://e-hentai.org/",
+          "https://evil.example/",
+        );
+      }
+    }
+    const parsed = parseGalleryPage(onSite, GALLERY_URL);
+    expect(parsed.actions.renameHref).toContain("e-hentai.org/gallerypopups.php");
+
+    const relative = await loadFixture("gallery-comments.html");
+    for (const script of relative.querySelectorAll("script")) {
+      if (script.textContent.includes("base_url")) {
+        script.textContent = script.textContent.replace("https://e-hentai.org/", "/");
+      }
+    }
+    expect(parseGalleryPage(relative, GALLERY_URL).actions.renameHref).toContain(
+      "e-hentai.org/gallerypopups.php",
+    );
+  });
+});
+
 describe("parseGalleryPage", () => {
   test("parses identity, titles and metadata", () => {
     expect(data.gid).toBe("123456");

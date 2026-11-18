@@ -353,4 +353,19 @@ describe("renderFavorites", () => {
     ]);
     expect(summary()).toBe("2 matches");
   });
+
+  test("a folder or search link drops the page cursor", () => {
+    renderFavorites(
+      host,
+      { ...data, url: "https://exhentai.org/favorites.php?favcat=0&page=2", search: "" },
+      viewContext(),
+      { remove, move },
+    );
+
+    const tabs = [...host.querySelectorAll<HTMLAnchorElement>(".favorites-tab")].map((tab) =>
+      tab.getAttribute("href"),
+    );
+    expect(tabs).not.toHaveLength(0);
+    expect(tabs.every((href) => href?.includes("page=") !== true)).toBe(true);
+  });
 });

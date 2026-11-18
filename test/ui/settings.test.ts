@@ -212,6 +212,36 @@ describe("renderSettings", () => {
     expect(calls[1]?.get("ry")).toBe("900");
   });
 
+  test("an edit typed while the save is in flight stays dirty and is posted next time", async () => {
+    const { promise, resolve: release } = Promise.withResolvers<void>();
+    const calls: URLSearchParams[] = [];
+    const save: Save = (body) => {
+      calls.push(body);
+      return promise;
+    };
+
+    renderSettings(host, data, viewContext(), { save });
+    input("rx").value = "640";
+    touch();
+    button(".settings-apply").click();
+    await flushMicrotasks(8);
+
+    // Typed while the POST is still open: it is not in the body, so it must not be marked saved.
+    input("ry").value = "900";
+    touch();
+    release();
+    await flushMicrotasks(8);
+
+    expect(calls).toHaveLength(1);
+    expect(button(".settings-apply").disabled).toBe(false);
+
+    button(".settings-apply").click();
+    await flushMicrotasks(8);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.get("ry")).toBe("900");
+    expect(calls[1]?.get("rx")).toBe("640");
+  });
+
   test("disables Apply while saving and restores the label afterwards", async () => {
     const { promise: pending, resolve: release } = Promise.withResolvers<void>();
     const save: Save = () => pending;
