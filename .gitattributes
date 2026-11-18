@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# The userscript bundle is build output: 18k lines of generated CSS and JS. Keep it out of the
+# language statistics and collapse it by default in diffs; CI still fails when it drifts from src/.
+dist/better-eh.user.js linguist-generated
