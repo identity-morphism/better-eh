@@ -6,7 +6,9 @@
   The exact canary build is pinned twice in `package.json` (`packageManager` and the `bun`
   devDependency), so `bun install` fetches it into `node_modules/.bin/bun`, where the scripts and
   the `prek` hooks pick it up. CI bootstraps with the released 1.4.4 and then runs the pinned
-  binary; stable Bun has no `bun lint`, so only the pinned canary runs that check.
+  binary; stable Bun has no `bun lint`, so only the pinned canary runs that check. `bun run lint`
+  goes through `scripts/lint.ts`, which reports the mismatch instead of letting `bun lint` resolve
+  back to the `lint` script and exit 0 without linting.
 - Tailwind CSS v4 is compiled by `build.ts`; no separate step is required.
 
 ## Setup
@@ -23,7 +25,7 @@ bun run test             # fixtures across parse, fetch, routes, viewer and ui; 
 bun run test:coverage    # the same suite, then the src/ line-coverage floor CI enforces
 bun run test:browser     # built userscript smoke gate (Playwright, two fixtures, axe)
 bun run typecheck        # built-in type checker through the pinned Bun
-bun run lint             # bun lint
+bun run lint             # bun lint through scripts/lint.ts
 bun run lint:fix         # bun lint --fix
 bun run format           # bun fmt
 bun run format:check     # bun fmt --check
