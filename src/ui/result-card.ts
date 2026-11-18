@@ -54,6 +54,9 @@ function cardCover(item: ListItem): HTMLElement {
     tabindex: "-1",
   });
   const missing = (): void => {
+    // The visible placeholder is part of the link's text, so the name has to contain it. No
+    // parentheses: name matching strips them, and "no cover" would stop counting.
+    link.setAttribute("aria-label", `${item.title.primary} - no cover`);
     link.replaceChildren("No cover");
     link.classList.add("is-missing");
   };

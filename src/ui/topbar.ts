@@ -3,7 +3,6 @@ import { rememberQuery } from "../data/search-history";
 import type { SearchDraft } from "../search-draft";
 import { getSearchDraft, setSearchDraftText, subscribeSearchDraft } from "../search-draft";
 import { getSettings } from "../settings";
-import { siteLabel } from "../site";
 import { toggleExpressionInSearch } from "../tags/model";
 import { el, icon, isEditableTarget, searchInput } from "./dom";
 import { syncScrollEdges, trackScrollEdges } from "./jump-row";
@@ -322,7 +321,8 @@ function backButton(): HTMLElement {
 }
 
 function brandLink(): HTMLElement {
-  return el("a", { class: "brand", href: "/", "aria-label": `${siteLabel()} home` }, "E-H");
+  // The visible mark is "E-H"; WCAG 2.5.3 requires the spoken name to contain it.
+  return el("a", { class: "brand", href: "/", "aria-label": "E-H home" }, "E-H");
 }
 
 /** Shared site header used by the list and gallery views. */
