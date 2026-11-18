@@ -117,9 +117,10 @@ function summaryText(data: FavoritesPage): string {
 
 function folderHref(baseUrl: string, active: number | "all"): string {
   const url = new URL(FAVORITES_PATH, baseUrl);
-  // Keep the search text and sort order; only the folder and the page cursors change.
+  // Keep the search text and sort order; the folder and every page cursor drop, so switching
+  // folders or searching starts at the first page instead of a stale offset.
   for (const [key, value] of new URL(baseUrl).searchParams) {
-    if (key !== "favcat" && key !== "next" && key !== "prev") {
+    if (key !== "favcat" && key !== "next" && key !== "prev" && key !== "page") {
       url.searchParams.set(key, value);
     }
   }

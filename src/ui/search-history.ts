@@ -81,19 +81,29 @@ export function searchHistoryButton(options: SearchHistoryOptions): HTMLButtonEl
         row.append(
           queryButton(entry.query, entry.name, () => {
             close();
-            options.onPick(entry.query);
+            if (entry.mode === "toggle") {
+              options.onToggle(entry.query);
+            } else {
+              options.onPick(entry.query);
+            }
           }),
         );
+        // The row does what the expression says; this button offers the other verb.
+        const keepsTerms = entry.mode === "toggle";
         const toggle = el("button", {
           class: "search-history-toggle",
           type: "button",
-          text: entry.mode === "toggle" ? "±" : "+",
-          "aria-label": `Toggle terms of ${entry.name}`,
-          title: "Add or remove these terms",
+          text: keepsTerms ? "▶" : "±",
+          "aria-label": `${keepsTerms ? "Run" : "Toggle terms of"} ${entry.name}`,
+          title: keepsTerms ? "Replace the search with these terms" : "Add or remove these terms",
         });
         toggle.addEventListener("click", () => {
           close();
-          options.onToggle(entry.query);
+          if (keepsTerms) {
+            options.onPick(entry.query);
+          } else {
+            options.onToggle(entry.query);
+          }
         });
         const remove = el("button", {
           class: "search-history-remove",

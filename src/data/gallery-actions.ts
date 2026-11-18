@@ -1,5 +1,6 @@
 import { LoginRequiredError } from "../fetch/errors";
 import { postForm, postJson as postJsonRequest } from "../net/http";
+import { isSiteHost } from "../site";
 import type { GalleryApiConfig } from "../types";
 
 /** Response of a successful `rategallery` call. */
@@ -57,8 +58,23 @@ function throwIfFailed(data: unknown, context: string): void {
   }
 }
 
+/**
+ * The endpoint arrives in the page's inline config, and the body carries the session's API key, so
+ * it only counts when it resolves to the site's own domain (the API is a subdomain of it).
+ */
+function siteUrl(url: string): string {
+  const resolved = new URL(url, location.href);
+  if (resolved.protocol !== "https:" || !isSiteHost(resolved.hostname)) {
+    throw new Error("Gallery request refused: the endpoint is not on this site.");
+  }
+  return resolved.href;
+}
+
 function postJson(url: string, body: unknown): Promise<unknown> {
-  return postJsonRequest(url, body, { tag: "gallery-action", failure: "Gallery request failed" });
+  return postJsonRequest(siteUrl(url), body, {
+    tag: "gallery-action",
+    failure: "Gallery request failed",
+  });
 }
 
 async function send(

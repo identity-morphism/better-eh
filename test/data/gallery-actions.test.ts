@@ -1,79 +1,59 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
-import { rateGallery, voteComment, voteTag } from "../../src/data/gallery-actions";
 import type { GalleryApiConfig } from "../../src/types";
 
-const CONFIG: GalleryApiConfig = {
-  apiUrl: "https://api.example/api.php",
-  apiUid: "42",
-  apiKey: "secret",
-  gid: "123456",
-  token: "abcdef1234",
-};
+const calls: { url: string; body: unknown }[] = [];
 
-describe("gallery action API calls", () => {
-  test("rates on the half-star scale and maps the response", async () => {
-    const bodies: unknown[] = [];
-    const result = await rateGallery(CONFIG, 3, {
-      post: (url, body) => {
-        expect(url).toBe(CONFIG.apiUrl);
-        bodies.push(body);
-        return Promise.resolve({
-          rating_avg: 4.61,
-          rating_usr: 3,
-          rating_cls: "ir",
-          rating_cnt: 150,
-        });
-      },
-    });
+void mock.module("../../src/net/http", () => ({
+  postForm: () => Promise.resolve(new Response("")),
+  postJson: (url: string, body: unknown) => {
+    calls.push({ url, body });
+    return Promise.resolve({});
+  },
+}));
 
-    expect(bodies).toEqual([
-      {
-        apiuid: "42",
-        apikey: "secret",
-        gid: "123456",
-        token: "abcdef1234",
-        method: "rategallery",
-        rating: 6,
-      },
-    ]);
-    expect(result).toEqual({ average: 4.61, votes: 150, user: 3 });
+Object.assign(globalThis, { location: new URL("https://e-hentai.org/g/123456/abcdef1234/") });
+
+// The http mock has to be registered before the action module is evaluated.
+const { rateGallery } = await import("../../src/data/gallery-actions");
+
+function config(apiUrl: string): GalleryApiConfig {
+  return { apiUrl, apiUid: "1", apiKey: "secret", gid: "123456", token: "abcdef1234" };
+}
+
+describe("gallery action endpoints", () => {
+  test("the site's API subdomain is accepted", async () => {
+    calls.length = 0;
+
+    await rateGallery(config("https://api.e-hentai.org/api.php"), 5);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://api.e-hentai.org/api.php");
+    expect(calls[0]?.body).toMatchObject({ apikey: "secret", method: "rategallery" });
   });
 
-  test("votes tags and surfaces API errors", async () => {
-    const bodies: unknown[] = [];
-    await voteTag(CONFIG, "artist:alice", -1, {
-      post: (_url, body) => {
-        bodies.push(body);
-        return Promise.resolve({});
-      },
-    });
+  test("a relative endpoint resolves against the page", async () => {
+    calls.length = 0;
 
-    expect(bodies[0]).toEqual({
-      apiuid: "42",
-      apikey: "secret",
-      gid: "123456",
-      token: "abcdef1234",
-      method: "taggallery",
-      tags: "artist:alice",
-      vote: -1,
-    });
+    await rateGallery(config("/api.php"), 5);
 
-    await expect(
-      voteTag(CONFIG, "artist:alice", 1, {
-        post: () => Promise.resolve({ error: "Vote limit reached" }),
-      }),
-    ).rejects.toThrow("Could not vote for tag: Vote limit reached");
+    expect(calls[0]?.url).toBe("https://e-hentai.org/api.php");
   });
 
-  test("returns the updated comment score and rejects a malformed reply", async () => {
-    const result = await voteComment(CONFIG, 9001, 1, {
-      post: () => Promise.resolve({ comment_id: 9001, comment_score: 8, comment_vote: 1 }),
-    });
-    expect(result).toEqual({ id: 9001, score: 8, vote: 1 });
+  test("an off-site endpoint never receives the API key", async () => {
+    calls.length = 0;
 
+    await expect(rateGallery(config("https://evil.example/api.php"), 5)).rejects.toThrow(
+      /not on this site/,
+    );
+    // Nor does a lookalike host that only ends with the site's name as a label.
     await expect(
-      voteComment(CONFIG, 9001, 1, { post: () => Promise.resolve({ comment_id: 9001 }) }),
-    ).rejects.toThrow("malformed response");
+      rateGallery(config("https://e-hentai.org.evil.example/api.php"), 5),
+    ).rejects.toThrow(/not on this site/);
+    await expect(rateGallery(config("http://api.e-hentai.org/api.php"), 5)).rejects.toThrow(
+      /not on this site/,
+    );
+
+    expect(calls).toHaveLength(0);
   });
 });

@@ -35,8 +35,14 @@ interface SettingsDraft {
   changed(): Map<string, unknown>;
   /** Write the baseline back through the bindings. */
   reset(): void;
-  /** Capture the controls' current values as the new baseline. */
-  rebase(): void;
+  /**
+   * Capture the controls' current values as the new baseline.
+   *
+   * `saved` names the values that actually reached the server. They replace the captured value for
+   * their keys, so an edit typed while the request was in flight stays dirty instead of being
+   * marked saved and then lost on reload.
+   */
+  rebase(saved?: ReadonlyMap<string, unknown>): void;
 }
 
 export function createSettingsDraft({ bindings, onChange }: SettingsDraftOptions): SettingsDraft {
@@ -76,8 +82,18 @@ export function createSettingsDraft({ bindings, onChange }: SettingsDraftOptions
       }
       onChange?.();
     },
-    rebase: () => {
-      capture();
+    rebase: (saved) => {
+      if (saved === undefined) {
+        capture();
+      } else {
+        // Only what reached the server becomes the baseline; every other key keeps the baseline it
+        // had, so a value typed during the request still reads as an unsaved change.
+        for (const [key, value] of saved) {
+          if (baseline.has(key)) {
+            baseline.set(key, value);
+          }
+        }
+      }
       onChange?.();
     },
   };

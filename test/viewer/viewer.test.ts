@@ -392,6 +392,50 @@ describe("mountViewer", () => {
     expect(active.navigations).toEqual([{ url: NEXT_NEXT, options: { replace: true } }]);
   });
 
+  test("spread Previous from page 2 lands on page 1", async () => {
+    updateSettings({ ...DEFAULT_SETTINGS, readerMode: "spread" });
+    const FIRST = "https://e-hentai.org/s/hash/123456-1";
+    const first = page({
+      viewerUrl: FIRST,
+      pageNum: 1,
+      counterText: "1 / 5",
+      imgSrc: "https://img.example/pages/1.jpg",
+      prevHref: null,
+    });
+    state.pages.set(FIRST, first);
+    state.pages.set(
+      NEXT,
+      page({ viewerUrl: NEXT, pageNum: 3, counterText: "3 / 5", prevHref: VIEWER }),
+    );
+
+    active = harness();
+    mountViewer(host, page(), active.ctx);
+    await flushMicrotasks(12);
+
+    click(requireNode(host, "#hud-prev"));
+    await flushMicrotasks(12);
+
+    expect(state.toasts).toEqual([]);
+    expect(active.navigations).toEqual([{ url: FIRST, options: { replace: true } }]);
+  });
+
+  test("a control inside the continuous stack keeps its own click", () => {
+    updateSettings({ ...DEFAULT_SETTINGS, readerMode: "continuous" });
+    active = harness();
+    mountViewer(host, page(), active.ctx);
+
+    const continuous = requireNode<HTMLElement>(host, "#continuous");
+    const button = document.createElement("button");
+    button.type = "button";
+    continuous.append(button);
+    // Centre of the viewport: without the exclusion this click toggles the HUD.
+    clickAt(button, 500);
+
+    expect(active.navigations).toEqual([]);
+    expect(state.toasts).toEqual([]);
+    expect(document.body.classList.contains("hud-pinned")).toBe(false);
+  });
+
   test("a failed facing page falls back to a single slot", async () => {
     updateSettings({ ...DEFAULT_SETTINGS, readerMode: "spread" });
     const data = page();
@@ -471,6 +515,11 @@ describe("mountViewer", () => {
     expect(error.hidden).toBe(false);
     expect(host.querySelector("#img-error-text")?.textContent).toContain("2 / 5");
     expect(state.retryCalls).toHaveLength(1);
+
+    // Retry cannot help without an `nl` token, so the panel always carries the native way out.
+    const native = requireNode<HTMLAnchorElement>(host, "#img-error-native");
+    expect(native.textContent).toBe("Open native page");
+    expect(native.getAttribute("href")).toContain("eh_native=1");
 
     const fixed = page({ imgSrc: "https://img.example/pages/fixed.jpg" });
     state.retry = fixed;

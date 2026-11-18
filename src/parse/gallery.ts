@@ -1,4 +1,5 @@
 import { HttpError } from "../fetch/errors";
+import { isSiteHost } from "../site";
 import type {
   FavoriteMark,
   GalleryActions,
@@ -233,11 +234,26 @@ function popupTarget(doc: Document, fragment: string, url: string): string | nul
   return safeUrl(match[2].replace(/&amp;/g, "&"), url)?.href ?? null;
 }
 
+/**
+ * The base the site's popups hang off.
+ *
+ * `base_url` comes from the page's inline script, so an off-site value would aim the rename window
+ * elsewhere; it only counts while it resolves to the site's own domain. Without a usable value the
+ * page's origin is the base, not its path: the popups live at the site root.
+ */
+function popupBase(declared: string | null, pageUrl: string): string {
+  const resolved = declared === null ? null : safeUrl(declared, pageUrl);
+  if (resolved !== null && resolved.protocol === "https:" && isSiteHost(resolved.hostname)) {
+    return resolved.href;
+  }
+  return new URL("/", pageUrl).href;
+}
+
 function parseActions(doc: Document, url: string): GalleryActions {
   const report = doc.querySelector<HTMLAnchorElement>("a[href*='report=select']");
   const expunge = doc.querySelector<HTMLAnchorElement>("a[href*='act=expunge']");
   const rename = doc.getElementById("renamelink");
-  const base = scriptValue(doc, "base_url") ?? url;
+  const base = popupBase(scriptValue(doc, "base_url"), url);
   const identity = galleryIdentity(url);
   const popup = rename ? safeUrl("gallerypopups.php", base) : null;
 

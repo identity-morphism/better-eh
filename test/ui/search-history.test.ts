@@ -215,8 +215,30 @@ describe("search history panel", () => {
     panel = historyPanel();
     input().value = "cat";
     input().dispatchEvent(new Event("input", { bubbles: true }));
-    panel.querySelector<HTMLButtonElement>(".search-history-toggle")?.click();
+    // A toggle expression's row does what the expression says.
+    panel.querySelector<HTMLButtonElement>(".search-history-saved .search-history-query")?.click();
 
     expect(searched).toEqual(["cat f:keyword$"]);
+  });
+
+  test("a run expression's row replaces the search, and its button toggles instead", () => {
+    input().value = "f:keyword$";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+
+    let panel = openHistory();
+    saveCurrent(panel, "TAGS", { mode: 0, pin: true });
+
+    panel = historyPanel();
+    input().value = "cat";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    panel.querySelector<HTMLButtonElement>(".search-history-saved .search-history-query")?.click();
+    expect(searched).toEqual(["f:keyword$"]);
+
+    // The row closed the panel and the field now holds the query; type a fresh draft and reopen.
+    input().value = "cat";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    panel = openHistory();
+    panel.querySelector<HTMLButtonElement>(".search-history-toggle")?.click();
+    expect(searched).toEqual(["f:keyword$", "cat f:keyword$"]);
   });
 });

@@ -566,8 +566,8 @@ export function renderSettings(
       if (settingsChanged) {
         panel.apply();
       }
-      // The one rebase: success makes both halves' current values the new Reset baseline.
-      draft.rebase();
+      // Only what was posted becomes the baseline; anything typed during the request stays dirty.
+      draft.rebase(changed);
       showToast("Settings saved");
     } catch (cause) {
       if (!ctx.signal.aborted) {
