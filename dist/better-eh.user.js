@@ -4332,6 +4332,7 @@ ${defaultKeySummary()}`)) {
       tabindex: "-1"
     });
     const missing = () => {
+      link.setAttribute("aria-label", `${item.title.primary} - no cover`);
       link.replaceChildren("No cover");
       link.classList.add("is-missing");
     };
@@ -6831,7 +6832,7 @@ ${defaultKeySummary()}`)) {
     }, icon("back"));
   }
   function brandLink() {
-    return el("a", { class: "brand", href: "/", "aria-label": `${siteLabel()} home` }, "E-H");
+    return el("a", { class: "brand", href: "/", "aria-label": "E-H home" }, "E-H");
   }
   function renderTopbar(options) {
     const initial = getSearchDraft();
