@@ -1,6 +1,6 @@
 import type { ListItem } from "../../src/types";
 
-/** The base result card shared by the list and preview tests. */
+/** The base result card shared by the list and card tests. */
 export function listItem(overrides: Partial<ListItem> = {}): ListItem {
   return {
     href: "/g/111/aaaa/",

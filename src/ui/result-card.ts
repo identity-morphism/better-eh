@@ -1,15 +1,14 @@
 /**
  * One result card, assembled once.
  *
- * Listings, the favorites view and the preview panel all describe the same gallery, so the article,
- * its cover, title, meta rows and the favorite mark wiring live here instead of being rebuilt (and
- * drifting) in each caller.
+ * Listings and the favorites view describe the same gallery, so the article, its cover, title, meta
+ * rows and the favorite mark wiring live here instead of being rebuilt (and drifting) in each
+ * caller.
  */
 
 import { folderColor } from "../data/favorites";
 import type { FavoriteMark, ListItem } from "../types";
 import { cardFactRows } from "./card-facts";
-import { cardPreview } from "./card-preview";
 import { el, icon } from "./dom";
 import { favoriteButton } from "./favmenu";
 import { createFavoriteState } from "./favorite-state";
@@ -145,8 +144,6 @@ interface ResultCardOptions {
   cover?: HTMLElement;
   /** Show the favorite button and keep the posted-date mark in step (default true). */
   favorite?: boolean;
-  /** Open the preview panel from a Preview button (default false). */
-  preview?: boolean;
   /** Extra line under the meta row, e.g. a favorites note. */
   note?: string;
   /** Extra class on the article (base is `card`). */
@@ -156,9 +153,8 @@ interface ResultCardOptions {
 /**
  * Build one result card.
  *
- * The card, its preview and the favorite button all read one state, so the posted-date mark and
- * every label cannot disagree after a change. `signal` is the view lifetime; it aborts the preview
- * listeners.
+ * The card and its favorite button read one state, so the posted-date mark and every label cannot
+ * disagree after a change. `signal` is the view lifetime; it aborts the favorite subscription.
  */
 export function resultCard(
   item: ListItem,
@@ -202,10 +198,6 @@ export function resultCard(
   if (options.note) {
     body.append(el("p", { class: "favorites-note", title: options.note, text: options.note }));
   }
-  if (options.preview === true) {
-    body.append(cardPreview(article, item, signal, favorite));
-  }
-
   article.append(cover, body);
   return article;
 }

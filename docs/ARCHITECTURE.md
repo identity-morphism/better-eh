@@ -49,8 +49,7 @@
   assembly, form-control state helpers, live-region helpers, shared pager (prev/next or numbered),
   paged-region (pager ⇄ infinite sentinel and
   appended nodes), the empty/error panel builder, the sticky chrome measurer, the in-page jump-row
-  tracked, infinite-scroll sentinel, the append-stable card grid, the quick-action card
-  preview, and view scaling.
+  tracked, infinite-scroll sentinel, the append-stable card grid, and view scaling.
 - **`src/tailwind.css` / `src/app.css`**: Tailwind v4 theme/utilities, shared components, and one
   stylesheet per feature (`nav`, `settings`, `toplist`, `torrents`, `gallery-torrents`, `my-tags`,
   `favorites`, `gallery-actions`). The shared recipes — interactive boxes, ghost icon buttons,

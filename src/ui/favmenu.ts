@@ -10,7 +10,7 @@ import { showToast } from "./toast";
 
 export interface FavoriteMenuOptions {
   anchor: HTMLElement;
-  /** The one state the button, the preview and the view repaint from. */
+  /** The one state the button and the view repaint from. */
   state: FavoriteState;
   /** Folder source; tests pass a list without loading `/uconfig.php`. */
   loadFolders?: (signal?: AbortSignal) => Promise<FavoriteFolder[]>;

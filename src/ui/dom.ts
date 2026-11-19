@@ -98,7 +98,6 @@ const ICON_PATHS = {
   last: "M6 6l6 6-6 6M13 6l6 6-6 6",
   download: "M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M5 19h14",
   history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2",
-  eye: "M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12zm10 2.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
 } as const;
 
 type IconName = keyof typeof ICON_PATHS;

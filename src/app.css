@@ -115,8 +115,7 @@ a {
 /* Icon-only controls that sit on the chrome rather than inside a panel. */
 .topbar-clear,
 .topbar-history,
-.expression-remove,
-.card-preview-trigger {
+.expression-remove {
   @apply inline-grid cursor-pointer place-items-center border-0 bg-transparent p-0;
   color: var(--color-muted);
   transition:
@@ -126,8 +125,7 @@ a {
 
 .topbar-clear:hover,
 .topbar-history:hover,
-.expression-remove:hover,
-.card-preview-trigger:hover {
+.expression-remove:hover {
   @apply bg-panel-hover text-fg;
 }
 
@@ -1645,42 +1643,6 @@ body.is-loading .eh-loading {
   @apply w-full border-0 bg-transparent text-left;
 }
 
-/* ------------------------------------------------------------ card preview */
-
-.card-preview-trigger {
-  @apply ml-auto size-7 shrink-0;
-  border-radius: var(--radius-control);
-}
-
-.card-preview {
-  @apply p-3;
-  width: min(320px, calc(100vw - 16px));
-}
-
-.card-preview-body {
-  @apply grid gap-2;
-}
-
-.card-preview-title {
-  @apply m-0 text-body font-semibold text-fg;
-}
-
-.card-preview-secondary {
-  @apply m-0 truncate text-meta text-muted;
-}
-
-.card-preview-facts {
-  @apply flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted;
-}
-
-.card-preview-favorite {
-  @apply text-star;
-}
-
-.card-preview-actions {
-  @apply mt-1 flex flex-wrap items-center gap-2;
-}
-
 /* Jump/seek beside the pager links. */
 .pager-jump {
   @apply flex items-center gap-1.5;
@@ -1799,7 +1761,6 @@ body.is-loading .eh-loading {
   .topbar-search,
   .field-input,
   .field-select,
-  .card-preview,
   .eh-popover,
   .tag-menu-color,
   .pager-jump-input {
@@ -1822,8 +1783,7 @@ body.is-loading .eh-loading {
     transform: none;
   }
 
-  .eh-popover,
-  .card-preview {
+  .eh-popover {
     background: Canvas;
     color: CanvasText;
     box-shadow: none;
@@ -1835,12 +1795,5 @@ body.is-loading .eh-loading {
   :focus-visible {
     outline: 2px solid CanvasText;
     outline-offset: 2px;
-  }
-}
-
-/* Coarse pointers get a larger preview hit area without changing the grid. */
-@media (pointer: coarse) {
-  .card-preview-trigger {
-    @apply size-9;
   }
 }

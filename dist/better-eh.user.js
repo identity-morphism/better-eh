@@ -2,7 +2,7 @@
 // @name         Better EH
 // @namespace    https://github.com/identity-morphism/better-eh
 // @version      1.0.3
-// @description  A userscript that reskins E-Hentai and ExHentai into one consistent, image-first interface: galleries, listings, favorites, toplists, torrents and the reader, with tag autocomplete, previews and prefetching.
+// @description  A userscript that reskins E-Hentai and ExHentai into one consistent, image-first interface: galleries, listings, favorites, toplists, torrents and the reader, with tag autocomplete and prefetching.
 // @author       identity-morphism
 // @icon         https://api.iconify.design/ph/book-open-bold.svg
 // @updateURL    https://raw.githubusercontent.com/identity-morphism/better-eh/master/dist/better-eh.user.js
@@ -1214,8 +1214,7 @@
     first: "M18 6l-6 6 6 6M11 6l-6 6 6 6",
     last: "M6 6l6 6-6 6M13 6l6 6-6 6",
     download: "M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M5 19h14",
-    history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2",
-    eye: "M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12zm10 2.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"
+    history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"
   };
   function icon(name, filled = false) {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -4002,7 +4001,6 @@ ${defaultKeySummary()}`)) {
   }
   function openPopover(request) {
     const { content, anchor, role = "dialog", align = "start", minWidth } = request;
-    const expanded = request.expanded ?? anchor;
     const panel = el("div", {
       class: request.className === undefined ? "eh-popover" : `eh-popover ${request.className}`,
       role,
@@ -4031,8 +4029,8 @@ ${defaultKeySummary()}`)) {
       const active = document.activeElement;
       const heldFocus = restoreFocus && (active === null || active === undefined || panel.contains(active));
       panel.remove();
-      if (expanded !== null && expanded.getAttribute("aria-haspopup") !== null) {
-        expanded.setAttribute("aria-expanded", "false");
+      if (anchor !== null && anchor.getAttribute("aria-haspopup") !== null) {
+        anchor.setAttribute("aria-expanded", "false");
       }
       if (anchor !== null && heldFocus && typeof anchor.focus === "function") {
         anchor.focus();
@@ -4105,8 +4103,8 @@ ${defaultKeySummary()}`)) {
       }
       close(false);
     }, { signal });
-    if (expanded !== null && expanded.getAttribute("aria-haspopup") !== null) {
-      expanded.setAttribute("aria-expanded", "true");
+    if (anchor !== null && anchor.getAttribute("aria-haspopup") !== null) {
+      anchor.setAttribute("aria-expanded", "true");
     }
     window.addEventListener("resize", reposition, { signal });
     window.addEventListener("scroll", reposition, { capture: true, passive: true, signal });
@@ -4522,90 +4520,6 @@ ${defaultKeySummary()}`)) {
     return button;
   }
 
-  // src/ui/card-preview.ts
-  function favoriteFact(snapshot) {
-    if (snapshot.favorited !== true) {
-      return null;
-    }
-    return el("span", {
-      class: "card-preview-favorite",
-      text: snapshot.folder === null || snapshot.folder === "" ? "In favorites" : `In: ${snapshot.folder}`
-    });
-  }
-  function resultFacts(item, favorite) {
-    const facts = el("div", { class: "card-preview-facts" }, ...cardFactRows(item, (text) => el("span", { text })));
-    if (item.uploader) {
-      facts.append(el("span", { text: item.uploader }));
-    }
-    const mark = favoriteFact(favorite.get());
-    if (mark !== null) {
-      facts.append(mark);
-    }
-    return facts;
-  }
-  function previewContent(item, favorite) {
-    const content = el("div", { class: "card-preview-body" });
-    const controller = new AbortController;
-    const heading = el("div", {}, el("p", { class: "card-preview-title", text: item.title.primary }), item.title.secondary ? el("p", { class: "card-preview-secondary", text: item.title.secondary }) : null);
-    content.append(heading);
-    const facts = resultFacts(item, favorite);
-    content.append(facts);
-    const unsubscribe = favorite.subscribe((snapshot) => {
-      const current = facts.querySelector(".card-preview-favorite");
-      const next = favoriteFact(snapshot);
-      if (next === null) {
-        current?.remove();
-      } else if (current === null) {
-        facts.append(next);
-      } else {
-        current.replaceWith(next);
-      }
-    });
-    const actions = el("div", { class: "card-preview-actions" }, el("a", { class: "btn btn-primary", href: item.href }, el("span", { text: "Open gallery" }), icon("arrowRight")), item.torrentsHref ? el("a", {
-      class: "btn btn-ghost",
-      href: item.torrentsHref,
-      "data-native": "",
-      target: "_blank",
-      rel: "nofollow noopener"
-    }, el("span", { text: "Torrents" })) : null, favoriteButton(favorite, controller.signal));
-    content.append(actions);
-    return {
-      element: content,
-      dispose: () => {
-        controller.abort();
-        unsubscribe();
-      }
-    };
-  }
-  function cardPreview(card, item, signal, favorite) {
-    const trigger = el("button", {
-      class: "card-preview-trigger",
-      type: "button",
-      "aria-haspopup": "dialog",
-      "aria-expanded": "false",
-      "aria-label": `Preview ${item.title.primary}`,
-      title: "Preview"
-    });
-    trigger.append(icon("eye"));
-    const popover = bindPopover(card, (close) => {
-      const content = previewContent(item, favorite);
-      content.element.addEventListener("click", (event) => {
-        if (event.target instanceof Element && event.target.closest("a")) {
-          close();
-        }
-      });
-      return { content: content.element, dispose: content.dispose };
-    }, {
-      role: "dialog",
-      label: `Preview: ${item.title.primary}`,
-      className: "card-preview",
-      autoFocus: true,
-      expanded: trigger
-    }, signal);
-    trigger.addEventListener("click", () => popover.toggle(), { signal });
-    return trigger;
-  }
-
   // src/ui/favorite-state.ts
   function createFavoriteState(gallery, mark, known = mark !== null) {
     let snapshot = !known ? { favorited: null, folder: null, slot: null } : mark === null ? { favorited: false, folder: null, slot: null } : { favorited: true, folder: mark.folder, slot: mark.slot };
@@ -4727,9 +4641,6 @@ ${defaultKeySummary()}`)) {
     const body = el("div", { class: "card-body" }, cardTitle(item), item.uploader ? el("div", { class: "card-uploader", text: item.uploader }) : null, meta);
     if (options.note) {
       body.append(el("p", { class: "favorites-note", title: options.note, text: options.note }));
-    }
-    if (options.preview === true) {
-      body.append(cardPreview(article, item, signal, favorite));
     }
     article.append(cover, body);
     return article;
@@ -10216,7 +10127,7 @@ ${defaultKeySummary()}`)) {
     });
     const panel = el("section", { class: "search-panel" }, categoryChips(draftQuery, ctx), quickTags.element, advancedPanel(draftQuery, ctx));
     const grid = createCardGrid(ctx.signal);
-    grid.append(shownItems.map((item) => resultCard(item, ctx.signal, { preview: true })));
+    grid.append(shownItems.map((item) => resultCard(item, ctx.signal)));
     const syncCount = () => {
       const cards = grid.element.querySelectorAll(".card").length;
       if (rangeActive) {
@@ -10300,7 +10211,7 @@ ${defaultKeySummary()}`)) {
           });
         },
         append: (incoming) => {
-          const nodes = incoming.map((item) => resultCard(item, ctx.signal, { preview: true }));
+          const nodes = incoming.map((item) => resultCard(item, ctx.signal));
           grid.append(nodes);
           return () => grid.remove(nodes);
         },
@@ -14389,7 +14300,7 @@ ${defaultKeySummary()}`)) {
     border-color: var(--color-accent);
     color: var(--color-fg);
   }
-  .topbar-clear, .topbar-history, .expression-remove, .card-preview-trigger {
+  .topbar-clear, .topbar-history, .expression-remove {
     display: inline-grid;
     cursor: pointer;
     place-items: center;
@@ -14400,7 +14311,7 @@ ${defaultKeySummary()}`)) {
     color: var(--color-muted);
     transition: color 0.15s, background-color 0.15s;
   }
-  .topbar-clear:hover, .topbar-history:hover, .expression-remove:hover, .card-preview-trigger:hover {
+  .topbar-clear:hover, .topbar-history:hover, .expression-remove:hover {
     background-color: var(--color-panel-hover);
     color: var(--color-fg);
   }
@@ -16278,55 +16189,6 @@ ${defaultKeySummary()}`)) {
     background-color: transparent;
     text-align: left;
   }
-  .card-preview-trigger {
-    margin-left: auto;
-    width: calc(var(--spacing) * 7);
-    height: calc(var(--spacing) * 7);
-    flex-shrink: 0;
-    border-radius: var(--radius-control);
-  }
-  .card-preview {
-    padding: calc(var(--spacing) * 3);
-    width: min(320px, calc(100vw - 16px));
-  }
-  .card-preview-body {
-    display: grid;
-    gap: calc(var(--spacing) * 2);
-  }
-  .card-preview-title {
-    margin: 0px;
-    font-size: var(--text-body);
-    --tw-font-weight: var(--font-weight-semibold);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-fg);
-  }
-  .card-preview-secondary {
-    margin: 0px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--text-meta);
-    color: var(--color-muted);
-  }
-  .card-preview-facts {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    column-gap: calc(var(--spacing) * 2);
-    row-gap: var(--spacing);
-    font-size: var(--text-meta);
-    color: var(--color-muted);
-  }
-  .card-preview-favorite {
-    color: var(--color-star);
-  }
-  .card-preview-actions {
-    margin-top: var(--spacing);
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: calc(var(--spacing) * 2);
-  }
   .pager-jump {
     display: flex;
     align-items: center;
@@ -16468,7 +16330,7 @@ ${defaultKeySummary()}`)) {
     color: var(--color-muted);
   }
   @media (forced-colors: active) {
-    .btn, .fav-btn, .pager-btn, .pager-num, .cat-chip, .term-toggle, .tag-chip, .card, .gallery-header, .settings-section, .comment, .topbar-search, .field-input, .field-select, .card-preview, .eh-popover, .tag-menu-color, .pager-jump-input {
+    .btn, .fav-btn, .pager-btn, .pager-num, .cat-chip, .term-toggle, .tag-chip, .card, .gallery-header, .settings-section, .comment, .topbar-search, .field-input, .field-select, .eh-popover, .tag-menu-color, .pager-jump-input {
       border: 1px solid CanvasText;
     }
     .btn-primary, .topbar-search-submit, .pager-num.is-current, .cat-chip[aria-pressed="true"], .quick-tag[aria-pressed="true"], .tag-combobox-exclude[aria-pressed="true"] {
@@ -16479,7 +16341,7 @@ ${defaultKeySummary()}`)) {
     .card:hover, .card:focus-within {
       transform: none;
     }
-    .eh-popover, .card-preview {
+    .eh-popover {
       background: Canvas;
       color: CanvasText;
       box-shadow: none;
@@ -16487,12 +16349,6 @@ ${defaultKeySummary()}`)) {
     .card-posted.is-favorite, .comment-score, .comment-votes, :focus-visible {
       outline: 2px solid CanvasText;
       outline-offset: 2px;
-    }
-  }
-  @media (pointer: coarse) {
-    .card-preview-trigger {
-      width: calc(var(--spacing) * 9);
-      height: calc(var(--spacing) * 9);
     }
   }
   .topbar-nav {
