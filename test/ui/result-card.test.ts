@@ -1,7 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 
-import { Element } from "linkedom";
-
 import { getSettings, updateSetting } from "../../src/settings";
 import { resultCard } from "../../src/ui/result-card";
 import { until } from "./async";
@@ -38,8 +36,6 @@ beforeEach(() => {
   // The queue's default spacing is the only reason these two-step flows would be slow.
   updateSetting("netIntervalMs", 0);
   document = installDom();
-  // `instanceof Element` checks in the preview panel need the adapter class installed.
-  Object.assign(globalThis, { location: new URL("https://e-hentai.org/"), Element });
   stubNetwork();
 });
 
@@ -131,57 +127,5 @@ describe("resultCard", () => {
     expect(note?.textContent).toBe("Read later");
     expect(note?.getAttribute("title")).toBe("Read later");
     expect(body?.lastElementChild).toBe(note);
-  });
-
-  test("preview: true mounts the trigger and the panel's favorite change paints the mark", async () => {
-    document.cookie = "ipb_member_id=72";
-    const article = resultCard(ITEM, new AbortController().signal, { preview: true });
-    document.body.append(article);
-
-    const trigger = article.querySelector<HTMLButtonElement>(".card-preview-trigger");
-    expect(trigger?.parentElement?.className).toBe("card-body");
-    trigger?.click();
-
-    const panel = document.querySelector<HTMLElement>(".card-preview");
-    expect(panel).not.toBeNull();
-    expect(panel?.querySelector<HTMLButtonElement>(".fav-btn")).not.toBeNull();
-
-    const posted = article.querySelector<HTMLElement>(".card-posted");
-    await chooseFolder(
-      panel?.querySelector<HTMLButtonElement>(".fav-btn"),
-      () => posted?.classList.contains("is-favorite") === true,
-    );
-
-    expect(posted?.classList.contains("is-favorite")).toBe(true);
-    expect(posted?.getAttribute("title")).toBe("In favorites: Read later");
-    expect(panel?.querySelector(".card-preview-favorite")?.textContent).toBe("In: Read later");
-  });
-
-  test("a preview opened after a card favorite shows the new folder", async () => {
-    document.cookie = "ipb_member_id=74";
-    const article = resultCard(ITEM, new AbortController().signal, { preview: true });
-    document.body.append(article);
-    const posted = article.querySelector<HTMLElement>(".card-posted");
-
-    await chooseFolder(
-      article.querySelector<HTMLButtonElement>(".fav-btn"),
-      () => posted?.classList.contains("is-favorite") === true,
-    );
-
-    article.querySelector<HTMLButtonElement>(".card-preview-trigger")?.click();
-    const panel = document.querySelector<HTMLElement>(".card-preview");
-    expect(panel?.querySelector(".card-preview-favorite")?.textContent).toBe("In: Read later");
-  });
-
-  test("the opened preview lists the card's rating", () => {
-    const article = resultCard(ITEM, new AbortController().signal, { preview: true });
-    document.body.append(article);
-
-    article.querySelector<HTMLButtonElement>(".card-preview-trigger")?.click();
-    const panel = document.querySelector<HTMLElement>(".card-preview");
-    expect(panel).not.toBeNull();
-    expect(panel?.querySelector<HTMLElement>("[role='img']")?.getAttribute("aria-label")).toBe(
-      "4 out of 5 stars",
-    );
   });
 });

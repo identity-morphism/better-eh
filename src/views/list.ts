@@ -452,7 +452,7 @@ export function renderList(
   );
 
   const grid = createCardGrid(ctx.signal);
-  grid.append(shownItems.map((item) => resultCard(item, ctx.signal, { preview: true })));
+  grid.append(shownItems.map((item) => resultCard(item, ctx.signal)));
 
   const syncCount = (): void => {
     const cards = grid.element.querySelectorAll(".card").length;
@@ -554,7 +554,7 @@ export function renderList(
         });
       },
       append: (incoming) => {
-        const nodes = incoming.map((item) => resultCard(item, ctx.signal, { preview: true }));
+        const nodes = incoming.map((item) => resultCard(item, ctx.signal));
         grid.append(nodes);
         return () => grid.remove(nodes);
       },

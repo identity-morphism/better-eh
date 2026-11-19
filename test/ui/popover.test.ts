@@ -62,22 +62,6 @@ describe("openPopover", () => {
     expect(anchor.hasAttribute("aria-expanded")).toBe(false);
   });
 
-  test("reports state on an expanded element that is not the anchor", () => {
-    const anchor = anchorWith(document, false);
-    const trigger = anchorWith(document, true);
-    const popover = openPopover({
-      content: content(document),
-      anchor,
-      expanded: trigger,
-    });
-
-    expect(anchor.hasAttribute("aria-expanded")).toBe(false);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-
-    popover.close();
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-  });
-
   test("Escape closes the top-most panel only", () => {
     const first = openPopover({ content: content(document), anchor: null });
     const second = openPopover({ content: content(document), anchor: null });

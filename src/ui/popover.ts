@@ -19,11 +19,6 @@ export interface PopoverRequest {
   content: HTMLElement;
   /** Element the panel is anchored to; `null` centers it in the viewport. */
   anchor: HTMLElement | null;
-  /**
-   * Element whose `aria-expanded` tracks the panel; defaults to `anchor`. The card preview anchors
-   * to the whole card but reports state on its own trigger.
-   */
-  expanded?: HTMLElement;
   role?: PopoverRole;
   /** Accessible name for the panel. */
   label?: string;
@@ -130,7 +125,6 @@ function bind(document: Document): void {
 /** Open a panel and return its handle. */
 export function openPopover(request: PopoverRequest): Popover {
   const { content, anchor, role = "dialog", align = "start", minWidth } = request;
-  const expanded = request.expanded ?? anchor;
   const panel = el("div", {
     class: request.className === undefined ? "eh-popover" : `eh-popover ${request.className}`,
     role,
@@ -163,8 +157,8 @@ export function openPopover(request: PopoverRequest): Popover {
     const heldFocus =
       restoreFocus && (active === null || active === undefined || panel.contains(active));
     panel.remove();
-    if (expanded !== null && expanded.getAttribute("aria-haspopup") !== null) {
-      expanded.setAttribute("aria-expanded", "false");
+    if (anchor !== null && anchor.getAttribute("aria-haspopup") !== null) {
+      anchor.setAttribute("aria-expanded", "false");
     }
     if (anchor !== null && heldFocus && typeof anchor.focus === "function") {
       anchor.focus();
@@ -263,8 +257,8 @@ export function openPopover(request: PopoverRequest): Popover {
     { signal },
   );
 
-  if (expanded !== null && expanded.getAttribute("aria-haspopup") !== null) {
-    expanded.setAttribute("aria-expanded", "true");
+  if (anchor !== null && anchor.getAttribute("aria-haspopup") !== null) {
+    anchor.setAttribute("aria-expanded", "true");
   }
 
   window.addEventListener("resize", reposition, { signal });

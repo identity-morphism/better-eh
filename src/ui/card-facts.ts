@@ -1,9 +1,9 @@
 /**
  * The fact rows every result surface shares.
  *
- * The card's meta row and its preview both start with the category, rating, posted time and page
- * count, in the order the site's own cards use. `posted` builds the time row, so the card can keep
- * its favorite mark on it while the preview stays plain.
+ * The card's meta row starts with the category, rating, posted time and page count, in the order
+ * the site's own cards use. `posted` builds the time row so the caller can attach its favorite
+ * mark.
  */
 
 import type { ListItem } from "../types";

@@ -1,10 +1,10 @@
 /**
  * One gallery's favorite truth.
  *
- * A result card, its preview and the gallery header each paint the same gallery, so they read and
- * write one state instead of keeping copies of the parsed mark. Unknown (signed out, or a page
- * without the mark) is distinct from known-unfavorited: the menu's wording and the remove action
- * depend on that difference.
+ * A result card and the gallery header each paint the same gallery, so they read and write one
+ * state instead of keeping copies of the parsed mark. Unknown (signed out, or a page without the
+ * mark) is distinct from known-unfavorited: the menu's wording and the remove action depend on that
+ * difference.
  */
 
 import type { FavoriteFolder } from "../data/favorites";

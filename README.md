@@ -43,8 +43,8 @@ tables. Routes it does not own stay native.
   backup.
 - **My Tags**: the `/mytags` manager renders in-app: watch or hide a tag, set its colour and
   weight, and add new tags without leaving the shell.
-- **Fast and robust**: request priorities and caching, rate-limit purge with a banner, result-card
-  previews, and a login gate instead of a broken page when a route needs a session.
+- **Fast and robust**: request priorities and caching, rate-limit purge with a banner, and a login
+  gate instead of a broken page when a route needs a session.
 - **Accessible**: keyboard paths, managed dialog focus, forced-colors support, reduced-motion
   handling and touch targets that grow on coarse pointers. The smoke gate runs axe over the shell
   with the WCAG A/AA rules, so a control that fails name, contrast or landmark checks fails CI.

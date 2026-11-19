@@ -96,7 +96,7 @@ locality) is used exactly as defined by the codebase-design skill.
 - **favorites selection**: the favorites page's selected gids, range anchor and select-all
   derivation; cards report intent and render their checked state from it.
 - **result-card**: the one result-card assembly (cover, title, uploader, meta, favorite mark,
-  optional overlay/note/preview), used by the list and favorites grids.
+  optional overlay/note), used by the list and favorites grids.
 - **tags**: the search-expression grammar, the cached tag index, and the suggestion ranking; no DOM.
 - **tag-combobox**: the accessible suggestion portal bound to the top bar's input.
 - **search-chips**: the structured view of the current query's terms.
