@@ -1,6 +1,8 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
 import { LoginRequiredError } from "../../src/fetch/errors";
+import { isLoginWall, postForm } from "../../src/net/http";
+import { getSettings, updateSettings } from "../../src/settings";
 
 /** The site's login page: a session that died between load and submit gets this with HTTP 200. */
 const LOGIN_PAGE = `<!doctype html>
@@ -21,16 +23,30 @@ const GALLERY_PAGE = `<!doctype html>
 /** The body the next queued request returns. */
 const reply = { body: GALLERY_PAGE };
 
-void mock.module("../../src/net/queue", () => ({
-  net: {
-    fetch: () => Promise.resolve(new Response(reply.body)),
-  },
-}));
-
-// The queue mock has to be registered before http.ts is evaluated.
-const { isLoginWall, postForm } = await import("../../src/net/http");
-
 const OPTIONS = { tag: "test", failure: "Request failed" };
+
+// The real queue reads these; zero keeps the two posts from waiting on the request interval.
+const originalInterval = getSettings().netIntervalMs;
+
+beforeAll(() => {
+  updateSettings({ netIntervalMs: 0 });
+});
+
+afterAll(() => {
+  updateSettings({ netIntervalMs: originalInterval });
+});
+
+const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+  // Stub the transport, not `net/http`: a `mock.module` registration outlives the file and would
+  // replace the real functions for every later test in a shared `bun test` process.
+  globalThis.fetch = (() => Promise.resolve(new Response(reply.body))) as unknown as typeof fetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 describe("login wall detection", () => {
   test("recognises the site's login form", () => {
