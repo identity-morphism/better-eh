@@ -11,6 +11,10 @@ tables. Routes it does not own stay native.
 | ------------------------------------------------------------------- | --------------------------------------------------- |
 | ![Gallery header and thumbnail grid](docs/screenshots/gallery.webp) | ![Full-screen reader](docs/screenshots/reader.webp) |
 
+Tag completion in the search bar — namespace-aware, popularity-ranked, and reachable from `f:`/`a:` aliases:
+
+![Tag suggestions completing an artist namespace query](docs/screenshots/tags.webp)
+
 <sub>Screenshots use Pepper&amp;Carrot demo data by David Revoy (CC BY 4.0).</sub>
 
 ## Features
