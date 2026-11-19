@@ -17,6 +17,7 @@ const ASSETS = ["assets/tag-index.bin", "assets/tag-counts.bin"] as const;
 const USERSCRIPT = "dist/better-eh.user.js";
 const RAW = `https://raw.githubusercontent.com/${REPO}/master`;
 const CDN = `https://cdn.jsdelivr.net/gh/${REPO}@master`;
+const LATEST = `https://github.com/${REPO}/releases/latest/download/better-eh.user.js`;
 
 function fail(message: string): never {
   console.error(`verify-release: ${message}`);
@@ -52,4 +53,14 @@ if (published !== pkg.version) {
   fail(`published @version ${published ?? "<missing>"} does not match package.json ${pkg.version}`);
 }
 console.log(`ok ${RAW}/${USERSCRIPT} (@version ${published})`);
+
+const latest = await fetch(LATEST, { redirect: "follow" });
+if (latest.status !== 200) {
+  fail(`${LATEST} returned HTTP ${latest.status} (is the release published?)`);
+}
+const latestVersion = readHeaderVersion(await latest.text());
+if (latestVersion !== pkg.version) {
+  fail(`latest release asset is ${latestVersion ?? "<missing>"}, expected ${pkg.version}`);
+}
+console.log(`ok ${LATEST} (@version ${latestVersion})`);
 console.log("verify-release: all publication checks passed");
