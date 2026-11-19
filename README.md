@@ -34,10 +34,11 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
   vocabulary, quoted/exact/signed terms, short aliases (`f:`, `a:`), popularity ranking and local
   usage learning. Clicking a gallery tag adds it to the current search; `Alt+click` excludes it.
 - **Gallery**: parsed title hierarchy, grouped tags with actions, rating and comments (including
-  editing your own), favorite folders with notes, archive links, the in-app torrent list, resume
-  position, and a sprite thumbnail grid with the site's pager.
-- **Gallery torrents**: the gallery's `/gallerytorrents.php` list renders in-app with its torrent
-  rows instead of the site's legacy page.
+  editing your own), favorite folders with notes, the in-app archive chooser and torrent list,
+  resume position, and a sprite thumbnail grid with the site's pager.
+- **Gallery archive and torrents**: the `/archiver.php` chooser renders in-app with each
+  archive's size, GP price and download step, and `/gallerytorrents.php` renders its torrent rows
+  instead of the site's legacy page.
 - **Reader**: fit-height/zoom/pan or natural-width scrolling, single/spread/continuous layouts,
   right-to-left direction, prefetching, `nl` retry, original-file fallback on deep zoom, keyboard,
   click zones, edge chevrons and swipes.
@@ -116,8 +117,8 @@ storage/debugging notes, and [Architecture](docs/ARCHITECTURE.md) for the module
   and personalized-torrent key reset — open the native page instead of posting from the app.
 - Toplists are an e-hentai.org feature: the ExHentai site itself answers `/toplist.php` with a 404,
   so the tab is hidden there.
-- Gallery archive, report and petition actions link to the site's own pages rather than being
-  rebuilt in-app.
+- Gallery report and petition actions link to the site's own pages rather than being rebuilt
+  in-app.
 - Tag suggestions start from an embedded compact core vocabulary (about 1,500 popular tags, roughly
   22 KB of source), so common tags work immediately. The full roughly 400 KB front-coded vocabulary
   (about 220 KB gzipped on the wire) starts downloading as soon as the first owned page renders,

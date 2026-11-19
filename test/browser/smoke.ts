@@ -3,11 +3,11 @@
  *
  * This exercises the parts unit tests cannot: the generated bundle boots at document-start, the
  * shell renders, the search field reaches the router, the tag combobox parses the compact
- * vocabulary asset, a gallery mounts from a page shaped like the site's, the reader mounts with its
- * HUD counter, the gallery torrent and My Tags views mount from their pages, a posted-date range
- * rewrites itself to the site's date cursor and still renders, a page the parser rejects reloads
- * natively, and axe finds no accessibility violation inside the shell. Run with `bun run
- * test:browser` after `bun run build`.
+ * vocabulary asset, a gallery mounts from a page shaped like the site's, its archive action renders
+ * the chooser in-app, the reader mounts with its HUD counter, the gallery torrent and My Tags views
+ * mount from their pages, a posted-date range rewrites itself to the site's date cursor and still
+ * renders, a page the parser rejects reloads natively, and axe finds no accessibility violation
+ * inside the shell. Run with `bun run test:browser` after `bun run build`.
  */
 
 import AxeBuilder from "@axe-core/playwright";
@@ -34,6 +34,7 @@ const FIXTURES: Record<string, string> = {
   "/": "list.html",
   "/g/123456/abcdef1234/": "gallery.html",
   "/gallerytorrents.php": "gallerytorrents.html",
+  "/archiver.php": "archive.html",
   "/mytags": "mytags.html",
   "/s/hash123/987654-2/": "viewer.html",
   // Served again for the fallback request, whose query keeps this pathname.
@@ -189,6 +190,13 @@ try {
   }
   await expectAccessible(galleryTorrents, "gallery torrents");
 
+  const archive = await open("/archiver.php?gid=123456&token=abcdef1234");
+  await archive.waitForSelector(".archive-option", { timeout: 15_000 });
+  if ((await archive.locator(".archive-option").count()) !== 2) {
+    fail("archive chooser did not render both options");
+  }
+  await expectAccessible(archive, "archive");
+
   const myTags = await open("/mytags");
   await myTags.waitForSelector("#my-tags", { timeout: 15_000 });
   if ((await myTags.locator(".my-tags-row").count()) !== 2) {
@@ -207,7 +215,7 @@ try {
     fail(`page errors: ${errors.join(" | ")}`);
   }
   console.log(
-    "browser smoke passed: list, gallery, reader, gallery torrents, My Tags, range, fallback, axe",
+    "browser smoke passed: list, gallery, reader, archive, gallery torrents, My Tags, range, fallback, axe",
   );
 } finally {
   await browser.close();

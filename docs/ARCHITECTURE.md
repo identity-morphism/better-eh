@@ -16,10 +16,11 @@
   caches, LRU eviction, image preloading and prefetch.
 - **`src/page-image.ts`**: page image display, retry ladder, and give-up handling.
 - **`src/parse/`**: `viewer`, `gallery`, `gallery-torrents`, `list`, `favorites`, `toplist`,
-  `torrents`, `home`, `my-tags`, `uconfig`, `query` (search/tag serialization), `pager` (the shared
-  numeric pager), and shared title parsing.
+  `archive`, `torrents`, `home`, `my-tags`, `uconfig`, `query` (search/tag serialization), `pager`
+  (the shared numeric pager), and shared title parsing.
 - **`src/data/`**: `favorites` (folder cache, add/remove, bulk delete/move), `gallery-actions`
-  (rating, tag votes, comment votes, comment posts and edits), `gallery-torrents` (per-torrent
+  (rating, tag votes, comment votes, comment posts and edits), `archive` (the archive chooser POST),
+  `gallery-torrents` (per-torrent
   details and their personalized/redistributable links), `list-filters` (remembered category and
   advanced filters), `list-date` (the app-owned posted-date range and its date-cursor request),
   `my-tags` (watch/hide/colour/weight changes and the add path), `search-history` (recent queries),
@@ -39,8 +40,8 @@
   versioned envelope, shape guard, swallowed failures; tests use an in-memory adapter.
 - **`src/settings-schema.ts`**: the single declaration of every scalar preference (default, control,
   bounds, hint); the settings store, panel, validation and import/export derive from it.
-- **`src/views/`**: `viewer`, `gallery`, `gallery-torrents`, `list`, `favorites`, `toplist`,
-  `torrents`, `home`, `my-tags` and `settings` render modules; `shell.ts` names the viewer shell's
+- **`src/views/`**: `viewer`, `gallery`, `gallery-torrents`, `archive`, `list`, `favorites`,
+  `toplist`, `torrents`, `home`, `my-tags` and `settings` render modules; `shell.ts` names the viewer shell's
   element contract.
 - **`src/view-mode.ts`**: the one owner of the body view-mode classes.
 - **`src/ui/`**: DOM helpers, top bar and site tabs, popover primitive (every panel, including the
@@ -52,7 +53,7 @@
   tracked, infinite-scroll sentinel, the append-stable card grid, and view scaling.
 - **`src/tailwind.css` / `src/app.css`**: Tailwind v4 theme/utilities, shared components, and one
   stylesheet per feature (`nav`, `settings`, `toplist`, `torrents`, `gallery-torrents`, `home`,
-  `my-tags`, `favorites`, `gallery-actions`). The shared recipes — interactive boxes, ghost icon buttons,
+  `my-tags`, `favorites`, `gallery-actions`, `archive`). The shared recipes — interactive boxes, ghost icon buttons,
   tab/filter active treatment, uppercase eyebrows, scrolling-row fade, settings rows/fields, status
   lines — live in `app.css`; a feature sheet only adds what makes its component different.
 - **`src/style.css`**: viewer-only styles.
