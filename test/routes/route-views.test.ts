@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { ParseMismatchError } from "../../src/fetch/errors";
 import type { DocumentOptions, ViewerPageOptions } from "../../src/fetch/loader";
 import { priorityOf } from "../../src/net/priority";
+import { parseArchivePage } from "../../src/parse/archive";
 import { parseGalleryPage } from "../../src/parse/gallery";
 import { parseGalleryTorrents } from "../../src/parse/gallery-torrents";
 import { parseListPage } from "../../src/parse/list";
@@ -24,6 +25,7 @@ const LIST_URL = "https://e-hentai.org/?f_search=test";
 const VIEWER_URL = "https://e-hentai.org/s/hash123/987654-2";
 const TORRENTS_URL = "https://e-hentai.org/torrents.php";
 const HOME_URL = "https://e-hentai.org/home.php";
+const ARCHIVE_URL = "https://e-hentai.org/archiver.php?gid=123456&token=abcdef1234";
 const GALLERY_TORRENTS_URL = "https://e-hentai.org/gallerytorrents.php?gid=987654&t=abcdef1234";
 
 const galleryDoc = await loadFixture("gallery.html");
@@ -35,6 +37,7 @@ const uconfigDoc = await loadFixture("uconfig.html");
 const favoritesDoc = await loadFixture("favorites.html");
 const toplistDoc = await loadFixture("toplist.html");
 const homeDoc = await loadFixture("home.html");
+const archiveDoc = await loadFixture("archive.html");
 
 /** Fixtures keyed by the URL each page route is loaded from. */
 const DOCS: Record<string, Document> = {
@@ -45,6 +48,7 @@ const DOCS: Record<string, Document> = {
   "https://e-hentai.org/favorites.php": favoritesDoc,
   "https://e-hentai.org/toplist.php": toplistDoc,
   [HOME_URL]: homeDoc,
+  [ARCHIVE_URL]: archiveDoc,
 };
 
 const galleryRoute = { kind: "gallery", url: GALLERY_URL } satisfies RouteOf<"gallery">;
@@ -57,6 +61,7 @@ const listRoute = {
 const viewerRoute = { kind: "viewer", url: VIEWER_URL } satisfies RouteOf<"viewer">;
 const torrentsRoute = { kind: "torrents", url: TORRENTS_URL } satisfies RouteOf<"torrents">;
 const homeRoute = { kind: "home", url: HOME_URL } satisfies RouteOf<"home">;
+const archiveRoute = { kind: "archive", url: ARCHIVE_URL } satisfies RouteOf<"archive">;
 const galleryTorrentsRoute = {
   kind: "galleryTorrents",
   url: GALLERY_TORRENTS_URL,
@@ -450,6 +455,34 @@ describe("gallery torrents route", () => {
     expect(views.routeView(galleryTorrentsRoute).title(data)).toBe(
       "Torrents for Test Gallery - E-Hentai",
     );
+  });
+});
+
+describe("archive route", () => {
+  test("loads the chooser through the injected document loader", async () => {
+    const { views, docCalls, viewerCalls } = harness();
+    const signal = new AbortController().signal;
+
+    const data = await views.routeView(archiveRoute).load(archiveRoute, signal);
+
+    expect(data.original?.kind).toBe("original");
+    expect(data.resample?.kind).toBe("resample");
+    expect(viewerCalls).toHaveLength(0);
+    expect(docCalls).toHaveLength(1);
+    expectDocumentLoad(docCalls[0], {
+      url: ARCHIVE_URL,
+      signal,
+      priority: "navigation",
+      tag: "archive",
+    });
+    expect(docCalls[0]?.options.fresh).toBe(true);
+  });
+
+  test("titles the page as the archive chooser", () => {
+    const { views } = harness();
+    const data = parseArchivePage(archiveDoc, ARCHIVE_URL);
+
+    expect(views.routeView(archiveRoute).title(data)).toBe("Archive Download - E-Hentai");
   });
 });
 

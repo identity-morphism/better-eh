@@ -1,0 +1,65 @@
+/* archive chooser styles. Compiled through Tailwind (see src/tailwind.css). */
+
+.archive-funds {
+  @apply mt-3 mb-0 rounded-row border border-line bg-surface px-3 py-2 text-control text-muted;
+}
+
+.archive-options {
+  @apply mt-4 grid gap-4;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.archive-option {
+  @apply flex flex-col gap-3 rounded-card border border-line-strong bg-panel p-4;
+}
+
+.archive-option-title {
+  @apply m-0 text-title-2 font-semibold;
+}
+
+.archive-option-meta {
+  @apply flex flex-wrap gap-x-8 gap-y-2;
+}
+
+.archive-option-meta-item {
+  @apply flex flex-col gap-0.5;
+}
+
+.archive-option-meta-label {
+  @apply text-meta text-muted uppercase;
+  letter-spacing: 0.06em;
+}
+
+.archive-option-meta-value {
+  @apply text-body font-semibold;
+}
+
+.archive-option-note {
+  @apply m-0 text-meta text-muted;
+}
+
+.archive-option-status {
+  @apply m-0 min-h-5 text-meta text-muted;
+}
+
+.archive-option-status[role="alert"] {
+  @apply text-danger-text;
+}
+
+.archive-option .archive-download {
+  @apply self-start;
+}
+
+.archive-links {
+  @apply mt-5 flex flex-wrap items-center gap-4 text-control;
+}
+
+.archive-footer {
+  @apply mt-8 border-t border-line pt-4;
+}
+
+@media (max-width: 720px) {
+  .archive-option-meta {
+    @apply gap-x-5;
+  }
+}

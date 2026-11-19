@@ -368,12 +368,7 @@ function siteActionItems(data: GalleryData): ActionMenuItem[] {
   const items: ActionMenuItem[] = [];
   const { archiverHref, torrentsHref, reportHref, expungeHref, renameHref } = data.actions;
   if (archiverHref !== null) {
-    items.push({
-      label: "Archive Download",
-      href: archiverHref,
-      native: true,
-      popup: { width: 480, height: 320 },
-    });
+    items.push({ label: "Archive Download", href: archiverHref });
   }
   if (torrentsHref !== null) {
     items.push({ label: "Torrent Download", href: torrentsHref });

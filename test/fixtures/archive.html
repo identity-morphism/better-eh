@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Archiver</title>
+    <meta http-equiv="Content-type" content="text/html; charset=UTF-8" />
+    <meta name="robots" content="noindex,nofollow" />
+  </head>
+  <body>
+    <div id="db">
+      <h1 style="font-size: 10pt; font-weight: bold">Test Gallery</h1>
+      <p>Current Funds:</p>
+      <p>
+        1,234 GP [<a href="https://ehwiki.org/wiki/Gallery_Points" target="ehwiki">?</a>] &nbsp;
+        5,678 Credits [<a href="https://ehwiki.org/wiki/Credits" target="ehwiki">?</a>]
+      </p>
+
+      <div style="position: relative; width: 370px; margin: 4px auto; padding-top: 3px">
+        <div style="width: 180px; float: left">
+          <div style="text-align: center; margin-top: 4px">
+            Download Cost: &nbsp; <strong>8,800 GP</strong>
+          </div>
+
+          <form
+            action="https://e-hentai.org/archiver.php?gid=123456&amp;token=abcdef1234&amp;or=fake-or-key"
+            method="post"
+          >
+            <input type="hidden" name="dltype" value="org" />
+            <div style="margin: 3px auto">
+              <input
+                type="submit"
+                name="dlcheck"
+                value="Download Original Archive"
+                style="width: 180px"
+              />
+            </div>
+          </form>
+
+          <p>Estimated Size: &nbsp; <strong>18.46 MiB</strong></p>
+        </div>
+
+        <div style="width: 180px; float: right">
+          <div style="text-align: center; margin-top: 4px">
+            Download Cost: &nbsp; <strong>218 GP</strong>
+          </div>
+
+          <form
+            action="https://e-hentai.org/archiver.php?gid=123456&amp;token=abcdef1234&amp;or=fake-or-key"
+            method="post"
+          >
+            <input type="hidden" name="dltype" value="res" />
+            <div style="margin: 3px auto">
+              <input
+                type="submit"
+                name="dlcheck"
+                value="Download Resample Archive"
+                style="width: 180px"
+              />
+            </div>
+          </form>
+
+          <p>Estimated Size: &nbsp; <strong>2.17 MiB</strong></p>
+        </div>
+
+        <div style="clear: both"></div>
+      </div>
+
+      <div style="position: relative; margin: 4px auto; padding-top: 3px">
+        <p style="font-weight: bold">H@H Downloader</p>
+        <form
+          id="hathdl_form"
+          action="https://e-hentai.org/archiver.php?gid=123456&amp;token=abcdef1234"
+          method="post"
+        >
+          <input type="hidden" id="hathdl_xres" name="hathdl_xres" value="" />
+        </form>
+        <table style="margin: auto">
+          <tr>
+            <td style="font-weight: bold; width: 70px; height: 62px">
+              <p>Original</p>
+              <p>18.46 MiB</p>
+              <p>8800 GP</p>
+            </td>
+            <td style="font-weight: bold; width: 70px; height: 62px">
+              <p>800x</p>
+              <p>2.17 MiB</p>
+              <p>218 GP</p>
+            </td>
+            <td style="font-weight: bold; width: 70px; height: 62px; color: #cccccc">
+              <p>1280x</p>
+              <p>N/A</p>
+              <p>N/A</p>
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

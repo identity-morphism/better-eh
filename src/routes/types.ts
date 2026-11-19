@@ -1,4 +1,5 @@
 import type { DocumentOptions, PageLoader } from "../fetch/loader";
+import type { ArchivePage } from "../parse/archive";
 import type { FavoritesPage } from "../parse/favorites";
 import type { GalleryTorrentsPage } from "../parse/gallery-torrents";
 import type { HomePage } from "../parse/home";
@@ -22,6 +23,7 @@ export type Route =
   | { kind: "favorites"; url: string }
   | { kind: "toplist"; url: string }
   | { kind: "galleryTorrents"; url: string }
+  | { kind: "archive"; url: string }
   | { kind: "home"; url: string }
   | { kind: "myTags"; url: string }
   | { kind: "settings"; url: string }
@@ -67,6 +69,7 @@ export interface RouteDataByKind {
   favorites: FavoritesPage;
   toplist: ToplistPage;
   galleryTorrents: GalleryTorrentsPage;
+  archive: ArchivePage;
   home: HomePage;
   myTags: MyTagsPage;
   settings: readonly UconfigSection[];

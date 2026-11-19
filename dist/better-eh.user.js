@@ -1929,6 +1929,142 @@ ${defaultKeySummary()}`)) {
     }
   });
 
+  // src/parse/archive.ts
+  var GID = /^\d+$/;
+  var GALLERY_TOKEN = /^[0-9a-f]+$/i;
+  function labelledText(container, label) {
+    for (const node of container.querySelectorAll("div, p")) {
+      const text = cleanText(node.textContent);
+      if (!text.startsWith(label)) {
+        continue;
+      }
+      const strong = node.querySelector("strong");
+      return cleanText(strong?.textContent) || cleanText(text.slice(label.length));
+    }
+    return "";
+  }
+  function optionContainer(form) {
+    let node = form.parentElement;
+    while (node !== null && node.id !== "db") {
+      const text = cleanText(node.textContent);
+      if (text.includes("Download Cost:") && text.includes("Estimated Size:")) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return form.parentElement ?? form;
+  }
+  function parseCost(text) {
+    const value = cleanText(text);
+    if (value === "") {
+      return { kind: "unknown", text: value };
+    }
+    if (/^free!?$/i.test(value)) {
+      return { kind: "free" };
+    }
+    if (/^n\/a$/i.test(value)) {
+      return { kind: "unavailable" };
+    }
+    if (/insufficient funds/i.test(value)) {
+      return { kind: "insufficient" };
+    }
+    if (/^([\d,]+)\s*GP$/i.test(value)) {
+      const amount = parseNumber(value);
+      if (amount !== null) {
+        return { kind: "gp", amount };
+      }
+    }
+    return { kind: "unknown", text: value };
+  }
+  function parseSize(text) {
+    const value = cleanText(text);
+    return value === "" || /^n\/a$/i.test(value) ? null : value;
+  }
+  function optionFrom(form, base) {
+    const dltype = (form.querySelector("input[name='dltype']")?.value ?? "").trim();
+    const kind = dltype === "org" ? "original" : dltype === "res" ? "resample" : null;
+    if (kind === null) {
+      return null;
+    }
+    const action = safeUrl(form.getAttribute("action") ?? "", base)?.href ?? null;
+    if (action === null) {
+      return null;
+    }
+    const submit = form.querySelector("input[name='dlcheck']");
+    const label = (submit?.getAttribute("value") ?? "").trim() || (kind === "original" ? "Download Original Archive" : "Download Resample Archive");
+    const container = optionContainer(form);
+    const cost = parseCost(labelledText(container, "Download Cost:"));
+    const disabled = submit === null || submit.hasAttribute("disabled");
+    const available = !disabled && (cost.kind === "free" || cost.kind === "gp");
+    return {
+      kind,
+      dltype,
+      label,
+      action,
+      cost,
+      size: parseSize(labelledText(container, "Estimated Size:")),
+      available
+    };
+  }
+  function parseFunds(doc) {
+    const container = doc.getElementById("db");
+    if (container === null) {
+      return null;
+    }
+    for (const paragraph of container.querySelectorAll("p")) {
+      if (!cleanText(paragraph.textContent).startsWith("Current Funds:")) {
+        continue;
+      }
+      const text = cleanText(paragraph.nextElementSibling?.textContent ?? paragraph.textContent);
+      const gp = /([\d,]+)\s*GP/i.exec(text)?.[1] ?? null;
+      const credits = /([\d,]+)\s*Credits/i.exec(text)?.[1] ?? null;
+      return { gp, credits };
+    }
+    return null;
+  }
+  function galleryLinks(url) {
+    const parsed = safeUrl(url);
+    const gid = parsed?.searchParams.get("gid") ?? "";
+    const token = parsed?.searchParams.get("token") ?? "";
+    if (!GID.test(gid) || !GALLERY_TOKEN.test(token)) {
+      return { galleryHref: null, torrentsHref: null };
+    }
+    return {
+      galleryHref: `/g/${gid}/${token}/`,
+      torrentsHref: `/gallerytorrents.php?gid=${gid}&t=${token}`
+    };
+  }
+  function parseArchivePage(doc, url) {
+    const container = doc.getElementById("db");
+    let original = null;
+    let resample = null;
+    for (const form of container?.querySelectorAll("form") ?? []) {
+      const option = optionFrom(form, url);
+      if (option?.kind === "original" && original === null) {
+        original = option;
+      } else if (option?.kind === "resample" && resample === null) {
+        resample = option;
+      }
+    }
+    return {
+      url,
+      title: cleanText(container?.querySelector("h1")?.textContent),
+      funds: parseFunds(doc),
+      original,
+      resample,
+      ...galleryLinks(url)
+    };
+  }
+  function parseArchiveDownloadHref(doc, base) {
+    const anchor = doc.getElementById("continue")?.querySelector("a[href]") ?? null;
+    const href = anchorHref(anchor, base);
+    if (href === null) {
+      return null;
+    }
+    const parsed = safeUrl(href);
+    return parsed !== null && /^https?:$/.test(parsed.protocol) ? href : null;
+  }
+
   // src/parse/list.ts
   var PAGES_TEXT = /^([\d,]+)\s+pages?$/i;
   var FAVORITE_SLOT_RGB = [
@@ -2571,14 +2707,14 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/parse/gallery-torrents.ts
-  var GID = /^\d+$/;
-  var GALLERY_TOKEN = /^[0-9a-f]+$/i;
+  var GID2 = /^\d+$/;
+  var GALLERY_TOKEN2 = /^[0-9a-f]+$/i;
   var DOWNLOAD_LINK = "a[href*='ehtracker.org/get/']";
   function galleryHrefFrom(url) {
     const parsed = safeUrl(url);
     const gid = parsed?.searchParams.get("gid") ?? "";
     const token = parsed?.searchParams.get("t") ?? "";
-    if (!GID.test(gid) || !GALLERY_TOKEN.test(token)) {
+    if (!GID2.test(gid) || !GALLERY_TOKEN2.test(token)) {
       return null;
     }
     return `/g/${gid}/${token}/`;
@@ -2854,6 +2990,14 @@ ${defaultKeySummary()}`)) {
     }
     if (data.sections.length === 0) {
       throw new ParseMismatchError("toplist", "the toplist sections are missing");
+    }
+  }
+  function assertArchivePage(data, doc) {
+    if (doc.getElementById("db") === null) {
+      throw new ParseMismatchError("archive", "the archiver container is missing");
+    }
+    if (data.original === null && data.resample === null) {
+      throw new ParseMismatchError("archive", "the archive download forms are missing");
     }
   }
   function assertSettingsPage(data) {
@@ -3598,6 +3742,33 @@ ${defaultKeySummary()}`)) {
     return body;
   }
 
+  // src/data/archive.ts
+  async function startArchiveDownload(option, signal, deps = {}) {
+    const body = new URLSearchParams({ dltype: option.dltype, dlcheck: option.label });
+    const response = await (deps.post ?? postForm)(option.action, body, {
+      tag: "archive",
+      failure: "Archive request failed",
+      signal
+    });
+    const html = await response.text();
+    const doc = (deps.parseHtml ?? ((text) => new DOMParser().parseFromString(text, "text/html")))(html);
+    const href = parseArchiveDownloadHref(doc, option.action);
+    if (href === null) {
+      throw new Error("The site did not return an archive download link.");
+    }
+    return href;
+  }
+
+  // src/ui/error-text.ts
+  function errorText(error, fallback = "Something went wrong.") {
+    return error instanceof Error ? error.message : fallback;
+  }
+
+  // src/ui/list-header.ts
+  function listHeader({ title, summary }) {
+    return el("div", { class: "list-header" }, el("div", { class: "list-heading" }, el("h1", { text: title })), el("div", { class: "list-summary" }, ...summary));
+  }
+
   // src/data/favorites.ts
   var FOLDER_COLORS = [
     "#c8c8c8",
@@ -3715,96 +3886,127 @@ ${defaultKeySummary()}`)) {
     await submitBulk(`fav${slot}`, gids, signal);
   }
 
-  // src/ui/view-scale.ts
-  function bindViewScale({ signal, apply }) {
-    apply(getSettings());
-    const off = onSettingsChange(apply);
-    let frame = 0;
-    const onResize = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => apply(getSettings()));
-    };
-    window.addEventListener("resize", onResize);
-    const cleanup = () => {
-      off();
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", onResize);
-    };
-    if (signal.aborted) {
-      cleanup();
+  // src/data/search-history.ts
+  var HISTORY_KEY = "eh:search-history:v1";
+  var VERSION3 = 1;
+  var DAY_MS = 24 * 60 * 60 * 1000;
+  var RECENT_LIMIT = 20;
+  var RECENT_TTL_MS = 90 * DAY_MS;
+  function normalize(text) {
+    return text.replace(/\s+/gu, " ").trim();
+  }
+  function isRecent(value) {
+    if (typeof value !== "object" || value === null) {
+      return false;
+    }
+    const record = value;
+    return typeof record.text === "string" && typeof record.usedAt === "number";
+  }
+  var historyStore = createStore({ key: HISTORY_KEY, version: VERSION3, empty: () => [], guard: isUnknownArray }, gmStorage());
+  function recentQueries(now = Date.now()) {
+    const seen = new Set;
+    const recent = [];
+    for (const value of historyStore.read()) {
+      if (!isRecent(value) || now - value.usedAt >= RECENT_TTL_MS) {
+        continue;
+      }
+      const text = normalize(value.text);
+      const key = text.toLowerCase();
+      if (text === "" || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      recent.push({ text, usedAt: value.usedAt });
+    }
+    return recent.slice(0, RECENT_LIMIT);
+  }
+  function rememberQuery(text, now = Date.now()) {
+    const normalized = normalize(text);
+    if (normalized === "") {
       return;
     }
-    signal.addEventListener("abort", cleanup, { once: true });
+    const key = normalized.toLowerCase();
+    const next = recentQueries(now).filter((entry) => entry.text.toLowerCase() !== key);
+    next.unshift({ text: normalized, usedAt: now });
+    historyStore.write(next.slice(0, RECENT_LIMIT));
+  }
+  function clearRecentQueries() {
+    historyStore.write([]);
   }
 
-  // src/ui/card-grid.ts
-  var MOBILE_WIDTH = 720;
-  var MOBILE_CARD_SIZE = 150;
-  function createCardGrid(signal) {
-    const element = el("div", { class: "card-grid" });
-    const cards = [];
-    let columns = [];
-    let nextColumn = 0;
-    function columnCount() {
-      const width = element.clientWidth || element.getBoundingClientRect().width || 0;
-      if (width <= 0) {
-        return 1;
-      }
-      const size = window.innerWidth <= MOBILE_WIDTH ? MOBILE_CARD_SIZE : getSettings().listThumbSize;
-      const space = getSettings().gap;
-      const fitted = Math.floor((width + space) / (size + space));
-      return Math.max(1, fitted);
+  // src/search-draft.ts
+  var QUERY_KEY = "eh:search-context:v1";
+  var QUERY_VERSION = 1;
+  var DRAFT_KEY = "eh:search-draft:v1";
+  var DRAFT_VERSION = 1;
+  var adapter = sessionStorageAdapter();
+  var queryStore = createStore({
+    key: QUERY_KEY,
+    version: QUERY_VERSION,
+    empty: () => "",
+    guard: (value) => typeof value === "string"
+  }, adapter);
+  var draftStore = createStore({
+    key: DRAFT_KEY,
+    version: DRAFT_VERSION,
+    empty: () => null,
+    guard: (value) => value === null || typeof value === "string"
+  }, adapter);
+  var listeners2 = new Set;
+  var cached = null;
+  function parseStored(value) {
+    if (value === "" || !URL.canParse(value, location.href)) {
+      return null;
     }
-    function rebuild(count) {
-      columns = Array.from({ length: count }, () => el("div", { class: "card-column" }));
-      const fragment = document.createDocumentFragment();
-      fragment.append(...columns);
-      element.replaceChildren(fragment);
-      cards.forEach((card, index) => {
-        columns[index % count]?.append(card);
-      });
-      nextColumn = cards.length % count;
+    return parseSearchQuery(new URL(value, location.href));
+  }
+  function read() {
+    const query = parseStored(queryStore.read()) ?? emptySearchQuery();
+    return { query, text: draftStore.read() ?? query.text };
+  }
+  function isDocumentReload() {
+    try {
+      const [entry] = performance.getEntriesByType("navigation");
+      return entry?.type === "reload";
+    } catch {
+      return false;
     }
-    function layout() {
-      element.style.setProperty("--gap", `${getSettings().gap}px`);
-      const count = columnCount();
-      if (count !== columns.length) {
-        rebuild(count);
-      }
+  }
+  function getSearchDraft() {
+    cached ??= read();
+    return cached;
+  }
+  function setSearchQuery(query) {
+    const previous = getSearchDraft();
+    const next = { query: { ...query }, text: query.text };
+    const url = buildSearchUrl(next.query);
+    cached = next;
+    queryStore.write(url);
+    draftStore.write(next.text);
+    if (previous.text !== next.text || buildSearchUrl(previous.query) !== url) {
+      notify();
     }
-    bindViewScale({ signal, apply: layout });
-    return {
-      element,
-      append: (incoming) => {
-        if (columns.length === 0) {
-          rebuild(columnCount());
-        }
-        for (const card of incoming) {
-          cards.push(card);
-          columns[nextColumn]?.append(card);
-          nextColumn = (nextColumn + 1) % columns.length;
-        }
-      },
-      remove: (removing) => {
-        const removed = new Set(removing);
-        for (const card of removing) {
-          card.remove();
-        }
-        for (let index = cards.length - 1;index >= 0; index--) {
-          const card = cards[index];
-          if (card !== undefined && removed.has(card)) {
-            cards.splice(index, 1);
-          }
-        }
-        nextColumn = cards.length % Math.max(1, columns.length);
-      },
-      refresh: layout
+  }
+  function setSearchDraftText(text) {
+    const previous = getSearchDraft();
+    if (previous.text === text) {
+      return;
+    }
+    cached = { query: previous.query, text };
+    draftStore.write(text);
+    notify();
+  }
+  function subscribeSearchDraft(listener) {
+    listeners2.add(listener);
+    return () => {
+      listeners2.delete(listener);
     };
   }
-
-  // src/ui/error-text.ts
-  function errorText(error, fallback = "Something went wrong.") {
-    return error instanceof Error ? error.message : fallback;
+  function notify() {
+    const state = getSearchDraft();
+    for (const listener of listeners2) {
+      listener(state);
+    }
   }
 
   // src/ui/jump-row.ts
@@ -3925,109 +4127,6 @@ ${defaultKeySummary()}`)) {
     }, { passive: true, signal });
     signal.addEventListener("abort", release, { once: true });
     return activate;
-  }
-
-  // src/ui/list-header.ts
-  function listHeader({ title, summary }) {
-    return el("div", { class: "list-header" }, el("div", { class: "list-heading" }, el("h1", { text: title })), el("div", { class: "list-summary" }, ...summary));
-  }
-
-  // src/ui/pager.ts
-  function pageHref(baseUrl, page, param) {
-    const url = new URL(baseUrl);
-    if (page <= 1) {
-      url.searchParams.delete(param);
-    } else {
-      url.searchParams.set(param, String(page - 1));
-    }
-    return url.href;
-  }
-  function pageWindow(current, total) {
-    const wanted = new Set([1, total, current - 1, current, current + 1]);
-    const pages = [...wanted].filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
-    const out = [];
-    let previous = 0;
-    for (const page of pages) {
-      if (previous !== 0 && page - previous > 1) {
-        out.push(null);
-      }
-      out.push(page);
-      previous = page;
-    }
-    return out;
-  }
-  function numericStrip({ current, total, href }) {
-    return pageWindow(current, total).map((page) => page === null ? el("span", { class: "pager-gap", "aria-hidden": "true", text: "…" }) : page === current ? el("span", { class: "pager-num is-current", "aria-current": "page", text: String(page) }, el("span", { class: "sr-only", text: " (current page)" })) : el("a", { class: "pager-num", href: href(page), text: String(page) }));
-  }
-  function jumpForm(label, input, onSubmit) {
-    const form = el("form", { class: "pager-jump" }, el("label", { class: "pager-jump-label", text: label }), input, el("button", { class: "btn btn-small", type: "submit", text: "Go" }));
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      onSubmit();
-    });
-    return form;
-  }
-  function pager({
-    prev,
-    next,
-    info = "",
-    label,
-    pages,
-    jump,
-    seek
-  }) {
-    const wrap = el("nav", { class: "pager", "aria-label": label });
-    const numbered = pages !== undefined && pages.total > 1;
-    if (prev && !numbered) {
-      wrap.append(el("a", { class: "pager-btn", href: prev }, icon("arrowLeft"), el("span", { text: "Previous" })));
-    }
-    if (info !== "") {
-      wrap.append(el("span", { class: "pager-info", text: info }));
-    }
-    if (numbered) {
-      wrap.append(el("span", { class: "pager-nums" }, ...numericStrip(pages)));
-    }
-    if (next && !numbered) {
-      wrap.append(el("a", { class: "pager-btn", href: next }, el("span", { text: "Next" }), icon("arrowRight")));
-    }
-    const paginated = numbered || prev !== null || next !== null;
-    if (jump && paginated) {
-      const input = el("input", {
-        class: "field-input pager-jump-input",
-        type: "number",
-        min: 1,
-        step: 1,
-        inputmode: "numeric",
-        value: String(jump.current),
-        "aria-label": "Jump to page",
-        title: "Jump to page"
-      });
-      wrap.append(jumpForm("Page", input, () => {
-        const page = Number.parseInt(input.value, 10);
-        if (Number.isFinite(page) && page >= 1) {
-          jump.go(page);
-        }
-      }));
-    }
-    if (seek && paginated) {
-      const input = el("input", {
-        class: "field-input pager-jump-input pager-seek-input",
-        type: "text",
-        placeholder: "date or offset",
-        "aria-label": "Seek to a date or offset",
-        title: "Enter a year (2020), a date (2020-06-15), or an offset such as 1d, 2w, 3m or 1y."
-      });
-      const form = jumpForm("Seek", input, () => {
-        const value = input.value.trim();
-        if (value !== "") {
-          seek.go(value);
-        }
-      });
-      form.classList.add("pager-seek");
-      wrap.append(form);
-    }
-    wrap.hidden = prev === null && next === null && !numbered && info === "";
-    return wrap;
   }
 
   // src/ui/anchor.ts
@@ -4308,602 +4407,6 @@ ${defaultKeySummary()}`)) {
   function closePopovers() {
     for (const entry of [...stack].reverse()) {
       entry.close();
-    }
-  }
-
-  // src/ui/stars.ts
-  var HALF_STEPS = 10;
-  function litHalves(value) {
-    return Math.min(HALF_STEPS, Math.max(0, Math.round(value * 2)));
-  }
-  function halfClass(half) {
-    return `rating-half ${half % 2 === 1 ? "rating-half-left" : "rating-half-right"}`;
-  }
-  function starGlyphs() {
-    const outline = icon("star", false);
-    outline.classList.add("rating-half-off");
-    const filled = icon("star", true);
-    filled.classList.add("rating-half-on");
-    return [outline, filled];
-  }
-  function starRow(value) {
-    if (value === null) {
-      return null;
-    }
-    const lit = litHalves(value);
-    const label = value.toFixed(1).replace(/\.0$/u, "");
-    const row = el("span", {
-      class: "rating-stars is-static",
-      role: "img",
-      "aria-label": `${label} out of 5 stars`
-    });
-    for (let half = 1;half <= HALF_STEPS; half++) {
-      const cell = el("span", {
-        class: `${halfClass(half)}${half <= lit ? " is-on" : ""}`
-      });
-      cell.append(...starGlyphs());
-      row.append(cell);
-    }
-    return row;
-  }
-
-  // src/ui/text.ts
-  function plural(count, singular, pluralForm = `${singular}s`) {
-    return count === 1 ? singular : pluralForm;
-  }
-  function countText(count, singular, pluralForm) {
-    return `${count} ${plural(count, singular, pluralForm)}`;
-  }
-
-  // src/ui/card-facts.ts
-  function cardFactRows(item, posted) {
-    const rows = [];
-    if (item.category) {
-      rows.push(el("span", { class: `cat-badge ${item.category.cls}`, text: item.category.name }));
-    }
-    const stars = starRow(item.rating);
-    if (stars) {
-      rows.push(stars);
-    }
-    if (item.posted) {
-      rows.push(posted(item.posted));
-    }
-    if (item.pages) {
-      rows.push(el("span", { text: countText(item.pages, "page") }));
-    }
-    return rows;
-  }
-
-  // src/ui/state-panel.ts
-  function nativePageAction(href = nativeUrl()) {
-    return { label: "Open native page", href, native: true };
-  }
-  function actionNode(action) {
-    const classes = action.primary === true ? "btn btn-primary" : "btn";
-    if (action.href !== undefined) {
-      return el("a", {
-        class: classes,
-        href: action.href,
-        "data-native": action.native === true ? "" : null
-      }, action.label);
-    }
-    return el("button", {
-      class: classes,
-      type: "button",
-      text: action.label,
-      onclick: action.onClick
-    });
-  }
-  function statePanel(options) {
-    const tone = options.tone ?? "empty";
-    const children = [];
-    if (tone === "error") {
-      children.push(el("div", { class: "state-icon", "aria-hidden": "true" }, icon("warning")));
-    }
-    if (options.title !== undefined) {
-      const heading = (options.headingLevel ?? 2) === 1 ? "h1" : "h2";
-      children.push(el(heading, { class: "state-title", text: options.title }));
-    }
-    children.push(el("p", { class: "state-text", text: options.text }));
-    if (options.detail !== undefined) {
-      children.push(el("p", { class: "state-text", text: options.detail }));
-    }
-    const actions = options.actions ?? [];
-    if (actions.length > 0) {
-      children.push(el("div", { class: "state-actions" }, ...actions.map(actionNode)));
-    }
-    return el("div", {
-      class: tone === "error" ? "error-view" : "empty-state",
-      role: tone === "error" ? "alert" : null
-    }, ...children);
-  }
-
-  // src/ui/login-gate.ts
-  var LOGIN_HREF = "https://forums.e-hentai.org/index.php?act=Login&CODE=00";
-  function loginGate(options = {}) {
-    return statePanel({
-      title: options.title ?? "Sign in required",
-      text: options.message ?? "This page reads your account, so it needs a signed-in session.",
-      headingLevel: 1,
-      actions: [
-        { label: "Sign in", href: LOGIN_HREF, native: true, primary: true },
-        ...options.nativeHref === undefined ? [] : [nativePageAction(options.nativeHref)]
-      ]
-    });
-  }
-
-  // src/ui/favmenu.ts
-  var activeMenu = null;
-  function closeFavoriteMenu() {
-    activeMenu?.close();
-    activeMenu = null;
-  }
-  function createStatusRegion() {
-    const node = el("div", {
-      class: "fav-status",
-      role: "status",
-      "aria-live": "polite",
-      "aria-atomic": "true"
-    });
-    node.hidden = true;
-    const write = (text) => {
-      node.textContent = text;
-      node.hidden = text === "";
-    };
-    return {
-      node,
-      announce(text) {
-        announceInto(node, text.trim(), write);
-      }
-    };
-  }
-  function favoriteDot(color) {
-    const dot = el("span", { class: "fav-dot" });
-    dot.style.background = color;
-    return dot;
-  }
-  function isCurrentFavoriteFolder(folder, snapshot) {
-    if (snapshot.favorited !== true) {
-      return false;
-    }
-    if (typeof snapshot.slot === "number") {
-      return folder.slot === snapshot.slot;
-    }
-    const name = snapshot.folder?.trim();
-    return name !== undefined && name !== "" && folder.name.toLowerCase() === name.toLowerCase();
-  }
-  function openFavoriteMenu(options) {
-    activeMenu?.close();
-    const {
-      anchor,
-      state,
-      loadFolders = getFolders,
-      loadNote = (signal) => getFavoriteNote(state, signal),
-      save = setFavorite
-    } = options;
-    const content = el("div");
-    const header = el("div", { class: "fav-head" });
-    const syncHeader = () => {
-      const favorited = state.get().favorited;
-      header.textContent = favorited === true ? "Update favorite" : favorited === false ? "Add to favorites" : "Favorites";
-    };
-    syncHeader();
-    const status = createStatusRegion();
-    const note = el("textarea", {
-      class: "field-input fav-note",
-      rows: 2,
-      placeholder: "Note (optional)",
-      "aria-label": "Favorite note"
-    });
-    note.hidden = !isLoggedIn();
-    const body = el("div", {}, header, status.node, note, content);
-    const controller = new AbortController;
-    const popover = bindPopover(anchor, () => ({
-      content: body,
-      dispose: () => {
-        controller.abort();
-        if (activeMenu?.anchor === anchor) {
-          activeMenu = null;
-        }
-      }
-    }), {
-      role: "dialog",
-      label: "Favorite folders",
-      className: "fav-menu",
-      align: "end",
-      autoFocus: true
-    });
-    activeMenu = { close: () => popover.close(), anchor };
-    popover.open();
-    const nativeFavoriteUrl = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(state.gid)}&t=${encodeURIComponent(state.token)}&act=addfav`;
-    const nativeLink = (label) => {
-      const link = el("a", {
-        class: "fav-link",
-        href: nativeFavoriteUrl,
-        "data-native": "",
-        target: "_blank",
-        rel: "noopener"
-      }, label);
-      return link;
-    };
-    const renderFolders = (folders) => {
-      content.replaceChildren();
-      if (!isLoggedIn()) {
-        status.announce("Sign in to use favorites.");
-        content.append(el("a", {
-          class: "fav-link",
-          href: LOGIN_HREF,
-          "data-native": ""
-        }, "Sign in"));
-        return;
-      }
-      if (folders.length === 0) {
-        status.announce("No favorite folders found.");
-        content.append(nativeLink("Open native dialog"));
-        return;
-      }
-      status.announce("");
-      const snapshot = state.get();
-      const grid = el("div", { class: "fav-grid" });
-      for (const folder of folders) {
-        const current = isCurrentFavoriteFolder(folder, snapshot);
-        grid.append(el("button", {
-          class: current ? "fav-item is-current" : "fav-item",
-          type: "button",
-          "aria-current": current ? "true" : null,
-          onclick: () => {
-            apply(folder);
-          }
-        }, favoriteDot(folder.color), el("span", { class: "fav-name", text: folder.name }), current ? el("span", { class: "fav-check", "aria-hidden": "true", text: "✓" }) : null));
-      }
-      content.append(grid);
-      if (snapshot.favorited !== false) {
-        content.append(el("button", {
-          class: "fav-item fav-remove",
-          type: "button",
-          onclick: () => {
-            apply(null);
-          }
-        }, favoriteDot("var(--color-danger)"), el("span", { class: "fav-name", text: "Remove from favorites" })));
-      }
-      content.append(el("a", {
-        class: "fav-link",
-        href: `${location.origin}/uconfig.php`,
-        "data-native": "",
-        target: "_blank",
-        rel: "noopener",
-        text: "Manage folders"
-      }));
-    };
-    const apply = async (folder) => {
-      content.replaceChildren();
-      status.announce("Saving…");
-      try {
-        if (await noteLoad === null) {
-          throw new Error("Could not read the saved note.");
-        }
-        await save(state, folder === null ? null : folder.slot, note.value.trim());
-        state.set(folder !== null, folder);
-        syncHeader();
-        showToast(folder === null ? "Removed from favorites" : "Added to favorites");
-        popover.close();
-        anchor.focus();
-      } catch (error) {
-        const message = errorText(error, "Favorite update failed.");
-        const retry = nativeLink("Retry in native dialog");
-        content.replaceChildren(retry);
-        status.announce(message);
-        popover.reposition();
-        retry.focus();
-      }
-    };
-    status.announce("Loading folders…");
-    const noteLoad = state.get().favorited === true ? loadNote(controller.signal).catch(() => null) : Promise.resolve("");
-    noteLoad.then((savedNote) => {
-      if (!controller.signal.aborted && note.value === "" && savedNote !== null) {
-        note.value = savedNote;
-      }
-    });
-    loadFolders(controller.signal).then((folders) => {
-      renderFolders(folders);
-      popover.reposition();
-    }).catch((error) => {
-      if (controller.signal.aborted) {
-        return;
-      }
-      const message = errorText(error, "Could not load favorite folders.");
-      const retry = nativeLink("Open native dialog");
-      content.replaceChildren(retry);
-      status.announce(message);
-      popover.reposition();
-      retry.focus();
-    });
-  }
-  function favoriteButton(state, signal) {
-    const button = el("button", {
-      class: "fav-btn",
-      type: "button",
-      "aria-label": "Favorite",
-      "aria-haspopup": "dialog",
-      "aria-expanded": "false",
-      title: "Favorite"
-    });
-    const sync = (snapshot = state.get()) => {
-      const favorited = snapshot.favorited;
-      const folder = snapshot.folder;
-      const label = favorited === true ? folder === null || folder === "" ? "Favorited" : folder : "Favorite";
-      button.replaceChildren(icon("star", favorited === true), el("span", { class: "fav-label", text: label }));
-      button.classList.toggle("is-favorite", favorited === true);
-      const action = favorited === true ? "Edit favorite" : favorited === false ? "Add to favorites" : "Favorite folders";
-      button.setAttribute("aria-label", action);
-      button.title = action;
-    };
-    sync();
-    const unsubscribe = state.subscribe(sync);
-    if (signal !== undefined) {
-      if (signal.aborted) {
-        unsubscribe();
-      } else {
-        signal.addEventListener("abort", unsubscribe, { once: true });
-      }
-    }
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      if (activeMenu?.anchor === button) {
-        closeFavoriteMenu();
-        return;
-      }
-      openFavoriteMenu({ anchor: button, state });
-    });
-    return button;
-  }
-
-  // src/ui/favorite-state.ts
-  function createFavoriteState(gallery, mark, known = mark !== null) {
-    let snapshot = !known ? { favorited: null, folder: null, slot: null } : mark === null ? { favorited: false, folder: null, slot: null } : { favorited: true, folder: mark.folder, slot: mark.slot };
-    const listeners = new Set;
-    return {
-      gid: gallery.gid,
-      token: gallery.token,
-      get: () => snapshot,
-      set(favorited, folder) {
-        snapshot = favorited ? { favorited: true, folder: folder?.name ?? "", slot: folder?.slot ?? null } : { favorited: false, folder: null, slot: null };
-        for (const listener of listeners) {
-          listener(snapshot);
-        }
-      },
-      subscribe(listener) {
-        listeners.add(listener);
-        return () => {
-          listeners.delete(listener);
-        };
-      }
-    };
-  }
-
-  // src/ui/result-card.ts
-  var MAX_COVER_ASPECT = 2.5;
-  function setFavoriteMark(node, mark) {
-    node.classList.toggle("is-favorite", mark !== null);
-    if (mark === null) {
-      node.style.removeProperty("--fav-color");
-      node.removeAttribute("title");
-      return;
-    }
-    node.style.setProperty("--fav-color", mark.slot === null ? "var(--color-accent)" : folderColor(mark.slot));
-    node.title = mark.folder === "" ? "In favorites" : `In favorites: ${mark.folder}`;
-  }
-  function cardCover(item) {
-    const link = el("a", {
-      class: "card-cover",
-      href: item.href,
-      "aria-label": item.title.primary,
-      tabindex: "-1"
-    });
-    const missing = () => {
-      link.setAttribute("aria-label", `${item.title.primary} - no cover`);
-      link.replaceChildren("No cover");
-      link.classList.add("is-missing");
-    };
-    if (item.coverSrc) {
-      const image = el("img", {
-        src: item.coverSrc,
-        alt: "",
-        loading: "lazy",
-        decoding: "async",
-        width: item.coverSize?.width ?? null,
-        height: item.coverSize?.height ?? null
-      });
-      const width = item.coverSize?.width;
-      const height = item.coverSize?.height;
-      if (width !== undefined && width > 0 && height !== undefined && height / width > MAX_COVER_ASPECT) {
-        link.classList.add("is-tall-cover");
-      }
-      image.addEventListener("error", missing, { once: true });
-      link.append(image);
-    } else {
-      missing();
-    }
-    return link;
-  }
-  function cardTitle(item) {
-    const title = el("a", { class: "card-title", href: item.href });
-    for (const meta of item.title.leading) {
-      title.append(el("span", { class: "card-artist", text: `${meta.text} ` }));
-    }
-    title.append(el("span", { class: "card-primary", text: item.title.primary }));
-    if (item.title.secondary) {
-      title.append(el("span", { class: "card-secondary", text: item.title.secondary }));
-    }
-    return title;
-  }
-  function cardMeta(item) {
-    const meta = el("div", { class: "card-meta" }, ...cardFactRows(item, (text) => {
-      const posted = el("span", { class: "card-posted", text });
-      setFavoriteMark(posted, item.favorite);
-      return posted;
-    }));
-    if (item.torrentsHref) {
-      meta.append(el("a", {
-        class: "card-torrent",
-        href: item.torrentsHref,
-        title: "Show torrents",
-        "aria-label": "Show torrents"
-      }, icon("download")));
-    }
-    return meta;
-  }
-  function resultCard(item, signal, options = {}) {
-    const favorite = createFavoriteState(item, item.favorite);
-    const meta = cardMeta(item);
-    const posted = meta.querySelector(".card-posted");
-    const repaint = (snapshot) => {
-      if (posted === null) {
-        return;
-      }
-      setFavoriteMark(posted, snapshot.favorited === true ? { folder: snapshot.folder ?? "", slot: snapshot.slot } : null);
-    };
-    repaint(favorite.get());
-    const unsubscribe = favorite.subscribe(repaint);
-    signal.addEventListener("abort", unsubscribe, { once: true });
-    const article = el("article", {
-      class: options.className === undefined ? "card" : `card ${options.className}`
-    });
-    const cover = el("div", { class: "card-cover-wrap" }, cardCover(item));
-    if (options.favorite !== false) {
-      cover.append(favoriteButton(favorite, signal));
-    }
-    if (options.cover) {
-      cover.append(options.cover);
-    }
-    const body = el("div", { class: "card-body" }, cardTitle(item), item.uploader ? el("div", { class: "card-uploader", text: item.uploader }) : null, meta);
-    if (options.note) {
-      body.append(el("p", { class: "favorites-note", title: options.note, text: options.note }));
-    }
-    article.append(cover, body);
-    return article;
-  }
-
-  // src/data/search-history.ts
-  var HISTORY_KEY = "eh:search-history:v1";
-  var VERSION3 = 1;
-  var DAY_MS = 24 * 60 * 60 * 1000;
-  var RECENT_LIMIT = 20;
-  var RECENT_TTL_MS = 90 * DAY_MS;
-  function normalize(text) {
-    return text.replace(/\s+/gu, " ").trim();
-  }
-  function isRecent(value) {
-    if (typeof value !== "object" || value === null) {
-      return false;
-    }
-    const record = value;
-    return typeof record.text === "string" && typeof record.usedAt === "number";
-  }
-  var historyStore = createStore({ key: HISTORY_KEY, version: VERSION3, empty: () => [], guard: isUnknownArray }, gmStorage());
-  function recentQueries(now = Date.now()) {
-    const seen = new Set;
-    const recent = [];
-    for (const value of historyStore.read()) {
-      if (!isRecent(value) || now - value.usedAt >= RECENT_TTL_MS) {
-        continue;
-      }
-      const text = normalize(value.text);
-      const key = text.toLowerCase();
-      if (text === "" || seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      recent.push({ text, usedAt: value.usedAt });
-    }
-    return recent.slice(0, RECENT_LIMIT);
-  }
-  function rememberQuery(text, now = Date.now()) {
-    const normalized = normalize(text);
-    if (normalized === "") {
-      return;
-    }
-    const key = normalized.toLowerCase();
-    const next = recentQueries(now).filter((entry) => entry.text.toLowerCase() !== key);
-    next.unshift({ text: normalized, usedAt: now });
-    historyStore.write(next.slice(0, RECENT_LIMIT));
-  }
-  function clearRecentQueries() {
-    historyStore.write([]);
-  }
-
-  // src/search-draft.ts
-  var QUERY_KEY = "eh:search-context:v1";
-  var QUERY_VERSION = 1;
-  var DRAFT_KEY = "eh:search-draft:v1";
-  var DRAFT_VERSION = 1;
-  var adapter = sessionStorageAdapter();
-  var queryStore = createStore({
-    key: QUERY_KEY,
-    version: QUERY_VERSION,
-    empty: () => "",
-    guard: (value) => typeof value === "string"
-  }, adapter);
-  var draftStore = createStore({
-    key: DRAFT_KEY,
-    version: DRAFT_VERSION,
-    empty: () => null,
-    guard: (value) => value === null || typeof value === "string"
-  }, adapter);
-  var listeners2 = new Set;
-  var cached = null;
-  function parseStored(value) {
-    if (value === "" || !URL.canParse(value, location.href)) {
-      return null;
-    }
-    return parseSearchQuery(new URL(value, location.href));
-  }
-  function read() {
-    const query = parseStored(queryStore.read()) ?? emptySearchQuery();
-    return { query, text: draftStore.read() ?? query.text };
-  }
-  function isDocumentReload() {
-    try {
-      const [entry] = performance.getEntriesByType("navigation");
-      return entry?.type === "reload";
-    } catch {
-      return false;
-    }
-  }
-  function getSearchDraft() {
-    cached ??= read();
-    return cached;
-  }
-  function setSearchQuery(query) {
-    const previous = getSearchDraft();
-    const next = { query: { ...query }, text: query.text };
-    const url = buildSearchUrl(next.query);
-    cached = next;
-    queryStore.write(url);
-    draftStore.write(next.text);
-    if (previous.text !== next.text || buildSearchUrl(previous.query) !== url) {
-      notify();
-    }
-  }
-  function setSearchDraftText(text) {
-    const previous = getSearchDraft();
-    if (previous.text === text) {
-      return;
-    }
-    cached = { query: previous.query, text };
-    draftStore.write(text);
-    notify();
-  }
-  function subscribeSearchDraft(listener) {
-    listeners2.add(listener);
-    return () => {
-      listeners2.delete(listener);
-    };
-  }
-  function notify() {
-    const state = getSearchDraft();
-    for (const listener of listeners2) {
-      listener(state);
     }
   }
 
@@ -6463,6 +5966,14 @@ ${defaultKeySummary()}`)) {
     return exclude ? "-" : term.sign;
   }
 
+  // src/ui/text.ts
+  function plural(count, singular, pluralForm = `${singular}s`) {
+    return count === 1 ? singular : pluralForm;
+  }
+  function countText(count, singular, pluralForm) {
+    return `${count} ${plural(count, singular, pluralForm)}`;
+  }
+
   // src/ui/tag-combobox.ts
   var LIMIT = 50;
   var nextId = 0;
@@ -7398,6 +6909,792 @@ ${defaultKeySummary()}`)) {
       }
     }
     return element;
+  }
+
+  // src/views/archive.ts
+  function optionTitle(option) {
+    return option.kind === "original" ? "Original archive" : "Resampled archive";
+  }
+  function costText(cost) {
+    switch (cost.kind) {
+      case "free":
+        return "Free";
+      case "gp":
+        return `${cost.amount.toLocaleString("en-US")} GP`;
+      case "unavailable":
+        return "Not available";
+      case "insufficient":
+        return "Insufficient funds";
+      case "unknown":
+        return cost.text === "" ? "Unknown" : cost.text;
+    }
+  }
+  function unavailableNote(option) {
+    if (option.available) {
+      return null;
+    }
+    switch (option.cost.kind) {
+      case "unavailable":
+        return "The site does not offer this archive for the gallery.";
+      case "insufficient":
+        return "This account does not have enough GP for this archive.";
+      case "unknown":
+        return "The cost could not be read, so the app will not spend GP on this archive.";
+      case "free":
+      case "gp":
+        return "The site does not offer this download for the gallery.";
+    }
+  }
+  function metaItem(label, value) {
+    return el("div", { class: "archive-option-meta-item" }, el("span", { class: "archive-option-meta-label", text: label }), el("span", { class: "archive-option-meta-value", text: value }));
+  }
+  function optionCard(option, ctx, controls, startDownload, openDownload) {
+    const note = unavailableNote(option);
+    const status = el("p", { class: "archive-option-status", role: "status", "aria-live": "polite" });
+    const button = el("button", {
+      class: "btn btn-primary archive-download",
+      type: "button",
+      disabled: option.available ? null : "disabled",
+      text: `Download ${option.kind === "original" ? "original" : "resampled"} archive`
+    });
+    controls.push({ button, available: option.available });
+    button.addEventListener("click", () => {
+      if (!option.available) {
+        return;
+      }
+      for (const control of controls) {
+        control.button.disabled = true;
+      }
+      button.setAttribute("aria-busy", "true");
+      status.removeAttribute("role");
+      status.textContent = "Preparing the archive…";
+      startDownload(option, ctx.signal).then((href) => {
+        if (ctx.signal.aborted) {
+          return;
+        }
+        button.removeAttribute("aria-busy");
+        status.textContent = "Archive ready. Starting the download…";
+        openDownload(href);
+      }, (error) => {
+        if (ctx.signal.aborted) {
+          return;
+        }
+        button.removeAttribute("aria-busy");
+        for (const control of controls) {
+          control.button.disabled = !control.available;
+        }
+        status.setAttribute("role", "alert");
+        status.textContent = errorText(error, "The archive could not be prepared.");
+      });
+    }, { signal: ctx.signal });
+    const cost = costText(option.cost);
+    return el("article", { class: "archive-option" }, el("h2", { class: "archive-option-title", text: optionTitle(option) }), el("div", { class: "archive-option-meta" }, metaItem("Size", option.size ?? "N/A"), metaItem("Cost", cost)), option.cost.kind === "gp" ? el("p", {
+      class: "archive-option-note",
+      text: `This download spends ${cost} when it starts.`
+    }) : null, note === null ? null : el("p", { class: "archive-option-note", text: note }), button, status);
+  }
+  function galleryLinks2(data) {
+    const links = [];
+    if (data.galleryHref !== null) {
+      links.push(el("a", { class: "meta-link", href: data.galleryHref, text: "Back to gallery" }));
+    }
+    if (data.torrentsHref !== null) {
+      links.push(el("a", { class: "meta-link", href: data.torrentsHref, text: "Torrents" }));
+    }
+    return links.length === 0 ? null : el("div", { class: "archive-links" }, ...links);
+  }
+  function fundsLine(funds) {
+    if (funds === null || funds.gp === null && funds.credits === null) {
+      return null;
+    }
+    const parts = [];
+    if (funds.gp !== null) {
+      parts.push(`${funds.gp} GP`);
+    }
+    if (funds.credits !== null) {
+      parts.push(`${funds.credits} Credits`);
+    }
+    return el("p", { class: "archive-funds", text: `Available: ${parts.join(" · ")}` });
+  }
+  function renderArchive(host, data, ctx, deps = {}) {
+    host.replaceChildren();
+    const startDownload = deps.startDownload ?? startArchiveDownload;
+    const openDownload = deps.openDownload ?? ((href) => {
+      window.location.href = href;
+    });
+    const controls = [];
+    const options = [data.original, data.resample].filter((option) => option !== null);
+    const grid = el("div", { class: "archive-options" }, ...options.map((option) => optionCard(option, ctx, controls, startDownload, openDownload)));
+    const empty = options.length === 0 ? el("div", { class: "empty-state" }, el("p", { class: "state-title", text: "No archive options" }), el("p", {
+      class: "state-text",
+      text: "The site did not offer an archive for this gallery."
+    })) : null;
+    appendChildren(host, [
+      siteNav(ctx.signal),
+      listHeader({
+        title: data.title === "" ? "Archive Download" : data.title,
+        summary: [el("span", { class: "badge", text: "Archive Download" })]
+      }),
+      fundsLine(data.funds) ?? null,
+      empty ?? grid,
+      galleryLinks2(data) ?? null,
+      el("div", { class: "archive-footer" }, el("a", {
+        class: "btn btn-ghost",
+        href: nativeUrl(data.url),
+        "data-native": "",
+        text: "Open native page"
+      }))
+    ]);
+  }
+
+  // src/ui/view-scale.ts
+  function bindViewScale({ signal, apply }) {
+    apply(getSettings());
+    const off = onSettingsChange(apply);
+    let frame = 0;
+    const onResize = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => apply(getSettings()));
+    };
+    window.addEventListener("resize", onResize);
+    const cleanup = () => {
+      off();
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", onResize);
+    };
+    if (signal.aborted) {
+      cleanup();
+      return;
+    }
+    signal.addEventListener("abort", cleanup, { once: true });
+  }
+
+  // src/ui/card-grid.ts
+  var MOBILE_WIDTH = 720;
+  var MOBILE_CARD_SIZE = 150;
+  function createCardGrid(signal) {
+    const element = el("div", { class: "card-grid" });
+    const cards = [];
+    let columns = [];
+    let nextColumn = 0;
+    function columnCount() {
+      const width = element.clientWidth || element.getBoundingClientRect().width || 0;
+      if (width <= 0) {
+        return 1;
+      }
+      const size = window.innerWidth <= MOBILE_WIDTH ? MOBILE_CARD_SIZE : getSettings().listThumbSize;
+      const space = getSettings().gap;
+      const fitted = Math.floor((width + space) / (size + space));
+      return Math.max(1, fitted);
+    }
+    function rebuild(count) {
+      columns = Array.from({ length: count }, () => el("div", { class: "card-column" }));
+      const fragment = document.createDocumentFragment();
+      fragment.append(...columns);
+      element.replaceChildren(fragment);
+      cards.forEach((card, index) => {
+        columns[index % count]?.append(card);
+      });
+      nextColumn = cards.length % count;
+    }
+    function layout() {
+      element.style.setProperty("--gap", `${getSettings().gap}px`);
+      const count = columnCount();
+      if (count !== columns.length) {
+        rebuild(count);
+      }
+    }
+    bindViewScale({ signal, apply: layout });
+    return {
+      element,
+      append: (incoming) => {
+        if (columns.length === 0) {
+          rebuild(columnCount());
+        }
+        for (const card of incoming) {
+          cards.push(card);
+          columns[nextColumn]?.append(card);
+          nextColumn = (nextColumn + 1) % columns.length;
+        }
+      },
+      remove: (removing) => {
+        const removed = new Set(removing);
+        for (const card of removing) {
+          card.remove();
+        }
+        for (let index = cards.length - 1;index >= 0; index--) {
+          const card = cards[index];
+          if (card !== undefined && removed.has(card)) {
+            cards.splice(index, 1);
+          }
+        }
+        nextColumn = cards.length % Math.max(1, columns.length);
+      },
+      refresh: layout
+    };
+  }
+
+  // src/ui/pager.ts
+  function pageHref(baseUrl, page, param) {
+    const url = new URL(baseUrl);
+    if (page <= 1) {
+      url.searchParams.delete(param);
+    } else {
+      url.searchParams.set(param, String(page - 1));
+    }
+    return url.href;
+  }
+  function pageWindow(current, total) {
+    const wanted = new Set([1, total, current - 1, current, current + 1]);
+    const pages = [...wanted].filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
+    const out = [];
+    let previous = 0;
+    for (const page of pages) {
+      if (previous !== 0 && page - previous > 1) {
+        out.push(null);
+      }
+      out.push(page);
+      previous = page;
+    }
+    return out;
+  }
+  function numericStrip({ current, total, href }) {
+    return pageWindow(current, total).map((page) => page === null ? el("span", { class: "pager-gap", "aria-hidden": "true", text: "…" }) : page === current ? el("span", { class: "pager-num is-current", "aria-current": "page", text: String(page) }, el("span", { class: "sr-only", text: " (current page)" })) : el("a", { class: "pager-num", href: href(page), text: String(page) }));
+  }
+  function jumpForm(label, input, onSubmit) {
+    const form = el("form", { class: "pager-jump" }, el("label", { class: "pager-jump-label", text: label }), input, el("button", { class: "btn btn-small", type: "submit", text: "Go" }));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      onSubmit();
+    });
+    return form;
+  }
+  function pager({
+    prev,
+    next,
+    info = "",
+    label,
+    pages,
+    jump,
+    seek
+  }) {
+    const wrap = el("nav", { class: "pager", "aria-label": label });
+    const numbered = pages !== undefined && pages.total > 1;
+    if (prev && !numbered) {
+      wrap.append(el("a", { class: "pager-btn", href: prev }, icon("arrowLeft"), el("span", { text: "Previous" })));
+    }
+    if (info !== "") {
+      wrap.append(el("span", { class: "pager-info", text: info }));
+    }
+    if (numbered) {
+      wrap.append(el("span", { class: "pager-nums" }, ...numericStrip(pages)));
+    }
+    if (next && !numbered) {
+      wrap.append(el("a", { class: "pager-btn", href: next }, el("span", { text: "Next" }), icon("arrowRight")));
+    }
+    const paginated = numbered || prev !== null || next !== null;
+    if (jump && paginated) {
+      const input = el("input", {
+        class: "field-input pager-jump-input",
+        type: "number",
+        min: 1,
+        step: 1,
+        inputmode: "numeric",
+        value: String(jump.current),
+        "aria-label": "Jump to page",
+        title: "Jump to page"
+      });
+      wrap.append(jumpForm("Page", input, () => {
+        const page = Number.parseInt(input.value, 10);
+        if (Number.isFinite(page) && page >= 1) {
+          jump.go(page);
+        }
+      }));
+    }
+    if (seek && paginated) {
+      const input = el("input", {
+        class: "field-input pager-jump-input pager-seek-input",
+        type: "text",
+        placeholder: "date or offset",
+        "aria-label": "Seek to a date or offset",
+        title: "Enter a year (2020), a date (2020-06-15), or an offset such as 1d, 2w, 3m or 1y."
+      });
+      const form = jumpForm("Seek", input, () => {
+        const value = input.value.trim();
+        if (value !== "") {
+          seek.go(value);
+        }
+      });
+      form.classList.add("pager-seek");
+      wrap.append(form);
+    }
+    wrap.hidden = prev === null && next === null && !numbered && info === "";
+    return wrap;
+  }
+
+  // src/ui/stars.ts
+  var HALF_STEPS = 10;
+  function litHalves(value) {
+    return Math.min(HALF_STEPS, Math.max(0, Math.round(value * 2)));
+  }
+  function halfClass(half) {
+    return `rating-half ${half % 2 === 1 ? "rating-half-left" : "rating-half-right"}`;
+  }
+  function starGlyphs() {
+    const outline = icon("star", false);
+    outline.classList.add("rating-half-off");
+    const filled = icon("star", true);
+    filled.classList.add("rating-half-on");
+    return [outline, filled];
+  }
+  function starRow(value) {
+    if (value === null) {
+      return null;
+    }
+    const lit = litHalves(value);
+    const label = value.toFixed(1).replace(/\.0$/u, "");
+    const row = el("span", {
+      class: "rating-stars is-static",
+      role: "img",
+      "aria-label": `${label} out of 5 stars`
+    });
+    for (let half = 1;half <= HALF_STEPS; half++) {
+      const cell = el("span", {
+        class: `${halfClass(half)}${half <= lit ? " is-on" : ""}`
+      });
+      cell.append(...starGlyphs());
+      row.append(cell);
+    }
+    return row;
+  }
+
+  // src/ui/card-facts.ts
+  function cardFactRows(item, posted) {
+    const rows = [];
+    if (item.category) {
+      rows.push(el("span", { class: `cat-badge ${item.category.cls}`, text: item.category.name }));
+    }
+    const stars = starRow(item.rating);
+    if (stars) {
+      rows.push(stars);
+    }
+    if (item.posted) {
+      rows.push(posted(item.posted));
+    }
+    if (item.pages) {
+      rows.push(el("span", { text: countText(item.pages, "page") }));
+    }
+    return rows;
+  }
+
+  // src/ui/state-panel.ts
+  function nativePageAction(href = nativeUrl()) {
+    return { label: "Open native page", href, native: true };
+  }
+  function actionNode(action) {
+    const classes = action.primary === true ? "btn btn-primary" : "btn";
+    if (action.href !== undefined) {
+      return el("a", {
+        class: classes,
+        href: action.href,
+        "data-native": action.native === true ? "" : null
+      }, action.label);
+    }
+    return el("button", {
+      class: classes,
+      type: "button",
+      text: action.label,
+      onclick: action.onClick
+    });
+  }
+  function statePanel(options) {
+    const tone = options.tone ?? "empty";
+    const children = [];
+    if (tone === "error") {
+      children.push(el("div", { class: "state-icon", "aria-hidden": "true" }, icon("warning")));
+    }
+    if (options.title !== undefined) {
+      const heading = (options.headingLevel ?? 2) === 1 ? "h1" : "h2";
+      children.push(el(heading, { class: "state-title", text: options.title }));
+    }
+    children.push(el("p", { class: "state-text", text: options.text }));
+    if (options.detail !== undefined) {
+      children.push(el("p", { class: "state-text", text: options.detail }));
+    }
+    const actions = options.actions ?? [];
+    if (actions.length > 0) {
+      children.push(el("div", { class: "state-actions" }, ...actions.map(actionNode)));
+    }
+    return el("div", {
+      class: tone === "error" ? "error-view" : "empty-state",
+      role: tone === "error" ? "alert" : null
+    }, ...children);
+  }
+
+  // src/ui/login-gate.ts
+  var LOGIN_HREF = "https://forums.e-hentai.org/index.php?act=Login&CODE=00";
+  function loginGate(options = {}) {
+    return statePanel({
+      title: options.title ?? "Sign in required",
+      text: options.message ?? "This page reads your account, so it needs a signed-in session.",
+      headingLevel: 1,
+      actions: [
+        { label: "Sign in", href: LOGIN_HREF, native: true, primary: true },
+        ...options.nativeHref === undefined ? [] : [nativePageAction(options.nativeHref)]
+      ]
+    });
+  }
+
+  // src/ui/favmenu.ts
+  var activeMenu = null;
+  function closeFavoriteMenu() {
+    activeMenu?.close();
+    activeMenu = null;
+  }
+  function createStatusRegion() {
+    const node = el("div", {
+      class: "fav-status",
+      role: "status",
+      "aria-live": "polite",
+      "aria-atomic": "true"
+    });
+    node.hidden = true;
+    const write = (text) => {
+      node.textContent = text;
+      node.hidden = text === "";
+    };
+    return {
+      node,
+      announce(text) {
+        announceInto(node, text.trim(), write);
+      }
+    };
+  }
+  function favoriteDot(color) {
+    const dot = el("span", { class: "fav-dot" });
+    dot.style.background = color;
+    return dot;
+  }
+  function isCurrentFavoriteFolder(folder, snapshot) {
+    if (snapshot.favorited !== true) {
+      return false;
+    }
+    if (typeof snapshot.slot === "number") {
+      return folder.slot === snapshot.slot;
+    }
+    const name = snapshot.folder?.trim();
+    return name !== undefined && name !== "" && folder.name.toLowerCase() === name.toLowerCase();
+  }
+  function openFavoriteMenu(options) {
+    activeMenu?.close();
+    const {
+      anchor,
+      state,
+      loadFolders = getFolders,
+      loadNote = (signal) => getFavoriteNote(state, signal),
+      save = setFavorite
+    } = options;
+    const content = el("div");
+    const header = el("div", { class: "fav-head" });
+    const syncHeader = () => {
+      const favorited = state.get().favorited;
+      header.textContent = favorited === true ? "Update favorite" : favorited === false ? "Add to favorites" : "Favorites";
+    };
+    syncHeader();
+    const status = createStatusRegion();
+    const note = el("textarea", {
+      class: "field-input fav-note",
+      rows: 2,
+      placeholder: "Note (optional)",
+      "aria-label": "Favorite note"
+    });
+    note.hidden = !isLoggedIn();
+    const body = el("div", {}, header, status.node, note, content);
+    const controller = new AbortController;
+    const popover = bindPopover(anchor, () => ({
+      content: body,
+      dispose: () => {
+        controller.abort();
+        if (activeMenu?.anchor === anchor) {
+          activeMenu = null;
+        }
+      }
+    }), {
+      role: "dialog",
+      label: "Favorite folders",
+      className: "fav-menu",
+      align: "end",
+      autoFocus: true
+    });
+    activeMenu = { close: () => popover.close(), anchor };
+    popover.open();
+    const nativeFavoriteUrl = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(state.gid)}&t=${encodeURIComponent(state.token)}&act=addfav`;
+    const nativeLink = (label) => {
+      const link = el("a", {
+        class: "fav-link",
+        href: nativeFavoriteUrl,
+        "data-native": "",
+        target: "_blank",
+        rel: "noopener"
+      }, label);
+      return link;
+    };
+    const renderFolders = (folders) => {
+      content.replaceChildren();
+      if (!isLoggedIn()) {
+        status.announce("Sign in to use favorites.");
+        content.append(el("a", {
+          class: "fav-link",
+          href: LOGIN_HREF,
+          "data-native": ""
+        }, "Sign in"));
+        return;
+      }
+      if (folders.length === 0) {
+        status.announce("No favorite folders found.");
+        content.append(nativeLink("Open native dialog"));
+        return;
+      }
+      status.announce("");
+      const snapshot = state.get();
+      const grid = el("div", { class: "fav-grid" });
+      for (const folder of folders) {
+        const current = isCurrentFavoriteFolder(folder, snapshot);
+        grid.append(el("button", {
+          class: current ? "fav-item is-current" : "fav-item",
+          type: "button",
+          "aria-current": current ? "true" : null,
+          onclick: () => {
+            apply(folder);
+          }
+        }, favoriteDot(folder.color), el("span", { class: "fav-name", text: folder.name }), current ? el("span", { class: "fav-check", "aria-hidden": "true", text: "✓" }) : null));
+      }
+      content.append(grid);
+      if (snapshot.favorited !== false) {
+        content.append(el("button", {
+          class: "fav-item fav-remove",
+          type: "button",
+          onclick: () => {
+            apply(null);
+          }
+        }, favoriteDot("var(--color-danger)"), el("span", { class: "fav-name", text: "Remove from favorites" })));
+      }
+      content.append(el("a", {
+        class: "fav-link",
+        href: `${location.origin}/uconfig.php`,
+        "data-native": "",
+        target: "_blank",
+        rel: "noopener",
+        text: "Manage folders"
+      }));
+    };
+    const apply = async (folder) => {
+      content.replaceChildren();
+      status.announce("Saving…");
+      try {
+        if (await noteLoad === null) {
+          throw new Error("Could not read the saved note.");
+        }
+        await save(state, folder === null ? null : folder.slot, note.value.trim());
+        state.set(folder !== null, folder);
+        syncHeader();
+        showToast(folder === null ? "Removed from favorites" : "Added to favorites");
+        popover.close();
+        anchor.focus();
+      } catch (error) {
+        const message = errorText(error, "Favorite update failed.");
+        const retry = nativeLink("Retry in native dialog");
+        content.replaceChildren(retry);
+        status.announce(message);
+        popover.reposition();
+        retry.focus();
+      }
+    };
+    status.announce("Loading folders…");
+    const noteLoad = state.get().favorited === true ? loadNote(controller.signal).catch(() => null) : Promise.resolve("");
+    noteLoad.then((savedNote) => {
+      if (!controller.signal.aborted && note.value === "" && savedNote !== null) {
+        note.value = savedNote;
+      }
+    });
+    loadFolders(controller.signal).then((folders) => {
+      renderFolders(folders);
+      popover.reposition();
+    }).catch((error) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+      const message = errorText(error, "Could not load favorite folders.");
+      const retry = nativeLink("Open native dialog");
+      content.replaceChildren(retry);
+      status.announce(message);
+      popover.reposition();
+      retry.focus();
+    });
+  }
+  function favoriteButton(state, signal) {
+    const button = el("button", {
+      class: "fav-btn",
+      type: "button",
+      "aria-label": "Favorite",
+      "aria-haspopup": "dialog",
+      "aria-expanded": "false",
+      title: "Favorite"
+    });
+    const sync = (snapshot = state.get()) => {
+      const favorited = snapshot.favorited;
+      const folder = snapshot.folder;
+      const label = favorited === true ? folder === null || folder === "" ? "Favorited" : folder : "Favorite";
+      button.replaceChildren(icon("star", favorited === true), el("span", { class: "fav-label", text: label }));
+      button.classList.toggle("is-favorite", favorited === true);
+      const action = favorited === true ? "Edit favorite" : favorited === false ? "Add to favorites" : "Favorite folders";
+      button.setAttribute("aria-label", action);
+      button.title = action;
+    };
+    sync();
+    const unsubscribe = state.subscribe(sync);
+    if (signal !== undefined) {
+      if (signal.aborted) {
+        unsubscribe();
+      } else {
+        signal.addEventListener("abort", unsubscribe, { once: true });
+      }
+    }
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (activeMenu?.anchor === button) {
+        closeFavoriteMenu();
+        return;
+      }
+      openFavoriteMenu({ anchor: button, state });
+    });
+    return button;
+  }
+
+  // src/ui/favorite-state.ts
+  function createFavoriteState(gallery, mark, known = mark !== null) {
+    let snapshot = !known ? { favorited: null, folder: null, slot: null } : mark === null ? { favorited: false, folder: null, slot: null } : { favorited: true, folder: mark.folder, slot: mark.slot };
+    const listeners = new Set;
+    return {
+      gid: gallery.gid,
+      token: gallery.token,
+      get: () => snapshot,
+      set(favorited, folder) {
+        snapshot = favorited ? { favorited: true, folder: folder?.name ?? "", slot: folder?.slot ?? null } : { favorited: false, folder: null, slot: null };
+        for (const listener of listeners) {
+          listener(snapshot);
+        }
+      },
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      }
+    };
+  }
+
+  // src/ui/result-card.ts
+  var MAX_COVER_ASPECT = 2.5;
+  function setFavoriteMark(node, mark) {
+    node.classList.toggle("is-favorite", mark !== null);
+    if (mark === null) {
+      node.style.removeProperty("--fav-color");
+      node.removeAttribute("title");
+      return;
+    }
+    node.style.setProperty("--fav-color", mark.slot === null ? "var(--color-accent)" : folderColor(mark.slot));
+    node.title = mark.folder === "" ? "In favorites" : `In favorites: ${mark.folder}`;
+  }
+  function cardCover(item) {
+    const link = el("a", {
+      class: "card-cover",
+      href: item.href,
+      "aria-label": item.title.primary,
+      tabindex: "-1"
+    });
+    const missing = () => {
+      link.setAttribute("aria-label", `${item.title.primary} - no cover`);
+      link.replaceChildren("No cover");
+      link.classList.add("is-missing");
+    };
+    if (item.coverSrc) {
+      const image = el("img", {
+        src: item.coverSrc,
+        alt: "",
+        loading: "lazy",
+        decoding: "async",
+        width: item.coverSize?.width ?? null,
+        height: item.coverSize?.height ?? null
+      });
+      const width = item.coverSize?.width;
+      const height = item.coverSize?.height;
+      if (width !== undefined && width > 0 && height !== undefined && height / width > MAX_COVER_ASPECT) {
+        link.classList.add("is-tall-cover");
+      }
+      image.addEventListener("error", missing, { once: true });
+      link.append(image);
+    } else {
+      missing();
+    }
+    return link;
+  }
+  function cardTitle(item) {
+    const title = el("a", { class: "card-title", href: item.href });
+    for (const meta of item.title.leading) {
+      title.append(el("span", { class: "card-artist", text: `${meta.text} ` }));
+    }
+    title.append(el("span", { class: "card-primary", text: item.title.primary }));
+    if (item.title.secondary) {
+      title.append(el("span", { class: "card-secondary", text: item.title.secondary }));
+    }
+    return title;
+  }
+  function cardMeta(item) {
+    const meta = el("div", { class: "card-meta" }, ...cardFactRows(item, (text) => {
+      const posted = el("span", { class: "card-posted", text });
+      setFavoriteMark(posted, item.favorite);
+      return posted;
+    }));
+    if (item.torrentsHref) {
+      meta.append(el("a", {
+        class: "card-torrent",
+        href: item.torrentsHref,
+        title: "Show torrents",
+        "aria-label": "Show torrents"
+      }, icon("download")));
+    }
+    return meta;
+  }
+  function resultCard(item, signal, options = {}) {
+    const favorite = createFavoriteState(item, item.favorite);
+    const meta = cardMeta(item);
+    const posted = meta.querySelector(".card-posted");
+    const repaint = (snapshot) => {
+      if (posted === null) {
+        return;
+      }
+      setFavoriteMark(posted, snapshot.favorited === true ? { folder: snapshot.folder ?? "", slot: snapshot.slot } : null);
+    };
+    repaint(favorite.get());
+    const unsubscribe = favorite.subscribe(repaint);
+    signal.addEventListener("abort", unsubscribe, { once: true });
+    const article = el("article", {
+      class: options.className === undefined ? "card" : `card ${options.className}`
+    });
+    const cover = el("div", { class: "card-cover-wrap" }, cardCover(item));
+    if (options.favorite !== false) {
+      cover.append(favoriteButton(favorite, signal));
+    }
+    if (options.cover) {
+      cover.append(options.cover);
+    }
+    const body = el("div", { class: "card-body" }, cardTitle(item), item.uploader ? el("div", { class: "card-uploader", text: item.uploader }) : null, meta);
+    if (options.note) {
+      body.append(el("p", { class: "favorites-note", title: options.note, text: options.note }));
+    }
+    article.append(cover, body);
+    return article;
   }
 
   // src/views/favorites-selection.ts
@@ -9235,12 +9532,7 @@ ${defaultKeySummary()}`)) {
     const items = [];
     const { archiverHref, torrentsHref, reportHref, expungeHref, renameHref } = data.actions;
     if (archiverHref !== null) {
-      items.push({
-        label: "Archive Download",
-        href: archiverHref,
-        native: true,
-        popup: { width: 480, height: 320 }
-      });
+      items.push({ label: "Archive Download", href: archiverHref });
     }
     if (torrentsHref !== null) {
       items.push({ label: "Torrent Download", href: torrentsHref });
@@ -9732,7 +10024,7 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/views/gallery-torrents.ts
-  function metaItem(label, value) {
+  function metaItem2(label, value) {
     return el("div", { class: "gallery-torrent-meta-item" }, el("span", { class: "gallery-torrent-meta-label", text: label }), el("span", { class: "gallery-torrent-meta-value", text: value === "" ? "—" : value }));
   }
   function infoRow(label, href) {
@@ -9808,7 +10100,7 @@ ${defaultKeySummary()}`)) {
         button.disabled = false;
       });
     }, { signal: ctx.signal });
-    return el("article", { class: "gallery-torrent-card" }, el("div", { class: "gallery-torrent-head" }, title, button), el("div", { class: "gallery-torrent-meta" }, metaItem("Posted", torrent.posted), metaItem("Size", torrent.size), metaItem("Seeds", String(torrent.seeds)), metaItem("Peers", String(torrent.peers)), metaItem("Downloads", String(torrent.downloads)), metaItem("Uploader", torrent.uploader)), detailsSlot);
+    return el("article", { class: "gallery-torrent-card" }, el("div", { class: "gallery-torrent-head" }, title, button), el("div", { class: "gallery-torrent-meta" }, metaItem2("Posted", torrent.posted), metaItem2("Size", torrent.size), metaItem2("Seeds", String(torrent.seeds)), metaItem2("Peers", String(torrent.peers)), metaItem2("Downloads", String(torrent.downloads)), metaItem2("Uploader", torrent.uploader)), detailsSlot);
   }
   function backLink(page) {
     if (page.galleryHref === null) {
@@ -13698,6 +13990,17 @@ ${defaultKeySummary()}`)) {
           title: (data) => documentTitle(data.title === "" ? "Torrents" : `Torrents for ${data.title}`)
         })
       },
+      archive: {
+        match: (url) => url.pathname === "/archiver.php" ? { kind: "archive", url: url.href } : null,
+        ...documentView(deps, {
+          tag: "archive",
+          parse: parseArchivePage,
+          sanity: assertArchivePage,
+          render: (host, data, ctx) => renderArchive(host, data, ctx),
+          title: () => documentTitle("Archive Download"),
+          fresh: true
+        })
+      },
       home: {
         match: (url) => url.pathname === "/home.php" ? { kind: "home", url: url.href } : null,
         ...documentView(deps, {
@@ -17011,6 +17314,101 @@ ${defaultKeySummary()}`)) {
   .toplist-jump {
     margin-bottom: calc(var(--spacing) * 4);
     position: static;
+  }
+  .archive-funds {
+    margin-top: calc(var(--spacing) * 3);
+    margin-bottom: 0px;
+    border-radius: var(--radius-row);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line);
+    background-color: var(--color-surface);
+    padding-inline: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 2);
+    font-size: var(--text-control);
+    color: var(--color-muted);
+  }
+  .archive-options {
+    margin-top: calc(var(--spacing) * 4);
+    display: grid;
+    gap: calc(var(--spacing) * 4);
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .archive-option {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 3);
+    border-radius: var(--radius-card);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line-strong);
+    background-color: var(--color-panel);
+    padding: calc(var(--spacing) * 4);
+  }
+  .archive-option-title {
+    margin: 0px;
+    font-size: var(--text-title-2);
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+  }
+  .archive-option-meta {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: calc(var(--spacing) * 8);
+    row-gap: calc(var(--spacing) * 2);
+  }
+  .archive-option-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 0.5);
+  }
+  .archive-option-meta-label {
+    font-size: var(--text-meta);
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .archive-option-meta-value {
+    font-size: var(--text-body);
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+  }
+  .archive-option-note {
+    margin: 0px;
+    font-size: var(--text-meta);
+    color: var(--color-muted);
+  }
+  .archive-option-status {
+    margin: 0px;
+    min-height: calc(var(--spacing) * 5);
+    font-size: var(--text-meta);
+    color: var(--color-muted);
+  }
+  .archive-option-status[role="alert"] {
+    color: var(--color-danger-text);
+  }
+  .archive-option .archive-download {
+    align-self: flex-start;
+  }
+  .archive-links {
+    margin-top: calc(var(--spacing) * 5);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--spacing) * 4);
+    font-size: var(--text-control);
+  }
+  .archive-footer {
+    margin-top: calc(var(--spacing) * 8);
+    border-top-style: var(--tw-border-style);
+    border-top-width: 1px;
+    border-color: var(--color-line);
+    padding-top: calc(var(--spacing) * 4);
+  }
+  @media (max-width: 720px) {
+    .archive-option-meta {
+      column-gap: calc(var(--spacing) * 5);
+    }
   }
   .torrent-filters {
     display: flex;
