@@ -14,13 +14,23 @@ proto.showPopover = function showPopover(): void {};
  * Install a linkedom document at `url` as the global DOM that the UI modules build against.
  *
  * The UI modules read `document` and `location` lazily, so tests install them before rendering.
+ * `html` seeds the parsed document, for tests that boot from a page fixture.
  */
-export function installDom(url = "https://e-hentai.org/"): Document {
-  const document = parseDocument('<!doctype html><html><body class="eh-body"></body></html>');
-  const view = document.defaultView as unknown as { Event: typeof Event };
+export function installDom(
+  url = "https://e-hentai.org/",
+  html = '<!doctype html><html><body class="eh-body"></body></html>',
+): Document {
+  const document = parseDocument(html);
+  const view = document.defaultView as unknown as {
+    Event: typeof Event;
+    Element: typeof Element;
+    HTMLElement: typeof HTMLElement;
+  };
   const globals = globalThis as unknown as Record<string, unknown>;
   globals.document = document;
   globals.Node = Node;
+  globals.Element = view.Element;
+  globals.HTMLElement = view.HTMLElement;
   globals.window = view;
   globals.Event = view.Event;
   // Views read `location` for the active tab and for relative URL resolution.
