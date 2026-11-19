@@ -46,8 +46,8 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
   and bulk move/delete; the ranked toplist overview and category pages; the torrent index with
   search, status, only-mine and sortable columns; `/uconfig.php` plus a userscript settings panel,
   keybinding editor and JSON backup.
-- **My Tags**: the `/mytags` manager renders in-app: watch or hide a tag, set its colour and
-  weight, and add new tags without leaving the shell.
+- **My Tags**: the `/mytags` manager renders in-app: switch, rename and recolour tag sets, watch
+  or hide a tag, set its colour and weight, and add new tags without leaving the shell.
 - **Fast and robust**: request priorities and caching, rate-limit purge with a banner, and a login
   gate instead of a broken page when a route needs a session.
 - **Accessible**: keyboard paths, managed dialog focus, forced-colors support, reduced-motion

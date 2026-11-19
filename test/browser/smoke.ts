@@ -202,6 +202,9 @@ try {
   if ((await myTags.locator(".my-tags-row").count()) !== 2) {
     fail("My Tags rows did not render");
   }
+  if ((await myTags.locator(".my-tags-tagset-link").count()) !== 2) {
+    fail("My Tags tagset choices did not render");
+  }
   await expectAccessible(myTags, "my tags");
 
   // A page whose markup the parser rejects must reload itself natively instead of mounting an

@@ -2932,10 +2932,109 @@ ${defaultKeySummary()}`)) {
     }
     return tags;
   }
+  function scriptString(doc, key) {
+    const pattern = new RegExp(`var\\s+${key}\\s*=\\s*("(?:\\\\.|[^"\\\\])*")`);
+    for (const script of doc.querySelectorAll("script")) {
+      const match = pattern.exec(script.textContent);
+      const literal = match?.[1];
+      if (literal === undefined) {
+        continue;
+      }
+      try {
+        const value = JSON.parse(literal);
+        return typeof value === "string" ? value : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  function optionName(label) {
+    return label.replace(/\s*\(\d+\)\s*$/u, "").trim();
+  }
+  function parseTagsetFields(form) {
+    const fields = [];
+    for (const control of form.querySelectorAll("input[name], select[name], textarea[name]")) {
+      const name = control.getAttribute("name")?.trim() ?? "";
+      if (name === "") {
+        continue;
+      }
+      if (control.tagName === "INPUT") {
+        const input = control;
+        const type = (input.getAttribute("type") ?? "text").toLowerCase();
+        if (type === "submit" || type === "button" || type === "reset" || type === "image" || type === "file") {
+          continue;
+        }
+        if (type === "checkbox") {
+          fields.push({
+            name,
+            kind: "checkbox",
+            value: isChecked(input) ? input.getAttribute("value") ?? "on" : ""
+          });
+          continue;
+        }
+        if (type === "radio" && !isChecked(input)) {
+          continue;
+        }
+        fields.push({ name, kind: "value", value: input.getAttribute("value") ?? "" });
+        continue;
+      }
+      if (control.tagName === "SELECT") {
+        const selected = control.querySelector("option[selected]") ?? control.querySelector("option");
+        fields.push({
+          name,
+          kind: "value",
+          value: selected?.getAttribute("value") ?? ""
+        });
+        continue;
+      }
+      fields.push({ name, kind: "value", value: control.textContent });
+    }
+    return fields;
+  }
+  function parseTagset(doc, url) {
+    const form = doc.getElementById("tagset_form");
+    if (form === null) {
+      return null;
+    }
+    const choices = [];
+    for (const option of form.querySelectorAll("select option")) {
+      const id = (option.getAttribute("value") ?? "").trim();
+      if (id === "") {
+        continue;
+      }
+      choices.push({
+        id,
+        label: cleanText(option.textContent),
+        selected: option.hasAttribute("selected")
+      });
+    }
+    if (choices.length === 0) {
+      return null;
+    }
+    const current = choices.find((choice) => choice.selected) ?? choices[0];
+    if (current === undefined) {
+      return null;
+    }
+    const fields = parseTagsetFields(form);
+    const field = (name) => fields.find((candidate) => candidate.name === name);
+    const enabledField = field("tagset_enable");
+    const action = safeUrl(form.getAttribute("action") ?? "", url)?.href ?? url;
+    return {
+      choices,
+      currentId: current.id,
+      name: scriptString(doc, "tagset_name") ?? optionName(current.label),
+      enabled: (enabledField?.value ?? "") !== "",
+      color: normalizeColor(field("tagset_color")?.value ?? ""),
+      action,
+      fields
+    };
+  }
   function parseMyTags(doc, url) {
     return {
       url,
       tags: parseUserTags(doc),
+      tagsets: parseTagset(doc, url),
       api: parseApiCredentials(doc)
     };
   }
@@ -8213,6 +8312,24 @@ ${defaultKeySummary()}`)) {
 
   // src/data/my-tags.ts
   var DEFAULT_WEIGHT2 = 10;
+  function tagsetBody(fields, overrides) {
+    const body = new URLSearchParams;
+    const emitted = new Set;
+    for (const field of fields) {
+      const value = overrides.get(field.name) ?? field.value;
+      emitted.add(field.name);
+      if (field.kind === "checkbox" && value === "") {
+        continue;
+      }
+      body.append(field.name, value);
+    }
+    for (const [name, value] of overrides) {
+      if (!emitted.has(name)) {
+        body.append(name, value);
+      }
+    }
+    return body;
+  }
   function normalizeName(name) {
     return name.replace(/\s+/gu, " ").trim().toLowerCase();
   }
@@ -8241,6 +8358,40 @@ ${defaultKeySummary()}`)) {
   }
   async function addTagForm(url, body, signal) {
     await postForm(url, body, { tag: "my-tags", failure: "Could not save tag", signal });
+  }
+  async function saveTagset(tagset, change, deps = {}) {
+    const overrides = new Map;
+    const renaming = change.name !== undefined;
+    overrides.set("tagset_action", renaming ? "rename" : "update");
+    if (change.name !== undefined) {
+      const name = change.name.trim();
+      if (name === "") {
+        throw new Error("Enter a tag set name.");
+      }
+      overrides.set("tagset_name", name);
+    } else {
+      overrides.set("tagset_name", "");
+    }
+    const hasEnable = tagset.fields.some((field) => field.name === "tagset_enable");
+    if (change.enabled !== undefined && hasEnable) {
+      overrides.set("tagset_enable", change.enabled ? "on" : "");
+    }
+    if (change.color !== undefined) {
+      const raw = (change.color ?? "").trim();
+      const color = normalizeColor(raw);
+      if (raw !== "" && color === "") {
+        throw new Error("Use a #rgb or #rrggbb colour, or leave the field empty.");
+      }
+      overrides.set("tagset_color", color);
+    }
+    const post = deps.post ?? ((url, body, signal) => postForm(url, body, {
+      tag: "my-tags",
+      failure: "Could not save tag set",
+      signal
+    }).then(() => {
+      return;
+    }));
+    await post(tagset.action, tagsetBody(tagset.fields, overrides), deps.signal);
   }
   async function applyMyTag(tag, change, deps) {
     const name = normalizeName(tag);
@@ -10700,6 +10851,110 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/views/my-tags.ts
+  function tagsetHref(pageUrl, id) {
+    const target = new URL(pageUrl);
+    target.searchParams.set("tagset", id);
+    return target.href;
+  }
+  function tagsetPanel(data, tagset, editable, ctx, save) {
+    const choices = el("div", { class: "my-tags-tagsets", role: "group", "aria-label": "Tag sets" }, ...tagset.choices.map((choice) => el("a", {
+      class: "my-tags-tagset-link",
+      href: tagsetHref(data.url, choice.id),
+      "aria-current": choice.selected ? "page" : null,
+      text: choice.label
+    })));
+    const name = textInput({
+      class: "field-input my-tags-tagset-name",
+      value: tagset.name,
+      "aria-label": "Tag set name"
+    });
+    const enabled = el("input", {
+      type: "checkbox",
+      class: "my-tags-tagset-enable",
+      checked: tagset.enabled ? "checked" : null
+    });
+    const color = textInput({
+      class: "field-input my-tags-tagset-color",
+      value: tagset.color,
+      placeholder: "#default",
+      maxlength: "7",
+      "aria-label": "Default colour for this tag set"
+    });
+    for (const control of [name, enabled, color]) {
+      control.disabled = !editable;
+    }
+    const hasEnable = tagset.fields.some((field) => field.name === "tagset_enable");
+    const error = el("p", { class: "my-tags-tagset-error", role: "alert" });
+    error.hidden = true;
+    const saveButton = el("button", {
+      class: "btn btn-primary my-tags-tagset-save",
+      type: "button",
+      text: "Save tag set"
+    });
+    const renameButton = el("button", {
+      class: "btn my-tags-tagset-rename",
+      type: "button",
+      text: "Rename tag set"
+    });
+    let busy = false;
+    const submit = async (change, message) => {
+      if (busy) {
+        return;
+      }
+      error.hidden = true;
+      busy = true;
+      saveButton.disabled = true;
+      renameButton.disabled = true;
+      try {
+        await save(tagset, change, ctx.signal);
+        if (ctx.signal.aborted) {
+          return;
+        }
+        showToast(message);
+        ctx.reload();
+      } catch (failure) {
+        if (ctx.signal.aborted) {
+          return;
+        }
+        error.textContent = errorText(failure, "Could not save the tag set.");
+        error.hidden = false;
+      } finally {
+        busy = false;
+        saveButton.disabled = false;
+        renameButton.disabled = false;
+      }
+    };
+    const liveChange = (nameValue) => ({
+      enabled: isChecked(enabled),
+      color: color.value,
+      ...nameValue === undefined ? {} : { name: nameValue }
+    });
+    saveButton.addEventListener("click", () => {
+      const next = name.value.trim();
+      const renamed = next !== tagset.name.trim();
+      if (renamed && next === "") {
+        error.textContent = "Enter a tag set name.";
+        error.hidden = false;
+        name.focus();
+        return;
+      }
+      submit(liveChange(renamed ? next : undefined), renamed ? "Tag set renamed" : "Tag set saved");
+    }, { signal: ctx.signal });
+    renameButton.addEventListener("click", () => {
+      const next = name.value.trim();
+      if (next === "") {
+        error.textContent = "Enter a tag set name.";
+        error.hidden = false;
+        name.focus();
+        return;
+      }
+      submit(liveChange(next), "Tag set renamed");
+    }, { signal: ctx.signal });
+    return el("section", { class: "settings-section my-tags-tagsets-section", "aria-label": "Tag sets" }, el("h2", { class: "settings-title", text: "Tag sets" }), choices, el("div", { class: "my-tags-tagset-form" }, el("label", { class: "settings-field my-tags-tagset-name-field" }, el("span", { text: "Name" }), name), hasEnable ? el("label", { class: "settings-row my-tags-tagset-enable-field" }, enabled, el("span", { text: "Enable flagging and watching for tags in this set" })) : null, el("label", { class: "settings-field my-tags-tagset-color-field" }, el("span", { text: "Default colour" }), color)), el("p", {
+      class: "settings-hint",
+      text: "Leave the colour empty for the site default. Tag colours in this set fall back to it."
+    }), editable ? el("div", { class: "my-tags-tagset-actions" }, saveButton, renameButton, error) : null);
+  }
   function writableApi(data) {
     const api = data.api;
     return api !== null && api.apiUid !== "-1" ? api : null;
@@ -10945,7 +11200,8 @@ ${defaultKeySummary()}`)) {
     for (const tag of data.tags) {
       list.append(buildRow(tag, api));
     }
-    const page = el("div", { id: "my-tags", class: "my-tags-page" }, toolbar);
+    const tagsetSection = data.tagsets === null ? null : tagsetPanel(data, data.tagsets, api !== null, ctx, deps?.saveTagset ?? ((tagset, change, signal) => saveTagset(tagset, change, { signal })));
+    const page = el("div", { id: "my-tags", class: "my-tags-page" }, tagsetSection, toolbar);
     if (api === null) {
       page.append(readOnlyNote(data));
     } else {
@@ -18590,6 +18846,76 @@ ${defaultKeySummary()}`)) {
       width: 100%;
     }
     .my-tags-add-fields {
+      align-items: stretch;
+    }
+  }
+  .my-tags-tagsets {
+    margin-top: calc(var(--spacing) * 3);
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 1.5);
+  }
+  .my-tags-tagset-link {
+    border-radius: var(--radius-control);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line);
+    background-color: var(--color-panel);
+    padding-inline: calc(var(--spacing) * 2.5);
+    padding-block: var(--spacing);
+    font-size: var(--text-control);
+    color: var(--color-muted);
+    text-decoration-line: none;
+  }
+  .my-tags-tagset-link:hover {
+    border-color: var(--color-accent);
+    color: var(--color-fg);
+  }
+  .my-tags-tagset-link[aria-current="page"] {
+    border-color: var(--color-accent);
+    background-color: var(--color-panel-hover);
+    color: var(--color-fg);
+  }
+  .my-tags-tagset-form {
+    margin-top: calc(var(--spacing) * 3);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: calc(var(--spacing) * 3);
+  }
+  .my-tags-tagset-name-field, .my-tags-tagset-color-field {
+    margin-top: 0px;
+    width: 220px;
+    max-width: 100%;
+  }
+  .my-tags-tagset-color-field {
+    width: 140px;
+  }
+  .my-tags-tagset-name-field .field-input, .my-tags-tagset-color-field .field-input {
+    width: 100%;
+  }
+  .my-tags-tagset-enable-field {
+    min-height: calc(var(--spacing) * 8);
+    align-items: center;
+    padding-inline: 0px;
+  }
+  .my-tags-tagset-actions {
+    margin-top: calc(var(--spacing) * 3);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+  }
+  .my-tags-tagset-error {
+    margin: 0px;
+    font-size: var(--text-control);
+    color: var(--color-danger-text);
+  }
+  @media (max-width: 720px) {
+    .my-tags-tagset-name-field, .my-tags-tagset-color-field {
+      width: 100%;
+    }
+    .my-tags-tagset-actions {
       align-items: stretch;
     }
   }

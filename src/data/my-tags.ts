@@ -10,11 +10,57 @@
 import type { DocumentOptions, HtmlResponse } from "../fetch/loader";
 import { postForm, postJson } from "../net/http";
 import type { ApiCredentials } from "../parse/gallery";
-import type { UserTagState } from "../parse/my-tags";
+import type { TagsetField, TagsetState, UserTagState } from "../parse/my-tags";
 import { normalizeColor, parseUserTags } from "../parse/my-tags";
 import type { GalleryPost } from "./gallery-actions";
 
 const DEFAULT_WEIGHT = 10;
+
+/**
+ * Rebuild the native tagset form body.
+ *
+ * Every parsed control is emitted in document order, with `overrides` replacing its current value.
+ * Unknown fields therefore round-trip untouched, the same guarantee `uconfigBody` gives settings.
+ */
+function tagsetBody(
+  fields: readonly TagsetField[],
+  overrides: ReadonlyMap<string, string>,
+): URLSearchParams {
+  const body = new URLSearchParams();
+  const emitted = new Set<string>();
+
+  for (const field of fields) {
+    const value = overrides.get(field.name) ?? field.value;
+    emitted.add(field.name);
+    if (field.kind === "checkbox" && value === "") {
+      continue;
+    }
+    body.append(field.name, value);
+  }
+
+  // A control the parser did not see (a new site field) still carries the user's chosen action.
+  for (const [name, value] of overrides) {
+    if (!emitted.has(name)) {
+      body.append(name, value);
+    }
+  }
+  return body;
+}
+
+/** One tagset edit: a rename, an enable toggle, or a default-colour change. */
+export interface TagsetChange {
+  /** A display name; its presence selects the native form's `rename` action. */
+  name?: string;
+  enabled?: boolean;
+  /** `null`/`""` clears the default colour. */
+  color?: string | null;
+}
+
+export interface MyTagSaveDeps {
+  /** Transport for the native tagset form; tests inject a recorder. */
+  post?: (url: string, body: URLSearchParams, signal?: AbortSignal) => Promise<void>;
+  signal?: AbortSignal;
+}
 
 export interface MyTagChange {
   watched?: boolean;
@@ -69,6 +115,58 @@ async function postTagJson(url: string, body: unknown, signal?: AbortSignal): Pr
 
 async function addTagForm(url: string, body: URLSearchParams, signal?: AbortSignal): Promise<void> {
   await postForm(url, body, { tag: "my-tags", failure: "Could not save tag", signal });
+}
+
+/**
+ * Save the selected tagset through the page's own form.
+ *
+ * `change.name` selects the native `rename` action; otherwise the request updates the enable flag
+ * and default colour. The form's other fields are preserved, and a malformed colour is rejected
+ * before the POST.
+ */
+export async function saveTagset(
+  tagset: TagsetState,
+  change: TagsetChange,
+  deps: MyTagSaveDeps = {},
+): Promise<void> {
+  const overrides = new Map<string, string>();
+  const renaming = change.name !== undefined;
+  overrides.set("tagset_action", renaming ? "rename" : "update");
+
+  if (change.name !== undefined) {
+    const name = change.name.trim();
+    if (name === "") {
+      throw new Error("Enter a tag set name.");
+    }
+    overrides.set("tagset_name", name);
+  } else {
+    overrides.set("tagset_name", "");
+  }
+
+  // A form without the enable control must not gain one through the override fallback.
+  const hasEnable = tagset.fields.some((field) => field.name === "tagset_enable");
+  if (change.enabled !== undefined && hasEnable) {
+    overrides.set("tagset_enable", change.enabled ? "on" : "");
+  }
+
+  if (change.color !== undefined) {
+    const raw = (change.color ?? "").trim();
+    const color = normalizeColor(raw);
+    if (raw !== "" && color === "") {
+      throw new Error("Use a #rgb or #rrggbb colour, or leave the field empty.");
+    }
+    overrides.set("tagset_color", color);
+  }
+
+  const post =
+    deps.post ??
+    ((url: string, body: URLSearchParams, signal?: AbortSignal) =>
+      postForm(url, body, {
+        tag: "my-tags",
+        failure: "Could not save tag set",
+        signal,
+      }).then(() => undefined));
+  await post(tagset.action, tagsetBody(tagset.fields, overrides), deps.signal);
 }
 
 /**
