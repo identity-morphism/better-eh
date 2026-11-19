@@ -59,6 +59,11 @@ async function main(): Promise<void> {
     fail(`invalid version argument: ${bumpArg} (expected ${BUMPS.join("|")} or X.Y.Z)`);
   }
 
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch !== "master") {
+    fail(`release from master, not ${branch}`);
+  }
+
   const dirty = git(["status", "--porcelain"]);
   if (dirty) {
     fail(`working tree is not clean:\n${dirty}`);
@@ -104,10 +109,12 @@ async function main(): Promise<void> {
   console.log(`release: committed and tagged v${next}`);
 
   if (push) {
-    git(["push", "--follow-tags"]);
-    console.log("release: pushed with tags");
+    git(["push", "--atomic", "origin", "HEAD:master", `refs/tags/v${next}`]);
+    console.log("release: pushed the commit and tag");
   } else {
-    console.log("release: run `git push --follow-tags` to publish the tag");
+    console.log(
+      `release: run \`git push --atomic origin HEAD:master refs/tags/v${next}\` to publish the tag`,
+    );
   }
 }
 

@@ -74,9 +74,13 @@ bun run release patch --push
 bun run verify:release          # after the repository is public and the tag is pushed
 ```
 
-The release script requires a clean tree, bumps `package.json`, rebuilds `dist/`, commits both,
-and tags `vX.Y.Z`. `--push` also runs `git push --follow-tags`; without it the script prints the
-command to run.
+The release script requires a clean tree and `master`, bumps `package.json`, rebuilds `dist/`,
+commits both, and tags `vX.Y.Z`. `--push` atomically pushes the commit and the exact tag; without
+it the script prints the command to run. The tag push starts `.github/workflows/release.yml`,
+which rebuilds from the tag, fails unless `package.json`, the bundle header and the committed
+`dist/` agree, then creates the GitHub Release with `dist/better-eh.user.js` attached. The root
+`.github/release.yml` only groups generated notes; it is not a workflow. Rerun a failed
+publication with `gh workflow run release.yml --ref vX.Y.Z`.
 
 Releases own the version. CI rebuilds `dist/` and fails on any diff, so a pull request that
 changes behaviour commits the rebuilt bundle and leaves `version` in `package.json` alone;
