@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import type { GalleryPost } from "../../src/data/gallery-actions";
-import { applyMyTag, normalizeWeight } from "../../src/data/my-tags";
+import { applyMyTag, normalizeWeight, saveTagset } from "../../src/data/my-tags";
 import type { DocumentOptions, HtmlResponse } from "../../src/fetch/loader";
-import type { UserTagState } from "../../src/parse/my-tags";
+import type { TagsetState, UserTagState } from "../../src/parse/my-tags";
 import { normalizeColor, parseUserTags } from "../../src/parse/my-tags";
 import type { GalleryApiConfig } from "../../src/types";
 import { parseDocument } from "../dom";
@@ -299,5 +299,121 @@ describe("My Tags mutations", () => {
     );
     expect(body.taghide).toBe(1);
     expect(body.tagwatch).toBe(0);
+  });
+});
+
+const TAGSET: TagsetState = {
+  choices: [{ id: "1", label: "Tagset #1 (2)", selected: true }],
+  currentId: "1",
+  name: "Tagset #1",
+  enabled: true,
+  color: "#ff8800",
+  action: "https://e-hentai.org/mytags?tagset=1",
+  fields: [
+    { name: "tagset_action", kind: "value", value: "" },
+    { name: "tagset_name", kind: "value", value: "" },
+    { name: "tagset_enable", kind: "checkbox", value: "on" },
+    { name: "tagset_color", kind: "value", value: "#FF8800" },
+    { name: "site_marker", kind: "value", value: "keep-me" },
+  ],
+};
+
+describe("saveTagset", () => {
+  test("posts the native update body and preserves unknown fields", async () => {
+    const calls: Array<{ url: string; body: URLSearchParams }> = [];
+    await saveTagset(
+      TAGSET,
+      { enabled: false, color: "#00AAFF" },
+      {
+        post: (url, body) => {
+          calls.push({ url, body });
+          return Promise.resolve();
+        },
+      },
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(TAGSET.action);
+    expect(Object.fromEntries(calls[0]?.body ?? [])).toEqual({
+      tagset_action: "update",
+      tagset_name: "",
+      tagset_color: "#00aaff",
+      site_marker: "keep-me",
+    });
+    expect(calls[0]?.body.has("tagset_enable")).toBe(false);
+  });
+
+  test("renames through the same form and keeps the current toggle and colour", async () => {
+    let body = new URLSearchParams();
+    await saveTagset(
+      TAGSET,
+      { name: "Reading queue" },
+      {
+        post: (_url, next) => {
+          body = next;
+          return Promise.resolve();
+        },
+      },
+    );
+
+    expect(body.get("tagset_action")).toBe("rename");
+    expect(body.get("tagset_name")).toBe("Reading queue");
+    expect(body.get("tagset_enable")).toBe("on");
+    expect(body.get("tagset_color")).toBe("#FF8800");
+    expect(body.get("site_marker")).toBe("keep-me");
+  });
+
+  test("emits an empty colour field so the site clears the default", async () => {
+    let body = new URLSearchParams();
+    await saveTagset(
+      TAGSET,
+      { color: "" },
+      {
+        post: (_url, next) => {
+          body = next;
+          return Promise.resolve();
+        },
+      },
+    );
+
+    expect(body.has("tagset_color")).toBe(true);
+    expect(body.get("tagset_color")).toBe("");
+  });
+
+  test("does not add an enable field a form never offered", async () => {
+    const withoutEnable: TagsetState = {
+      ...TAGSET,
+      fields: TAGSET.fields.filter((field) => field.name !== "tagset_enable"),
+    };
+    let body = new URLSearchParams();
+    await saveTagset(
+      withoutEnable,
+      { enabled: true, color: "#FF8800" },
+      {
+        post: (_url, next) => {
+          body = next;
+          return Promise.resolve();
+        },
+      },
+    );
+
+    expect(body.has("tagset_enable")).toBe(false);
+    expect(body.get("tagset_action")).toBe("update");
+  });
+
+  test("rejects a blank name and a malformed colour before posting", async () => {
+    let posted = false;
+    const post = () => {
+      posted = true;
+      return Promise.resolve();
+    };
+
+    await expect(saveTagset(TAGSET, { name: "   " }, { post })).rejects.toThrow(
+      "Enter a tag set name.",
+    );
+    await expect(saveTagset(TAGSET, { color: "not-a-colour" }, { post })).rejects.toThrow(
+      "Use a #rgb or #rrggbb colour, or leave the field empty.",
+    );
+    expect(posted).toBe(false);
   });
 });

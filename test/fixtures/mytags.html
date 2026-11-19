@@ -4,6 +4,29 @@
     <title>My Tags</title>
   </head>
   <body>
+    <form id="tagset_form" action="" method="post">
+      <input id="tagset_action" name="tagset_action" type="hidden" value="" />
+      <input id="tagset_name" name="tagset_name" type="hidden" value="" />
+      <select>
+        <option value="1" selected="selected">Tagset #1 (2)</option>
+        <option value="2">Reading (1)</option>
+      </select>
+      <label>
+        <input id="tagset_enable" name="tagset_enable" type="checkbox" checked="checked" />
+        Enable flagging and watching for tags in this set
+      </label>
+      <label>
+        Default colour
+        <input
+          id="tagcolor"
+          name="tagset_color"
+          type="text"
+          value="#FF8800"
+          placeholder="#default"
+          maxlength="7"
+        />
+      </label>
+    </form>
     <div id="usertags_outer">
       <div id="usertag_0" class="usertag">
         <div id="tagpreview_0" class="tagpreview"></div>
@@ -69,6 +92,8 @@
       var api_url = "https://api.e-hentai.org/api.php";
       var apiuid = 424242;
       var apikey = "fake-api-key";
+      var tagset_color = "#FF8800";
+      var tagset_name = "Tagset #1";
     </script>
   </body>
 </html>

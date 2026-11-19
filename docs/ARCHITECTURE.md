@@ -23,7 +23,7 @@
   `gallery-torrents` (per-torrent
   details and their personalized/redistributable links), `list-filters` (remembered category and
   advanced filters), `list-date` (the app-owned posted-date range and its date-cursor request),
-  `my-tags` (watch/hide/colour/weight changes and the add path), `search-history` (recent queries),
+  `my-tags` (tagset save/rename plus watch/hide/colour/weight changes and the add path), `search-history` (recent queries),
   and `saved-expressions` (named searches and quick tags, with the one-time legacy migration).
 - **`src/tags/`**: `model` (search-expression grammar and tag toggling), `db` (compact index,
   popularity attachment, storage cache, download, usage and prefix-completion history, with the
