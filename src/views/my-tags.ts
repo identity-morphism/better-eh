@@ -7,13 +7,13 @@
  */
 
 import type { GalleryPost } from "../data/gallery-actions";
-import type { MyTagChange } from "../data/my-tags";
-import { applyMyTag, normalizeWeight } from "../data/my-tags";
+import type { MyTagChange, TagsetChange } from "../data/my-tags";
+import { applyMyTag, normalizeWeight, saveTagset as saveTagsetRequest } from "../data/my-tags";
 import type { DocumentOptions, HtmlResponse } from "../fetch/loader";
 import { loader } from "../fetch/loader";
 import type { ApiCredentials } from "../parse/gallery";
 import { isChecked } from "../parse/helpers";
-import type { MyTagsPage, UserTagState } from "../parse/my-tags";
+import type { MyTagsPage, TagsetState, UserTagState } from "../parse/my-tags";
 import { normalizeColor } from "../parse/my-tags";
 import { nativeUrl } from "../routes/identity";
 import { el, searchInput, textInput } from "../ui/dom";
@@ -24,6 +24,13 @@ import { showToast } from "../ui/toast";
 import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
 
+/** Save the selected tagset through the page's own form. */
+export type SaveTagset = (
+  tagset: TagsetState,
+  change: TagsetChange,
+  signal: AbortSignal,
+) => Promise<void>;
+
 /** Optional transports so tests can drive saves without the network. */
 export interface MyTagsViewDeps {
   /** Fetch the page that holds the saved tag ids; defaults to the shared loader. */
@@ -32,6 +39,183 @@ export interface MyTagsViewDeps {
   post?: GalleryPost;
   /** Transport for the native add-form POST. */
   addTag?: (url: string, body: URLSearchParams, signal?: AbortSignal) => Promise<void>;
+  /** Transport for the tagset form; defaults to the native form POST. */
+  saveTagset?: SaveTagset;
+}
+
+/** The in-app address of one tagset, preserving the page's other query parameters. */
+function tagsetHref(pageUrl: string, id: string): string {
+  const target = new URL(pageUrl);
+  target.searchParams.set("tagset", id);
+  return target.href;
+}
+
+/**
+ * The native tagset manager: every set as a switchable chip, then the selected set's name, enable
+ * flag and default colour. The form posts its parsed fields back through the page, so a site field
+ * the app does not understand survives the save.
+ */
+function tagsetPanel(
+  data: MyTagsPage,
+  tagset: TagsetState,
+  editable: boolean,
+  ctx: ViewContext,
+  save: SaveTagset,
+): HTMLElement {
+  const choices = el(
+    "div",
+    { class: "my-tags-tagsets", role: "group", "aria-label": "Tag sets" },
+    ...tagset.choices.map((choice) =>
+      el("a", {
+        class: "my-tags-tagset-link",
+        href: tagsetHref(data.url, choice.id),
+        "aria-current": choice.selected ? "page" : null,
+        text: choice.label,
+      }),
+    ),
+  );
+
+  const name = textInput({
+    class: "field-input my-tags-tagset-name",
+    value: tagset.name,
+    "aria-label": "Tag set name",
+  });
+  const enabled = el("input", {
+    type: "checkbox",
+    class: "my-tags-tagset-enable",
+    checked: tagset.enabled ? "checked" : null,
+  });
+  const color = textInput({
+    class: "field-input my-tags-tagset-color",
+    value: tagset.color,
+    placeholder: "#default",
+    maxlength: "7",
+    "aria-label": "Default colour for this tag set",
+  });
+  for (const control of [name, enabled, color]) {
+    control.disabled = !editable;
+  }
+
+  const hasEnable = tagset.fields.some((field) => field.name === "tagset_enable");
+  const error = el("p", { class: "my-tags-tagset-error", role: "alert" });
+  error.hidden = true;
+  const saveButton = el("button", {
+    class: "btn btn-primary my-tags-tagset-save",
+    type: "button",
+    text: "Save tag set",
+  });
+  const renameButton = el("button", {
+    class: "btn my-tags-tagset-rename",
+    type: "button",
+    text: "Rename tag set",
+  });
+
+  let busy = false;
+  const submit = async (change: TagsetChange, message: string): Promise<void> => {
+    if (busy) {
+      return;
+    }
+    error.hidden = true;
+    busy = true;
+    saveButton.disabled = true;
+    renameButton.disabled = true;
+    try {
+      await save(tagset, change, ctx.signal);
+      if (ctx.signal.aborted) {
+        return;
+      }
+      showToast(message);
+      ctx.reload();
+    } catch (failure) {
+      if (ctx.signal.aborted) {
+        return;
+      }
+      error.textContent = errorText(failure, "Could not save the tag set.");
+      error.hidden = false;
+    } finally {
+      busy = false;
+      saveButton.disabled = false;
+      renameButton.disabled = false;
+    }
+  };
+
+  /** Every visible control, so one action cannot silently discard an edit in another. */
+  const liveChange = (nameValue?: string): TagsetChange => ({
+    enabled: isChecked(enabled),
+    color: color.value,
+    ...(nameValue === undefined ? {} : { name: nameValue }),
+  });
+
+  saveButton.addEventListener(
+    "click",
+    () => {
+      const next = name.value.trim();
+      const renamed = next !== tagset.name.trim();
+      if (renamed && next === "") {
+        error.textContent = "Enter a tag set name.";
+        error.hidden = false;
+        name.focus();
+        return;
+      }
+      void submit(
+        liveChange(renamed ? next : undefined),
+        renamed ? "Tag set renamed" : "Tag set saved",
+      );
+    },
+    { signal: ctx.signal },
+  );
+  renameButton.addEventListener(
+    "click",
+    () => {
+      const next = name.value.trim();
+      if (next === "") {
+        error.textContent = "Enter a tag set name.";
+        error.hidden = false;
+        name.focus();
+        return;
+      }
+      void submit(liveChange(next), "Tag set renamed");
+    },
+    { signal: ctx.signal },
+  );
+
+  return el(
+    "section",
+    { class: "settings-section my-tags-tagsets-section", "aria-label": "Tag sets" },
+    el("h2", { class: "settings-title", text: "Tag sets" }),
+    choices,
+    el(
+      "div",
+      { class: "my-tags-tagset-form" },
+      el(
+        "label",
+        { class: "settings-field my-tags-tagset-name-field" },
+        el("span", { text: "Name" }),
+        name,
+      ),
+      hasEnable
+        ? el(
+            "label",
+            { class: "settings-row my-tags-tagset-enable-field" },
+            enabled,
+            el("span", { text: "Enable flagging and watching for tags in this set" }),
+          )
+        : null,
+      el(
+        "label",
+        { class: "settings-field my-tags-tagset-color-field" },
+        el("span", { text: "Default colour" }),
+        color,
+      ),
+    ),
+    el("p", {
+      class: "settings-hint",
+      text: "Leave the colour empty for the site default. Tag colours in this set fall back to it.",
+    }),
+    editable
+      ? el("div", { class: "my-tags-tagset-actions" }, saveButton, renameButton, error)
+      : null,
+  );
 }
 
 interface TagInputs {
@@ -385,7 +569,18 @@ export function renderMyTags(
     list.append(buildRow(tag, api));
   }
 
-  const page = el("div", { id: "my-tags", class: "my-tags-page" }, toolbar);
+  const tagsetSection =
+    data.tagsets === null
+      ? null
+      : tagsetPanel(
+          data,
+          data.tagsets,
+          api !== null,
+          ctx,
+          deps?.saveTagset ??
+            ((tagset, change, signal) => saveTagsetRequest(tagset, change, { signal })),
+        );
+  const page = el("div", { id: "my-tags", class: "my-tags-page" }, tagsetSection, toolbar);
   if (api === null) {
     page.append(readOnlyNote(data));
   } else {
