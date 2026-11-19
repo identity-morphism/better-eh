@@ -1,21 +1,52 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
+import { rateGallery } from "../../src/data/gallery-actions";
+import { getSettings, updateSettings } from "../../src/settings";
 import type { GalleryApiConfig } from "../../src/types";
-
-const calls: { url: string; body: unknown }[] = [];
-
-void mock.module("../../src/net/http", () => ({
-  postForm: () => Promise.resolve(new Response("")),
-  postJson: (url: string, body: unknown) => {
-    calls.push({ url, body });
-    return Promise.resolve({});
-  },
-}));
 
 Object.assign(globalThis, { location: new URL("https://e-hentai.org/g/123456/abcdef1234/") });
 
-// The http mock has to be registered before the action module is evaluated.
-const { rateGallery } = await import("../../src/data/gallery-actions");
+const calls: { url: string; body: unknown }[] = [];
+
+interface RequestInitWithBody extends RequestInit {
+  body: string;
+}
+
+const originalFetch = globalThis.fetch;
+const originalInterval = getSettings().netIntervalMs;
+
+// The real queue reads these; zero keeps consecutive posts from waiting on the request interval.
+beforeAll(() => {
+  updateSettings({ netIntervalMs: 0 });
+});
+
+afterAll(() => {
+  updateSettings({ netIntervalMs: originalInterval });
+});
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  return input instanceof URL ? input.href : input.url;
+}
+
+beforeEach(() => {
+  calls.length = 0;
+  // Stub the transport, not `net/http`: a `mock.module` registration outlives the file and would
+  // replace the real functions for every later test in a shared `bun test` process.
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInitWithBody) => {
+    calls.push({
+      url: requestUrl(input),
+      body: JSON.parse(init?.body ?? "{}") as unknown,
+    });
+    return Promise.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
+  }) as unknown as typeof fetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 function config(apiUrl: string): GalleryApiConfig {
   return { apiUrl, apiUid: "1", apiKey: "secret", gid: "123456", token: "abcdef1234" };
@@ -23,8 +54,6 @@ function config(apiUrl: string): GalleryApiConfig {
 
 describe("gallery action endpoints", () => {
   test("the site's API subdomain is accepted", async () => {
-    calls.length = 0;
-
     await rateGallery(config("https://api.e-hentai.org/api.php"), 5);
 
     expect(calls).toHaveLength(1);
@@ -33,16 +62,12 @@ describe("gallery action endpoints", () => {
   });
 
   test("a relative endpoint resolves against the page", async () => {
-    calls.length = 0;
-
     await rateGallery(config("/api.php"), 5);
 
     expect(calls[0]?.url).toBe("https://e-hentai.org/api.php");
   });
 
   test("an off-site endpoint never receives the API key", async () => {
-    calls.length = 0;
-
     await expect(rateGallery(config("https://evil.example/api.php"), 5)).rejects.toThrow(
       /not on this site/,
     );
