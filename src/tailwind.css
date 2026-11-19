@@ -7,6 +7,7 @@
 @import "./nav.css" layer(components);
 @import "./settings.css" layer(components);
 @import "./toplist.css" layer(components);
+@import "./archive.css" layer(components);
 @import "./torrents.css" layer(components);
 @import "./favorites.css" layer(components);
 @import "./gallery-actions.css" layer(components);

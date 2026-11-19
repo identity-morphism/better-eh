@@ -1,5 +1,6 @@
 import { ParseMismatchError } from "../fetch/errors";
 import type { GalleryData, ListPageData, PageData } from "../types";
+import type { ArchivePage } from "./archive";
 import type { FavoritesPage } from "./favorites";
 import type { GalleryTorrentsPage } from "./gallery-torrents";
 import type { HomePage } from "./home";
@@ -79,6 +80,16 @@ export function assertToplistPage(data: ToplistPage): void {
   }
   if (data.sections.length === 0) {
     throw new ParseMismatchError("toplist", "the toplist sections are missing");
+  }
+}
+
+/** The archive chooser always carries its container and at least one download form. */
+export function assertArchivePage(data: ArchivePage, doc: Document): void {
+  if (doc.getElementById("db") === null) {
+    throw new ParseMismatchError("archive", "the archiver container is missing");
+  }
+  if (data.original === null && data.resample === null) {
+    throw new ParseMismatchError("archive", "the archive download forms are missing");
   }
 }
 

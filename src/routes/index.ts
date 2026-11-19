@@ -3,6 +3,7 @@ import type { HtmlResponse } from "../fetch/loader";
 import { loader } from "../fetch/loader";
 import type { Priority } from "../net/priority";
 import { priorityOf } from "../net/priority";
+import { parseArchivePage } from "../parse/archive";
 import { parseFavorites } from "../parse/favorites";
 import { parseGalleryPage } from "../parse/gallery";
 import { parseGalleryTorrents } from "../parse/gallery-torrents";
@@ -11,6 +12,7 @@ import { parseListPage } from "../parse/list";
 import { parseMyTags } from "../parse/my-tags";
 import { parseSearchQuery, tagTokenFromHref, uploaderTokenFromHref } from "../parse/query";
 import {
+  assertArchivePage,
   assertFavoritesPage,
   assertGalleryPage,
   assertGalleryTorrentsPage,
@@ -29,6 +31,7 @@ import { parseViewer } from "../parse/viewer";
 import { documentTitle } from "../site";
 import type { GalleryThumb, ListItem } from "../types";
 import type { CursorPage } from "../ui/page-cursor";
+import { renderArchive } from "../views/archive";
 import type { PageSource, ViewContext } from "../views/context";
 import { favoritesLabels, renderFavorites } from "../views/favorites";
 import { renderGallery } from "../views/gallery";
@@ -268,6 +271,19 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
         render: (host, data, ctx) => renderGalleryTorrents(host, data, ctx),
         title: (data) =>
           documentTitle(data.title === "" ? "Torrents" : `Torrents for ${data.title}`),
+      }),
+    },
+    archive: {
+      match: (url) =>
+        url.pathname === "/archiver.php" ? { kind: "archive", url: url.href } : null,
+      ...documentView<"archive">(deps, {
+        tag: "archive",
+        parse: parseArchivePage,
+        sanity: assertArchivePage,
+        render: (host, data, ctx) => renderArchive(host, data, ctx),
+        title: () => documentTitle("Archive Download"),
+        // An unlocked resample and the printed GP price are server state; a cached chooser can be stale.
+        fresh: true,
       }),
     },
     home: {

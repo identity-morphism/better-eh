@@ -330,10 +330,12 @@ describe("gallery parity actions", () => {
       `https://e-hentai.org/g/123456/abcdef1234/?eh_native=1`,
     ]);
     for (const link of links) {
-      // The gallery torrent list is owned now; the other site actions still leave the shell.
-      expect(link.getAttribute("data-native")).toBe(
-        link.getAttribute("href")?.includes("gallerytorrents.php") === true ? null : "",
-      );
+      // The archive chooser and the gallery torrent list are owned now; the other site actions
+      // still leave the shell.
+      const owned =
+        link.getAttribute("href")?.includes("gallerytorrents.php") === true ||
+        link.getAttribute("href")?.includes("archiver.php") === true;
+      expect(link.getAttribute("data-native")).toBe(owned ? null : "");
     }
     expect(host.querySelector(".gallery-rail")?.getAttribute("aria-label")).toBe("Site actions");
   });
