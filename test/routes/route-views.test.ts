@@ -23,6 +23,7 @@ const GALLERY_URL = "https://e-hentai.org/g/123456/abcdef1234/";
 const LIST_URL = "https://e-hentai.org/?f_search=test";
 const VIEWER_URL = "https://e-hentai.org/s/hash123/987654-2";
 const TORRENTS_URL = "https://e-hentai.org/torrents.php";
+const HOME_URL = "https://e-hentai.org/home.php";
 const GALLERY_TORRENTS_URL = "https://e-hentai.org/gallerytorrents.php?gid=987654&t=abcdef1234";
 
 const galleryDoc = await loadFixture("gallery.html");
@@ -33,6 +34,7 @@ const viewerDoc = await loadFixture("viewer.html");
 const uconfigDoc = await loadFixture("uconfig.html");
 const favoritesDoc = await loadFixture("favorites.html");
 const toplistDoc = await loadFixture("toplist.html");
+const homeDoc = await loadFixture("home.html");
 
 /** Fixtures keyed by the URL each page route is loaded from. */
 const DOCS: Record<string, Document> = {
@@ -42,6 +44,7 @@ const DOCS: Record<string, Document> = {
   "https://e-hentai.org/uconfig.php": uconfigDoc,
   "https://e-hentai.org/favorites.php": favoritesDoc,
   "https://e-hentai.org/toplist.php": toplistDoc,
+  [HOME_URL]: homeDoc,
 };
 
 const galleryRoute = { kind: "gallery", url: GALLERY_URL } satisfies RouteOf<"gallery">;
@@ -53,6 +56,7 @@ const listRoute = {
 } satisfies RouteOf<"list">;
 const viewerRoute = { kind: "viewer", url: VIEWER_URL } satisfies RouteOf<"viewer">;
 const torrentsRoute = { kind: "torrents", url: TORRENTS_URL } satisfies RouteOf<"torrents">;
+const homeRoute = { kind: "home", url: HOME_URL } satisfies RouteOf<"home">;
 const galleryTorrentsRoute = {
   kind: "galleryTorrents",
   url: GALLERY_TORRENTS_URL,
@@ -158,6 +162,24 @@ describe("createRouteViews routing", () => {
     for (const route of routes) {
       expect(() => views.routeView(route)).toThrow();
     }
+  });
+});
+
+describe("home route", () => {
+  test("loads the account overview and titles it", async () => {
+    const { views, docCalls } = harness();
+    const signal = new AbortController().signal;
+
+    const data = await views.routeView(homeRoute).load(homeRoute, signal);
+
+    expect(data.sections).toHaveLength(5);
+    expectDocumentLoad(docCalls[0], {
+      url: HOME_URL,
+      signal,
+      priority: "navigation",
+      tag: "home",
+    });
+    expect(views.routeView(homeRoute).title(data)).toBe("My Home - E-Hentai");
   });
 });
 

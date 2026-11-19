@@ -6,6 +6,7 @@ import { priorityOf } from "../net/priority";
 import { parseFavorites } from "../parse/favorites";
 import { parseGalleryPage } from "../parse/gallery";
 import { parseGalleryTorrents } from "../parse/gallery-torrents";
+import { parseHome } from "../parse/home";
 import { parseListPage } from "../parse/list";
 import { parseMyTags } from "../parse/my-tags";
 import { parseSearchQuery, tagTokenFromHref, uploaderTokenFromHref } from "../parse/query";
@@ -13,6 +14,7 @@ import {
   assertFavoritesPage,
   assertGalleryPage,
   assertGalleryTorrentsPage,
+  assertHomePage,
   assertListPage,
   assertMyTagsPage,
   assertSettingsPage,
@@ -31,6 +33,7 @@ import type { PageSource, ViewContext } from "../views/context";
 import { favoritesLabels, renderFavorites } from "../views/favorites";
 import { renderGallery } from "../views/gallery";
 import { renderGalleryTorrents } from "../views/gallery-torrents";
+import { renderHome } from "../views/home";
 import { listLabels, renderList } from "../views/list";
 import { renderMyTags } from "../views/my-tags";
 import { renderSettings } from "../views/settings";
@@ -265,6 +268,16 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
         render: (host, data, ctx) => renderGalleryTorrents(host, data, ctx),
         title: (data) =>
           documentTitle(data.title === "" ? "Torrents" : `Torrents for ${data.title}`),
+      }),
+    },
+    home: {
+      match: (url) => (url.pathname === "/home.php" ? { kind: "home", url: url.href } : null),
+      ...documentView<"home">(deps, {
+        tag: "home",
+        parse: parseHome,
+        sanity: assertHomePage,
+        render: (host, data, ctx) => renderHome(host, data, ctx),
+        title: () => documentTitle("My Home"),
       }),
     },
     myTags: {

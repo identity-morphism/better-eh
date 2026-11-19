@@ -97,6 +97,8 @@ locality) is used exactly as defined by the codebase-design skill.
   derivation; cards report intent and render their checked state from it.
 - **result-card**: the one result-card assembly (cover, title, uploader, meta, favorite mark,
   optional overlay/note), used by the list and favorites grids.
+- **home**: the `/home.php` account overview: the account subnav plus each titled stats box as
+  prose, label/value facts and standalone links. Account-mutating forms stay on the native page.
 - **tags**: the search-expression grammar, the cached tag index, and the suggestion ranking; no DOM.
 - **tag-combobox**: the accessible suggestion portal bound to the top bar's input.
 - **search-chips**: the structured view of the current query's terms.

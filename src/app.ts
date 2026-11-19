@@ -18,6 +18,7 @@ import type { RouteView } from "./routes";
 import { getSettings } from "./settings";
 import { documentTitle, siteLabel } from "./site";
 import { blockSiteAds } from "./site-ads";
+import { loadTagIndex } from "./tags/db";
 import { showBanner } from "./ui/banner";
 import { el } from "./ui/dom";
 import { closeFavoriteMenu } from "./ui/favmenu";
@@ -424,6 +425,10 @@ function startOwned(initialRoute: Route): void {
     errorView(error, initialRoute);
   }
   revealDocument();
+  // Warm the full vocabulary so the first focus on the search field is not limited to the core.
+  if (getSettings().tagSuggestions) {
+    void loadTagIndex().catch((error: unknown) => log("tag index prefetch failed", error));
+  }
   log("ready", getSettings().fitHeight ? "fit-height" : "natural-width");
 }
 

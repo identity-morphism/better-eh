@@ -2,6 +2,7 @@ import { ParseMismatchError } from "../fetch/errors";
 import type { GalleryData, ListPageData, PageData } from "../types";
 import type { FavoritesPage } from "./favorites";
 import type { GalleryTorrentsPage } from "./gallery-torrents";
+import type { HomePage } from "./home";
 import type { MyTagsPage } from "./my-tags";
 import type { ToplistPage } from "./toplist";
 import type { TorrentPage } from "./torrents";
@@ -85,6 +86,16 @@ export function assertToplistPage(data: ToplistPage): void {
 export function assertSettingsPage(data: readonly UconfigSection[]): void {
   if (data.length === 0) {
     throw new ParseMismatchError("settings", "the settings form is missing");
+  }
+}
+
+/** My Home always carries the account boxes; the login wall and a changed layout do not. */
+export function assertHomePage(data: HomePage, doc: Document): void {
+  if (doc.querySelector(".stuffbox") === null) {
+    throw new ParseMismatchError("home", "the account boxes are missing");
+  }
+  if (data.sections.length === 0) {
+    throw new ParseMismatchError("home", "no account sections were parsed");
   }
 }
 

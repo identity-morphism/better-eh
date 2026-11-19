@@ -91,6 +91,7 @@ describe("parseRoute", () => {
     expect(parseRoute(`${ORIGIN}/g/123456/abcdef1234/`).kind).toBe("gallery");
     expect(parseRoute(`${ORIGIN}/s/abcdef1234/123456-3`).kind).toBe("viewer");
     expect(parseRoute(`${ORIGIN}/favorites.php`).kind).toBe("favorites");
+    expect(parseRoute(`${ORIGIN}/home.php`).kind).toBe("home");
     expect(parseRoute(`${ORIGIN}/torrents.php`).kind).toBe("torrents");
     expect(parseRoute(`${ORIGIN}/toplist.php`).kind).toBe("toplist");
     expect(parseRoute(`${ORIGIN}/uconfig.php`).kind).toBe("settings");

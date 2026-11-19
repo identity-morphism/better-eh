@@ -2630,6 +2630,136 @@ ${defaultKeySummary()}`)) {
     };
   }
 
+  // src/parse/home.ts
+  var VALUE = /^[=+-]?\s*[\d,.]+\s*(?:[A-Za-z%/]+)?$/u;
+  function fact(left, right) {
+    const first = cleanText(left.textContent);
+    const second = cleanText(right.textContent);
+    if (first === "" || second === "") {
+      return null;
+    }
+    if (VALUE.test(first) && !VALUE.test(second)) {
+      return { label: second, value: first };
+    }
+    return { label: first, value: second };
+  }
+  function factsOf(homebox) {
+    const facts = [];
+    for (const label of homebox.querySelectorAll("div")) {
+      if (cleanText(label.textContent) !== "Current Moderation Power") {
+        continue;
+      }
+      const value = cleanText(label.nextElementSibling?.textContent);
+      if (value !== "") {
+        facts.push({ label: "Current", value });
+      }
+    }
+    for (const row of homebox.querySelectorAll("tr")) {
+      const cells = [...row.children].filter((cell) => cell.tagName === "TD");
+      if (cells.length === 2) {
+        const [left, right] = cells;
+        const parsed = left !== undefined && right !== undefined ? fact(left, right) : null;
+        if (parsed !== null) {
+          facts.push(parsed);
+        }
+        continue;
+      }
+      if (cells.length === 6) {
+        for (let index = 0;index < cells.length; index += 2) {
+          const left = cells[index];
+          const right = cells[index + 1];
+          const parsed = left !== undefined && right !== undefined ? fact(left, right) : null;
+          if (parsed !== null) {
+            facts.push(parsed);
+          }
+        }
+      }
+    }
+    return facts;
+  }
+  function paragraphsOf(homebox) {
+    const seen = new Set;
+    const paragraphs = [];
+    for (const node of homebox.querySelectorAll("p")) {
+      const text = cleanText(node.textContent);
+      if (text !== "" && !seen.has(text)) {
+        seen.add(text);
+        paragraphs.push(text);
+      }
+    }
+    return paragraphs;
+  }
+  function linksOf(homebox, url) {
+    const links = [];
+    for (const anchor of homebox.querySelectorAll("a[href]")) {
+      if (anchor.closest("p") !== null) {
+        continue;
+      }
+      const href = anchorHref(anchor, url);
+      const label = cleanText(anchor.textContent);
+      if (href !== null && label !== "") {
+        links.push({ label, href });
+      }
+    }
+    return links;
+  }
+  function actionOf(homebox) {
+    const submit = homebox.querySelector('input[type="submit"]');
+    const label = cleanText(submit?.value);
+    if (label !== "") {
+      return label;
+    }
+    const button = cleanText(homebox.querySelector("button")?.textContent);
+    return button === "" ? null : button;
+  }
+  function sectionOf(title, homebox, url) {
+    const paragraphs = paragraphsOf(homebox);
+    const facts = factsOf(homebox);
+    const links = linksOf(homebox, url);
+    if (paragraphs.length === 0 && facts.length === 0 && links.length === 0) {
+      const text = cleanText(homebox.textContent);
+      if (text !== "") {
+        paragraphs.push(text);
+      }
+    }
+    return { title, paragraphs, facts, links, action: actionOf(homebox) };
+  }
+  function navOf(doc, url) {
+    const current = new URL(url);
+    const links = [];
+    for (const anchor of doc.querySelectorAll("#lb a[href]")) {
+      const label = cleanText(anchor.textContent);
+      const href = anchorHref(anchor, url);
+      if (href === null || label === "") {
+        continue;
+      }
+      const target = new URL(href);
+      links.push({
+        label,
+        href,
+        active: target.pathname === current.pathname && target.search === current.search
+      });
+    }
+    return links;
+  }
+  function parseHome(doc, url) {
+    const root = doc.querySelector(".stuffbox");
+    const sections = [];
+    if (root !== null) {
+      for (const heading of root.querySelectorAll("h2")) {
+        const homebox = heading.nextElementSibling;
+        if (!homebox?.classList.contains("homebox")) {
+          continue;
+        }
+        const title = cleanText(heading.textContent);
+        if (title !== "") {
+          sections.push(sectionOf(title, homebox, url));
+        }
+      }
+    }
+    return { url, nav: navOf(doc, url), sections };
+  }
+
   // src/parse/my-tags.ts
   var DEFAULT_WEIGHT = 10;
   function normalizeColor(color) {
@@ -2729,6 +2859,14 @@ ${defaultKeySummary()}`)) {
   function assertSettingsPage(data) {
     if (data.length === 0) {
       throw new ParseMismatchError("settings", "the settings form is missing");
+    }
+  }
+  function assertHomePage(data, doc) {
+    if (doc.querySelector(".stuffbox") === null) {
+      throw new ParseMismatchError("home", "the account boxes are missing");
+    }
+    if (data.sections.length === 0) {
+      throw new ParseMismatchError("home", "no account sections were parsed");
     }
   }
   function assertGalleryTorrentsPage(data, doc) {
@@ -9709,6 +9847,54 @@ ${defaultKeySummary()}`)) {
     host.append(root);
   }
 
+  // src/views/home.ts
+  function navStrip(data) {
+    if (data.nav.length === 0) {
+      return null;
+    }
+    return el("nav", { class: "home-nav", "aria-label": "Account pages" }, ...data.nav.map((link) => el("a", {
+      class: link.active ? "home-nav-link is-active" : "home-nav-link",
+      href: link.href,
+      "aria-current": link.active ? "page" : null,
+      text: link.label
+    })));
+  }
+  function sectionCard(section, url) {
+    const card = el("section", { class: "home-section", "aria-label": section.title }, el("h2", { class: "home-section-title", text: section.title }));
+    if (section.facts.length > 0) {
+      const facts = el("dl", { class: "home-facts" });
+      for (const fact of section.facts) {
+        facts.append(el("div", { class: "home-fact" }, el("dt", { text: fact.label }), el("dd", { text: fact.value })));
+      }
+      card.append(facts);
+    }
+    if (section.paragraphs.length > 0) {
+      card.append(el("div", { class: "home-text" }, ...section.paragraphs.map((text) => el("p", { class: "home-text-line", text }))));
+    }
+    if (section.links.length > 0) {
+      card.append(el("div", { class: "home-links" }, ...section.links.map((link) => el("a", { class: "home-link", href: link.href, text: link.label }))));
+    }
+    if (section.action !== null) {
+      card.append(el("a", {
+        class: "btn btn-ghost home-action",
+        href: nativeUrl(url),
+        "data-native": "",
+        title: "Open the native My Home page to run this action",
+        "aria-label": `${section.action} on the native My Home page`
+      }, el("span", { text: section.action }), icon("external")));
+    }
+    return card;
+  }
+  function renderHome(host, data, ctx) {
+    host.replaceChildren();
+    host.append(siteNav(ctx.signal), listHeader({ title: "My Home", summary: [el("span", { text: "Account overview" })] }));
+    const nav = navStrip(data);
+    if (nav !== null) {
+      host.append(nav);
+    }
+    host.append(el("div", { class: "home-sections" }, ...data.sections.map((section) => sectionCard(section, data.url))));
+  }
+
   // src/data/list-seek.ts
   function seekHref(baseUrl, value) {
     const target = new URL(baseUrl);
@@ -13510,6 +13696,16 @@ ${defaultKeySummary()}`)) {
           sanity: assertGalleryTorrentsPage,
           render: (host, data, ctx) => renderGalleryTorrents(host, data, ctx),
           title: (data) => documentTitle(data.title === "" ? "Torrents" : `Torrents for ${data.title}`)
+        })
+      },
+      home: {
+        match: (url) => url.pathname === "/home.php" ? { kind: "home", url: url.href } : null,
+        ...documentView(deps, {
+          tag: "home",
+          parse: parseHome,
+          sanity: assertHomePage,
+          render: (host, data, ctx) => renderHome(host, data, ctx),
+          title: () => documentTitle("My Home")
         })
       },
       myTags: {
@@ -17723,6 +17919,119 @@ ${defaultKeySummary()}`)) {
       align-self: flex-start;
     }
   }
+  .home-nav {
+    margin-bottom: calc(var(--spacing) * 4);
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 1.5);
+  }
+  .home-nav-link {
+    border-radius: 0;
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line-strong);
+    background-color: var(--color-panel);
+    padding-inline: calc(var(--spacing) * 2);
+    padding-block: var(--spacing);
+    font-size: var(--text-meta);
+    color: var(--color-muted);
+    text-decoration-line: none;
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
+  .home-nav-link:hover {
+    background-color: var(--color-panel-hover);
+    color: var(--color-fg);
+  }
+  .home-nav-link.is-active {
+    border-color: var(--color-accent);
+    background-color: var(--color-accent);
+    color: var(--color-fg);
+  }
+  .home-sections {
+    display: grid;
+    grid-template-columns: repeat(auto-fill,minmax(290px,1fr));
+    align-items: flex-start;
+    gap: calc(var(--spacing) * 4);
+    padding-bottom: calc(var(--spacing) * 6);
+  }
+  .home-section {
+    display: flex;
+    min-width: 0px;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 2);
+    border-radius: var(--radius-card);
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+    border-color: var(--color-line);
+    background-color: var(--color-panel);
+    padding: calc(var(--spacing) * 4);
+  }
+  .home-section-title {
+    margin: 0px;
+    border-bottom-style: var(--tw-border-style);
+    border-bottom-width: 1px;
+    border-color: var(--color-line);
+    padding-bottom: calc(var(--spacing) * 2);
+    font-size: var(--text-body);
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-fg);
+  }
+  .home-text {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 1.5);
+  }
+  .home-text-line {
+    margin: 0px;
+    font-size: var(--text-control);
+    color: var(--color-muted);
+  }
+  .home-facts {
+    margin: 0px;
+    display: grid;
+    gap: var(--spacing);
+  }
+  .home-fact {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: calc(var(--spacing) * 3);
+    font-size: var(--text-control);
+  }
+  .home-fact dt {
+    min-width: 0px;
+    color: var(--color-muted);
+  }
+  .home-fact dd {
+    margin: 0px;
+    flex-shrink: 0;
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-fg);
+    --tw-numeric-spacing: tabular-nums;
+    font-variant-numeric: var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, );
+  }
+  .home-links {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: calc(var(--spacing) * 3);
+    row-gap: var(--spacing);
+  }
+  .home-link {
+    font-size: var(--text-control);
+    color: var(--color-accent-text);
+    text-decoration-line: none;
+  }
+  .home-link:hover {
+    text-decoration-line: underline;
+  }
+  .home-action {
+    margin-top: var(--spacing);
+    align-self: flex-start;
+  }
   .my-tags-page {
     margin-top: calc(var(--spacing) * 4);
     display: flex;
@@ -19204,6 +19513,9 @@ body.fit-h.reader-continuous #reader {
       errorView(error, initialRoute);
     }
     revealDocument();
+    if (getSettings().tagSuggestions) {
+      loadTagIndex().catch((error) => log("tag index prefetch failed", error));
+    }
     log("ready", getSettings().fitHeight ? "fit-height" : "natural-width");
   }
   function boot() {
