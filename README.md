@@ -1,9 +1,9 @@
 # Better EH
 
 A full reskin of `e-hentai.org` and `exhentai.org`. Every page the script owns — search and
-category listings, galleries, the reader, favorites, toplists, torrents, gallery torrents, My Tags
-and settings — renders as one consistent, image-first interface instead of the site's legacy
-tables. Routes it does not own stay native.
+category listings, galleries, the reader, favorites, My Home, toplists, torrents, gallery torrents,
+My Tags and settings — renders as one consistent, image-first interface instead of the site's
+legacy tables. Routes it does not own stay native.
 
 ![Search results with demo data](docs/screenshots/browse.webp)
 
@@ -41,10 +41,10 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
 - **Reader**: fit-height/zoom/pan or natural-width scrolling, single/spread/continuous layouts,
   right-to-left direction, prefetching, `nl` retry, original-file fallback on deep zoom, keyboard,
   click zones, edge chevrons and swipes.
-- **Account pages**: favorites folders with search, notes, ordering and bulk move/delete; the
-  ranked toplist overview and category pages; the torrent index with search, status, only-mine and
-  sortable columns; `/uconfig.php` plus a userscript settings panel, keybinding editor and JSON
-  backup.
+- **Account pages**: the My Home account overview; favorites folders with search, notes, ordering
+  and bulk move/delete; the ranked toplist overview and category pages; the torrent index with
+  search, status, only-mine and sortable columns; `/uconfig.php` plus a userscript settings panel,
+  keybinding editor and JSON backup.
 - **My Tags**: the `/mytags` manager renders in-app: watch or hide a tag, set its colour and
   weight, and add new tags without leaving the shell.
 - **Fast and robust**: request priorities and caching, rate-limit purge with a banner, and a login
@@ -109,18 +109,21 @@ storage/debugging notes, and [Architecture](docs/ARCHITECTURE.md) for the module
 
 ## Known Limits
 
-- My Home and `/lofi/` remain native for now; `/mpv/` no longer exists on the site (it answers
-  404).
+- `/lofi/` stays native. It is a separate mobile listing, gallery and reader under its own `/lofi/`
+  URL space, not a second skin for the pages this script owns. `/mpv/` no longer exists on the
+  site (it answers 404).
+- My Home is a read-only overview. Actions that spend GP or reset account state — the quota unlock
+  and personalized-torrent key reset — open the native page instead of posting from the app.
 - Toplists are an e-hentai.org feature: the ExHentai site itself answers `/toplist.php` with a 404,
   so the tab is hidden there.
 - Gallery archive, report and petition actions link to the site's own pages rather than being
   rebuilt in-app.
 - Tag suggestions start from an embedded compact core vocabulary (about 1,500 popular tags, roughly
   22 KB of source), so common tags work immediately. The full roughly 400 KB front-coded vocabulary
-  (about 220 KB gzipped on the wire) downloads in the background and replaces that core, and is
-  cached for a week. Popularity ranking fetches a roughly 14 KB binary asset separately and caches
-  it for a week. If the full download fails, the core stays in place and less-common tags stay
-  missing until a later attempt succeeds.
+  (about 220 KB gzipped on the wire) starts downloading as soon as the first owned page renders,
+  replaces that core, and is cached for a week. Popularity ranking fetches a roughly 14 KB binary
+  asset separately and caches it for a week. If the full download fails, the core stays in place
+  and less-common tags stay missing until a later attempt succeeds.
 - Site HTML changes can break parsers; keep the native escape path available.
 
 ## Contributing

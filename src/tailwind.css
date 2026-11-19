@@ -11,6 +11,7 @@
 @import "./favorites.css" layer(components);
 @import "./gallery-actions.css" layer(components);
 @import "./gallery-torrents.css" layer(components);
+@import "./home.css" layer(components);
 @import "./my-tags.css" layer(components);
 
 @source "./**/*.{ts,html}";
