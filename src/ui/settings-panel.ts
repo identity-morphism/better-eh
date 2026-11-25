@@ -19,7 +19,7 @@ import {
 } from "../settings-schema";
 import type { BooleanKey, NumberField, ScalarKey, SelectKey } from "../settings-schema";
 import type { UserSettings } from "../types";
-import { el } from "./dom";
+import { buttonEl, el } from "./dom";
 import { createCheckbox, createSelect } from "./form-controls";
 import type { CheckboxControl, SelectControl } from "./form-controls";
 import { createSettingsDraft } from "./settings-draft";
@@ -362,9 +362,8 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
   }
 
   function captureButton(action: KeyAction, label: string): HTMLButtonElement {
-    const button = el("button", {
+    const button = buttonEl({
       class: "settings-key-capture",
-      type: "button",
       text: "Add key",
       "aria-label": `Add a key for ${label}`,
     });
@@ -420,9 +419,8 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
           "span",
           { class: "settings-key" },
           el("span", { class: "settings-key-name", text: keyLabel(key) }),
-          el("button", {
+          buttonEl({
             class: "settings-key-remove",
-            type: "button",
             text: "×",
             "aria-label": `Remove ${keyLabel(key)} from ${label}`,
             onclick: () => removeKey(action, key),
@@ -576,18 +574,10 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
     change();
   }
 
-  const exportButton = el("button", {
-    class: "btn btn-ghost settings-export",
-    type: "button",
-    text: "Export JSON",
-  });
+  const exportButton = buttonEl({ class: "btn btn-ghost settings-export", text: "Export JSON" });
   exportButton.addEventListener("click", exportSettings);
 
-  const importButton = el("button", {
-    class: "btn btn-ghost settings-import",
-    type: "button",
-    text: "Import JSON",
-  });
+  const importButton = buttonEl({ class: "btn btn-ghost settings-import", text: "Import JSON" });
   const fileInput = el("input", {
     class: VISUALLY_HIDDEN,
     type: "file",
@@ -610,9 +600,8 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
     );
   });
 
-  const keymapReset = el("button", {
+  const keymapReset = buttonEl({
     class: "btn btn-ghost settings-keymap-reset",
-    type: "button",
     text: "Reset keys",
   });
   keymapReset.addEventListener("click", () => {

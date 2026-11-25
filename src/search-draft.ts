@@ -8,6 +8,8 @@
  * query keeps the key the old context module used, so an open tab loses nothing.
  */
 
+import type { Unsubscribe } from "./emitter";
+import { createEmitter } from "./emitter";
 import type { SearchQuery } from "./parse/query";
 import { buildSearchUrl, emptySearchQuery, parseSearchQuery } from "./parse/query";
 import { createStore, sessionStorageAdapter } from "./store";
@@ -47,9 +49,7 @@ export interface SearchDraft {
   readonly text: string;
 }
 
-type SearchDraftListener = (state: Readonly<SearchDraft>) => void;
-
-const listeners = new Set<SearchDraftListener>();
+const draftChanged = createEmitter<Readonly<SearchDraft>>();
 let cached: SearchDraft | null = null;
 
 function parseStored(value: string): SearchQuery | null {
@@ -113,16 +113,12 @@ export function setSearchDraftText(text: string): void {
 }
 
 /** Observe draft and committed changes. Returns the unsubscribe function. */
-export function subscribeSearchDraft(listener: SearchDraftListener): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+export function subscribeSearchDraft(
+  listener: (state: Readonly<SearchDraft>) => void,
+): Unsubscribe {
+  return draftChanged.subscribe(listener);
 }
 
 function notify(): void {
-  const state = getSearchDraft();
-  for (const listener of listeners) {
-    listener(state);
-  }
+  draftChanged.emit(getSearchDraft());
 }

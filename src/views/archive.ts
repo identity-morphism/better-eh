@@ -2,7 +2,7 @@ import type { StartArchiveDownload } from "../data/archive";
 import { startArchiveDownload } from "../data/archive";
 import type { ArchiveCost, ArchiveOption, ArchivePage } from "../parse/archive";
 import { nativeUrl } from "../routes/identity";
-import { appendChildren, el } from "../ui/dom";
+import { appendChildren, buttonEl, el } from "../ui/dom";
 import { errorText } from "../ui/error-text";
 import { factRow } from "../ui/fact-row";
 import { listHeader } from "../ui/list-header";
@@ -75,9 +75,8 @@ function optionCard(
 ): HTMLElement {
   const note = unavailableNote(option);
   const status = el("p", { class: "archive-option-status", role: "status", "aria-live": "polite" });
-  const button: HTMLButtonElement = el("button", {
+  const button: HTMLButtonElement = buttonEl({
     class: "btn btn-primary archive-download",
-    type: "button",
     disabled: option.available ? null : "disabled",
     text: `Download ${option.kind === "original" ? "original" : "resampled"} archive`,
   });

@@ -5,7 +5,7 @@ import {
   voteComment,
 } from "../data/gallery-actions";
 import type { GalleryApiConfig, GalleryComment, GalleryData } from "../types";
-import { appendChildren, el } from "./dom";
+import { appendChildren, buttonEl, el } from "./dom";
 import { errorText } from "./error-text";
 import { showToast } from "./toast";
 
@@ -52,17 +52,15 @@ function commentCard(
     text: scoreText(comment.score),
     "aria-live": "polite",
   });
-  const up = el("button", {
+  const up = buttonEl({
     class: "comment-vote comment-vote-up",
-    type: "button",
     title: "Vote up",
     "aria-label": `Vote up ${comment.author || "comment"}`,
     "aria-pressed": "false",
     text: "+",
   });
-  const down = el("button", {
+  const down = buttonEl({
     class: "comment-vote comment-vote-down",
-    type: "button",
     title: "Vote down",
     "aria-label": `Vote down ${comment.author || "comment"}`,
     "aria-pressed": "false",
@@ -130,9 +128,8 @@ function commentCard(
   let saving = false;
   const editButton =
     config !== null && comment.editable
-      ? el("button", {
+      ? buttonEl({
           class: "comment-edit",
-          type: "button",
           text: "Edit",
           "aria-label": `Edit comment by ${comment.author || "Anonymous"}`,
         })
@@ -155,12 +152,8 @@ function commentCard(
           "aria-label": `Edit comment by ${comment.author || "Anonymous"}`,
         });
         textarea.value = comment.body;
-        const save = el("button", { class: "btn btn-small", type: "submit", text: "Save" });
-        const cancel = el("button", {
-          class: "btn btn-ghost btn-small",
-          type: "button",
-          text: "Cancel",
-        });
+        const save = buttonEl({ class: "btn btn-small", type: "submit", text: "Save" });
+        const cancel = buttonEl({ class: "btn btn-ghost btn-small", text: "Cancel" });
         const status = el("span", { class: "comment-status", role: "status" });
         form.append(
           textarea,
@@ -281,7 +274,7 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
     placeholder: "Add a comment…",
     "aria-label": "New comment",
   });
-  const button = el("button", { class: "btn btn-small", type: "submit", text: "Post comment" });
+  const button = buttonEl({ class: "btn btn-small", type: "submit", text: "Post comment" });
   const status = el("span", { class: "comment-status", role: "status" });
   form.append(textarea, el("div", { class: "comment-compose-actions" }, button, status));
   section.append(form);
@@ -303,9 +296,8 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
       }
       status.replaceChildren(
         "Posted, but the page could not refresh. ",
-        el("button", {
+        buttonEl({
           class: "comment-retry",
-          type: "button",
           text: "Reload",
           onclick: () => {
             void refresh();

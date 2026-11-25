@@ -114,6 +114,22 @@
   }
 
   // src/tags/model.ts
+  var TAG_SIGNS = Object.freeze(["", "-", "~"]);
+  var SIGN_PRESENTATION = Object.freeze({
+    "": { glyph: "+", state: "included", chipClass: "term-chip", action: "Include in search" },
+    "-": {
+      glyph: "−",
+      state: "excluded",
+      chipClass: "term-chip is-excluded",
+      action: "Exclude from search"
+    },
+    "~": {
+      glyph: "~",
+      state: "optional",
+      chipClass: "term-chip is-or",
+      action: "Make optional (OR)"
+    }
+  });
   var TAG_NAMESPACES = Object.freeze([
     { id: "female", label: "Female", alias: "f", weight: 9 },
     { id: "male", label: "Male", alias: "m", weight: 8.5 },
@@ -853,6 +869,24 @@
     }
   }
 
+  // src/emitter.ts
+  function createEmitter() {
+    const listeners = new Set;
+    return {
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      emit(value) {
+        for (const listener of listeners) {
+          listener(value);
+        }
+      }
+    };
+  }
+
   // src/keymap-schema.ts
   var KEY_ACTIONS = [
     { action: "next", label: "Next page", defaults: ["D", "ARROWRIGHT"] },
@@ -1108,7 +1142,7 @@
   // src/settings.ts
   var STORAGE_KEY = "eh:settings:v2";
   var VERSION2 = 2;
-  var listeners = new Set;
+  var settingsChanged = createEmitter();
   var DEFAULT_SETTINGS = Object.freeze({
     ...defaultScalars(),
     keymap: defaultKeymap()
@@ -1166,18 +1200,13 @@
     }
     current = Object.freeze(next);
     store.write(current);
-    for (const listener of listeners) {
-      listener(current);
-    }
+    settingsChanged.emit(current);
   }
   function updateSetting(key, value) {
     updateSettings({ [key]: value });
   }
   function onSettingsChange(listener) {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
+    return settingsChanged.subscribe(listener);
   }
 
   // src/log.ts
@@ -1214,6 +1243,9 @@
     }
     appendChildren(node, children);
     return node;
+  }
+  function buttonEl(props = {}, ...children) {
+    return el("button", { type: "button", ...props }, ...children);
   }
   function appendChildren(parent, children) {
     for (const child of children) {
@@ -3951,7 +3983,7 @@ ${defaultKeySummary()}`)) {
     empty: () => null,
     guard: (value) => value === null || typeof value === "string"
   }, adapter);
-  var listeners2 = new Set;
+  var draftChanged = createEmitter();
   var cached = null;
   function parseStored(value) {
     if (value === "" || !URL.canParse(value, location.href)) {
@@ -3996,16 +4028,10 @@ ${defaultKeySummary()}`)) {
     notify();
   }
   function subscribeSearchDraft(listener) {
-    listeners2.add(listener);
-    return () => {
-      listeners2.delete(listener);
-    };
+    return draftChanged.subscribe(listener);
   }
   function notify() {
-    const state = getSearchDraft();
-    for (const listener of listeners2) {
-      listener(state);
-    }
+    draftChanged.emit(getSearchDraft());
   }
 
   // src/session.ts
@@ -4432,9 +4458,8 @@ ${defaultKeySummary()}`)) {
     const content = el("div", { class: "action-menu", role: "none" });
     let dismiss = () => {};
     for (const item of items) {
-      const node = item.href === undefined ? el("button", {
+      const node = item.href === undefined ? buttonEl({
         class: "action-menu-item",
-        type: "button",
         role: "menuitem",
         text: item.label,
         onclick: () => {
@@ -4481,46 +4506,17 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/ui/search-chips.ts
-  function signGlyph(term) {
-    if (term.sign === "-") {
-      return "−";
-    }
-    if (term.sign === "~") {
-      return "~";
-    }
-    return "+";
-  }
-  function chipClass(term) {
-    if (term.sign === "-") {
-      return "term-chip is-excluded";
-    }
-    if (term.sign === "~") {
-      return "term-chip is-or";
-    }
-    return "term-chip";
-  }
-  function stateLabel(term) {
-    if (term.sign === "-") {
-      return "excluded";
-    }
-    if (term.sign === "~") {
-      return "optional";
-    }
-    return "included";
-  }
   function signItems(term, text, index, onSearch) {
     const items = [];
-    const set = (sign, label) => {
-      if (term.sign !== sign) {
-        items.push({
-          label,
-          run: () => onSearch(setTermSign(text, term, sign), { type: "toggle", index })
-        });
+    for (const sign of TAG_SIGNS) {
+      if (term.sign === sign) {
+        continue;
       }
-    };
-    set("", "Include in search");
-    set("-", "Exclude from search");
-    set("~", "Make optional (OR)");
+      items.push({
+        label: SIGN_PRESENTATION[sign].action,
+        run: () => onSearch(setTermSign(text, term, sign), { type: "toggle", index })
+      });
+    }
     items.push({
       label: "Remove",
       run: () => onSearch(removeTerm(text, term), { type: "remove", index })
@@ -4529,17 +4525,20 @@ ${defaultKeySummary()}`)) {
   }
   function chip(term, text, index, onSearch, signal) {
     const node = el("span", {
-      class: chipClass(term)
+      class: SIGN_PRESENTATION[term.sign].chipClass
     });
-    const toggle = el("button", {
+    const toggle = buttonEl({
       class: "term-toggle",
-      type: "button",
-      "aria-label": `${termLabel(term)}, ${stateLabel(term)}. Remove from search. Right-click to include, exclude or make optional.`,
+      "aria-label": `${termLabel(term)}, ${SIGN_PRESENTATION[term.sign].state}. Remove from search. Right-click to include, exclude or make optional.`,
       title: "Click to remove · Right-click to include, exclude or make optional",
       "aria-haspopup": "menu",
       "aria-expanded": "false"
     });
-    toggle.append(el("span", { class: "term-sign", "aria-hidden": "true", text: signGlyph(term) }));
+    toggle.append(el("span", {
+      class: "term-sign",
+      "aria-hidden": "true",
+      text: SIGN_PRESENTATION[term.sign].glyph
+    }));
     if (term.ns) {
       toggle.append(el("span", {
         class: `term-ns ns-${term.ns.id}`,
@@ -4572,12 +4571,7 @@ ${defaultKeySummary()}`)) {
     terms.forEach((term, index) => {
       row.append(chip(term, text, index, onSearch, signal));
     });
-    const clear = el("button", {
-      class: "search-filters-clear",
-      type: "button",
-      text: "Clear",
-      title: "Clear search"
-    });
+    const clear = buttonEl({ class: "search-filters-clear", text: "Clear", title: "Clear search" });
     clear.addEventListener("click", () => {
       onSearch("", { type: "clear" });
     });
@@ -4598,24 +4592,22 @@ ${defaultKeySummary()}`)) {
     return typeof record.name === "string" && typeof record.query === "string" && typeof record.savedAt === "number";
   }
   var store2 = createStore({ key: KEY2, version: VERSION4, empty: () => [], guard: isUnknownArray }, gmStorage());
-  var listeners3 = new Set;
+  var quickTagsChanged = createEmitter();
   function subscribeQuickTags(listener) {
-    listeners3.add(listener);
-    return () => {
-      listeners3.delete(listener);
-    };
+    return quickTagsChanged.subscribe(listener);
   }
   function notify2() {
-    for (const listener of listeners3) {
-      listener();
-    }
+    quickTagsChanged.emit();
   }
-  function quickTags() {
-    return store2.read().filter(isQuickTag).map((entry) => ({
+  function cleanTags(values) {
+    return values.map((entry) => ({
       name: collapseWhitespace(entry.name),
       query: collapseWhitespace(entry.query),
       savedAt: entry.savedAt
-    })).filter((entry) => entry.name !== "" && entry.query !== "").sort((a, b) => b.savedAt - a.savedAt).slice(0, QUICK_TAG_LIMIT);
+    })).filter((entry) => entry.name !== "" && entry.query !== "");
+  }
+  function quickTags() {
+    return cleanTags(store2.read().filter(isQuickTag)).sort((a, b) => b.savedAt - a.savedAt).slice(0, QUICK_TAG_LIMIT);
   }
   function removeQuickTag(name) {
     const key = collapseWhitespace(name).toLowerCase();
@@ -4623,12 +4615,7 @@ ${defaultKeySummary()}`)) {
     notify2();
   }
   function replaceQuickTags(tags) {
-    const next = tags.map((entry) => ({
-      name: collapseWhitespace(entry.name),
-      query: collapseWhitespace(entry.query),
-      savedAt: entry.savedAt
-    })).filter((entry) => entry.name !== "" && entry.query !== "").slice(0, QUICK_TAG_LIMIT);
-    store2.write(next);
+    store2.write(cleanTags(tags).slice(0, QUICK_TAG_LIMIT));
     notify2();
   }
 
@@ -4851,7 +4838,7 @@ ${defaultKeySummary()}`)) {
     let inFlight = null;
     let generation = 0;
     let lastAttempt = 0;
-    const listeners = new Set;
+    const listeners = createEmitter();
     function cached() {
       if (!cacheRead) {
         current = readCache();
@@ -4860,9 +4847,7 @@ ${defaultKeySummary()}`)) {
       return current;
     }
     function notify(value) {
-      for (const listener of listeners) {
-        listener(value);
-      }
+      listeners.emit(value);
     }
     function start(background) {
       const token = ++generation;
@@ -4934,10 +4919,7 @@ ${defaultKeySummary()}`)) {
       },
       load: loadFromCache,
       onChange(listener) {
-        listeners.add(listener);
-        return () => {
-          listeners.delete(listener);
-        };
+        return listeners.subscribe(listener);
       },
       publish(value) {
         const known = cached();
@@ -5980,9 +5962,8 @@ ${defaultKeySummary()}`)) {
         "aria-hidden": "true",
         text: "↑↓ move · Enter apply · Ctrl/Cmd exclude"
       });
-      excludeButton = el("button", {
+      excludeButton = buttonEl({
         class: "tag-combobox-exclude tag-combobox-exclude-toggle",
-        type: "button",
         tabindex: "-1",
         "aria-pressed": "false",
         title: "Apply the next tag as an exclusion (hold Ctrl/Cmd)",
@@ -5995,9 +5976,8 @@ ${defaultKeySummary()}`)) {
         excludeNext = !excludeNext;
         render();
       });
-      retryButton = el("button", {
+      retryButton = buttonEl({
         class: "tag-combobox-exclude is-retry",
-        type: "button",
         tabindex: "-1",
         text: "Retry",
         hidden: "hidden"
@@ -6263,9 +6243,8 @@ ${defaultKeySummary()}`)) {
         if (getSettings().tagSuggestions) {
           attachTagCombobox({ input: query, signal: rows.signal });
         }
-        const remove = el("button", {
+        const remove = buttonEl({
           class: "quick-tag-remove",
-          type: "button",
           text: "×",
           title: "Remove quick tag",
           "aria-label": `Remove quick tag ${index + 1}`
@@ -6280,21 +6259,13 @@ ${defaultKeySummary()}`)) {
         focusQuery(focusIndex);
       }
     };
-    const add = el("button", {
-      class: "btn btn-ghost btn-small",
-      type: "button",
-      text: "+ Add"
-    });
+    const add = buttonEl({ class: "btn btn-ghost btn-small", text: "+ Add" });
     add.addEventListener("click", () => {
       draft.push({ name: "", query: "", savedAt: Date.now() });
       renderRows(draft.length - 1);
     });
-    const save = el("button", { class: "btn btn-small", type: "submit", text: "Save" });
-    const cancel = el("button", {
-      class: "btn btn-ghost btn-small",
-      type: "button",
-      text: "Cancel"
-    });
+    const save = buttonEl({ class: "btn btn-small", type: "submit", text: "Save" });
+    const cancel = buttonEl({ class: "btn btn-ghost btn-small", text: "Cancel" });
     cancel.addEventListener("click", () => {
       panel?.close();
     });
@@ -6332,12 +6303,11 @@ ${defaultKeySummary()}`)) {
 
   // src/ui/search-history.ts
   function queryButton(text, label, onPick) {
-    return el("button", { class: "search-history-query", type: "button", title: text, onclick: onPick }, el("span", { class: "search-history-name", text: label }), label === text ? null : el("span", { class: "search-history-text", text }));
+    return buttonEl({ class: "search-history-query", title: text, onclick: onPick }, el("span", { class: "search-history-name", text: label }), label === text ? null : el("span", { class: "search-history-text", text }));
   }
   function searchHistoryButton(options) {
-    const button = el("button", {
+    const button = buttonEl({
       class: "topbar-history",
-      type: "button",
       "aria-label": "Search history",
       title: "Recent searches and quick tags",
       "aria-haspopup": "dialog",
@@ -6359,11 +6329,7 @@ ${defaultKeySummary()}`)) {
           }));
         }
         container.append(list);
-        const clear = el("button", {
-          class: "search-history-clear",
-          type: "button",
-          text: "Clear recent"
-        });
+        const clear = buttonEl({ class: "search-history-clear", text: "Clear recent" });
         clear.addEventListener("click", () => {
           clearRecentQueries();
           renderInto(container, close);
@@ -6380,9 +6346,8 @@ ${defaultKeySummary()}`)) {
             close();
             options.onToggle(entry.query);
           }));
-          const remove = el("button", {
+          const remove = buttonEl({
             class: "search-history-remove",
-            type: "button",
             text: "×",
             "aria-label": `Remove quick tag ${entry.name}`,
             title: `Remove ${entry.name}`
@@ -6395,9 +6360,8 @@ ${defaultKeySummary()}`)) {
           list.append(row);
         }
         container.append(list);
-        const edit = el("button", {
+        const edit = buttonEl({
           class: "search-history-edit",
-          type: "button",
           text: "Edit quick tags",
           title: "Edit quick tags"
         });
@@ -6414,9 +6378,8 @@ ${defaultKeySummary()}`)) {
           text: "No recent searches or quick tags yet."
         }));
       }
-      const saveCurrent = el("button", {
+      const saveCurrent = buttonEl({
         class: "btn btn-small search-history-save-current",
-        type: "button",
         text: "Save current as quick tag",
         title: "Save the current search as a quick tag",
         "aria-haspopup": "dialog",
@@ -6618,9 +6581,8 @@ ${defaultKeySummary()}`)) {
     if (overflow.length === 0) {
       return nav;
     }
-    const moreButton = el("button", {
+    const moreButton = buttonEl({
       class: "topbar-more btn btn-ghost btn-small",
-      type: "button",
       text: "More",
       "aria-haspopup": "menu",
       "aria-expanded": "false"
@@ -6650,9 +6612,8 @@ ${defaultKeySummary()}`)) {
     return nav;
   }
   function backButton() {
-    return el("button", {
+    return buttonEl({
       class: "icon-btn",
-      type: "button",
       "aria-label": "Go back",
       title: "Back",
       onclick: () => {
@@ -6677,9 +6638,8 @@ ${defaultKeySummary()}`)) {
       "aria-label": "Search tags or titles",
       "aria-keyshortcuts": "Control+K Meta+K"
     });
-    const clear = el("button", {
+    const clear = buttonEl({
       class: "topbar-clear",
-      type: "button",
       "aria-label": "Clear search",
       title: "Clear search",
       hidden: "hidden"
@@ -6701,7 +6661,7 @@ ${defaultKeySummary()}`)) {
       },
       signal: options.signal ?? new AbortController().signal
     });
-    form.append(el("span", { class: "topbar-search-icon" }, icon("search")), input, clear, hint, history2, el("button", { class: "topbar-search-submit", type: "submit", "aria-label": "Search" }, el("span", { class: "topbar-search-submit-icon" }, icon("search")), el("span", { class: "topbar-search-submit-label", text: "Search" })));
+    form.append(el("span", { class: "topbar-search-icon" }, icon("search")), input, clear, hint, history2, buttonEl({ class: "topbar-search-submit", type: "submit", "aria-label": "Search" }, el("span", { class: "topbar-search-submit-icon" }, icon("search")), el("span", { class: "topbar-search-submit-label", text: "Search" })));
     const filters = el("div", { class: "topbar-filters", hidden: "hidden" });
     let renderedText = "";
     const chipsFromDraft = options.draftChips === true;
@@ -6827,9 +6787,8 @@ ${defaultKeySummary()}`)) {
   function optionCard(option, ctx, controls, startDownload, openDownload) {
     const note = unavailableNote(option);
     const status = el("p", { class: "archive-option-status", role: "status", "aria-live": "polite" });
-    const button = el("button", {
+    const button = buttonEl({
       class: "btn btn-primary archive-download",
-      type: "button",
       disabled: option.available ? null : "disabled",
       text: `Download ${option.kind === "original" ? "original" : "resampled"} archive`
     });
@@ -7149,7 +7108,7 @@ ${defaultKeySummary()}`)) {
     return pageWindow(current, total).map((page) => page === null ? el("span", { class: "pager-gap", "aria-hidden": "true", text: "…" }) : page === current ? el("span", { class: "pager-num is-current", "aria-current": "page", text: String(page) }, el("span", { class: "sr-only", text: " (current page)" })) : el("a", { class: "pager-num", href: href(page), text: String(page) }));
   }
   function jumpForm(label, input, onSubmit) {
-    const form = el("form", { class: "pager-jump" }, el("label", { class: "pager-jump-label", text: label }), input, el("button", { class: "btn btn-small", type: "submit", text: "Go" }));
+    const form = el("form", { class: "pager-jump" }, el("label", { class: "pager-jump-label", text: label }), input, buttonEl({ class: "btn btn-small", type: "submit", text: "Go" }));
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       onSubmit();
@@ -7299,6 +7258,9 @@ ${defaultKeySummary()}`)) {
   function nativePageAction(href = nativeUrl()) {
     return { label: "Open native page", href, native: true };
   }
+  function nativeEmptyPanel(text) {
+    return statePanel({ text, actions: [nativePageAction()] });
+  }
   function actionNode(action) {
     const classes = action.primary === true ? "btn btn-primary" : "btn";
     if (action.href !== undefined) {
@@ -7308,12 +7270,7 @@ ${defaultKeySummary()}`)) {
         "data-native": action.native === true ? "" : null
       }, action.label);
     }
-    return el("button", {
-      class: classes,
-      type: "button",
-      text: action.label,
-      onclick: action.onClick
-    });
+    return buttonEl({ class: classes, text: action.label, onclick: action.onClick });
   }
   function statePanel(options) {
     const tone = options.tone ?? "empty";
@@ -7468,9 +7425,8 @@ ${defaultKeySummary()}`)) {
       const grid = el("div", { class: "fav-grid" });
       for (const folder of folders) {
         const current = isCurrentFavoriteFolder(folder, snapshot);
-        grid.append(el("button", {
+        grid.append(buttonEl({
           class: current ? "fav-item is-current" : "fav-item",
-          type: "button",
           "aria-current": current ? "true" : null,
           onclick: () => {
             apply(folder);
@@ -7479,9 +7435,8 @@ ${defaultKeySummary()}`)) {
       }
       content.append(grid);
       if (snapshot.favorited !== false) {
-        content.append(el("button", {
+        content.append(buttonEl({
           class: "fav-item fav-remove",
-          type: "button",
           onclick: () => {
             apply(null);
           }
@@ -7541,9 +7496,8 @@ ${defaultKeySummary()}`)) {
     });
   }
   function favoriteButton(state, signal) {
-    const button = el("button", {
+    const button = buttonEl({
       class: "fav-btn",
-      type: "button",
       "aria-label": "Favorite",
       "aria-haspopup": "dialog",
       "aria-expanded": "false",
@@ -7710,12 +7664,10 @@ ${defaultKeySummary()}`)) {
     const order = [...gids];
     const positions = new Map(order.map((gid, index) => [gid, index]));
     const chosen = new Set;
-    const listeners = new Set;
+    const selectionChanged = createEmitter();
     let anchor = null;
     const notify = () => {
-      for (const listener of listeners) {
-        listener();
-      }
+      selectionChanged.emit();
     };
     return {
       has(gid) {
@@ -7787,10 +7739,7 @@ ${defaultKeySummary()}`)) {
         }
       },
       subscribe(listener) {
-        listeners.add(listener);
-        return () => {
-          listeners.delete(listener);
-        };
+        return selectionChanged.subscribe(listener);
       }
     };
   }
@@ -7890,19 +7839,10 @@ ${defaultKeySummary()}`)) {
     const countLabel = el("span", { class: "favorites-bulk-count" });
     const statusText = el("span", { class: "favorites-bulk-status", role: "status" });
     statusText.hidden = true;
-    const retryButton = el("button", {
-      class: "btn btn-small favorites-retry",
-      type: "button",
-      text: "Retry"
-    });
-    const removeButton = el("button", {
-      class: "btn btn-small favorites-delete",
-      type: "button",
-      text: "Delete"
-    });
-    const moveButton = el("button", {
+    const retryButton = buttonEl({ class: "btn btn-small favorites-retry", text: "Retry" });
+    const removeButton = buttonEl({ class: "btn btn-small favorites-delete", text: "Delete" });
+    const moveButton = buttonEl({
       class: "btn btn-small favorites-move",
-      type: "button",
       text: "Move to…",
       "aria-haspopup": "menu",
       "aria-expanded": "false"
@@ -7983,7 +7923,7 @@ ${defaultKeySummary()}`)) {
         content.append(el("div", { class: "favorites-move-empty", text: "No favorite folders found." }));
       }
       for (const folder of data.folders) {
-        const choice = el("button", { class: "favorites-move-item", type: "button", role: "menuitem" }, el("span", { class: "favorites-move-name", text: folder.name }), el("span", { class: "favorites-move-count", text: String(folder.count) }));
+        const choice = buttonEl({ class: "favorites-move-item", role: "menuitem" }, el("span", { class: "favorites-move-name", text: folder.name }), el("span", { class: "favorites-move-count", text: String(folder.count) }));
         choice.addEventListener("click", () => {
           movePopover?.close();
           const gids = selection.ids();
@@ -8094,7 +8034,7 @@ ${defaultKeySummary()}`)) {
       placeholder: "Search favorites",
       "aria-label": "Search favorites"
     });
-    search.append(searchInput, el("button", { class: "btn btn-small", type: "submit", text: "Search" }));
+    search.append(searchInput, buttonEl({ class: "btn btn-small", type: "submit", text: "Search" }));
     search.addEventListener("submit", (event) => {
       event.preventDefault();
       const url = new URL(folderHref(data.url, data.active));
@@ -8454,17 +8394,15 @@ ${defaultKeySummary()}`)) {
       text: scoreText(comment.score),
       "aria-live": "polite"
     });
-    const up = el("button", {
+    const up = buttonEl({
       class: "comment-vote comment-vote-up",
-      type: "button",
       title: "Vote up",
       "aria-label": `Vote up ${comment.author || "comment"}`,
       "aria-pressed": "false",
       text: "+"
     });
-    const down = el("button", {
+    const down = buttonEl({
       class: "comment-vote comment-vote-down",
-      type: "button",
       title: "Vote down",
       "aria-label": `Vote down ${comment.author || "comment"}`,
       "aria-pressed": "false",
@@ -8515,9 +8453,8 @@ ${defaultKeySummary()}`)) {
     const bodyHost = el("div", { class: "comment-body-host" }, body);
     let editing = false;
     let saving = false;
-    const editButton = config !== null && comment.editable ? el("button", {
+    const editButton = config !== null && comment.editable ? buttonEl({
       class: "comment-edit",
-      type: "button",
       text: "Edit",
       "aria-label": `Edit comment by ${comment.author || "Anonymous"}`
     }) : null;
@@ -8536,12 +8473,8 @@ ${defaultKeySummary()}`)) {
           "aria-label": `Edit comment by ${comment.author || "Anonymous"}`
         });
         textarea.value = comment.body;
-        const save = el("button", { class: "btn btn-small", type: "submit", text: "Save" });
-        const cancel = el("button", {
-          class: "btn btn-ghost btn-small",
-          type: "button",
-          text: "Cancel"
-        });
+        const save = buttonEl({ class: "btn btn-small", type: "submit", text: "Save" });
+        const cancel = buttonEl({ class: "btn btn-ghost btn-small", text: "Cancel" });
         const status = el("span", { class: "comment-status", role: "status" });
         form.append(textarea, el("div", { class: "comment-compose-actions" }, save, cancel, status));
         bodyHost.replaceChildren(form);
@@ -8633,7 +8566,7 @@ ${defaultKeySummary()}`)) {
       placeholder: "Add a comment…",
       "aria-label": "New comment"
     });
-    const button = el("button", { class: "btn btn-small", type: "submit", text: "Post comment" });
+    const button = buttonEl({ class: "btn btn-small", type: "submit", text: "Post comment" });
     const status = el("span", { class: "comment-status", role: "status" });
     form.append(textarea, el("div", { class: "comment-compose-actions" }, button, status));
     section.append(form);
@@ -8650,9 +8583,8 @@ ${defaultKeySummary()}`)) {
         if (signal.aborted) {
           return;
         }
-        status.replaceChildren("Posted, but the page could not refresh. ", el("button", {
+        status.replaceChildren("Posted, but the page could not refresh. ", buttonEl({
           class: "comment-retry",
-          type: "button",
           text: "Reload",
           onclick: () => {
             refresh();
@@ -8801,9 +8733,8 @@ ${defaultKeySummary()}`)) {
     if (coarse) {
       for (let star = 1;star <= 5; star++) {
         const text = `Rate ${star} ${star === 1 ? "star" : "stars"}`;
-        const button = el("button", {
+        const button = buttonEl({
           class: "rating-star",
-          type: "button",
           title: text,
           "aria-label": text,
           "aria-pressed": "false",
@@ -8826,9 +8757,8 @@ ${defaultKeySummary()}`)) {
       for (let half = 1;half <= HALF_STEPS; half++) {
         const value = half / 2;
         const text = `Rate ${halfText(half)} ${value === 1 ? "star" : "stars"}`;
-        const button = el("button", {
+        const button = buttonEl({
           class: halfClass(half),
-          type: "button",
           title: text,
           "aria-label": text,
           "aria-pressed": "false",
@@ -8876,31 +8806,11 @@ ${defaultKeySummary()}`)) {
     const input = tagInput("field-input");
     const extraButtons = [];
     const buttons = {
-      up: el("button", {
-        class: "tag-menu-item",
-        type: "button",
-        text: "Vote up"
-      }),
-      down: el("button", {
-        class: "tag-menu-item",
-        type: "button",
-        text: "Vote down"
-      }),
-      include: el("button", {
-        class: "tag-menu-item",
-        type: "button",
-        text: "Include in search"
-      }),
-      exclude: el("button", {
-        class: "tag-menu-item",
-        type: "button",
-        text: "Exclude from search"
-      }),
-      or: el("button", {
-        class: "tag-menu-item",
-        type: "button",
-        text: "Make optional (OR)"
-      })
+      up: buttonEl({ class: "tag-menu-item", text: "Vote up" }),
+      down: buttonEl({ class: "tag-menu-item", text: "Vote down" }),
+      include: buttonEl({ class: "tag-menu-item", text: SIGN_PRESENTATION[""].action }),
+      exclude: buttonEl({ class: "tag-menu-item", text: SIGN_PRESENTATION["-"].action }),
+      or: buttonEl({ class: "tag-menu-item", text: SIGN_PRESENTATION["~"].action })
     };
     const setBusy = (busy) => {
       for (const button of [...Object.values(buttons), ...extraButtons]) {
@@ -8959,7 +8869,7 @@ ${defaultKeySummary()}`)) {
     buttons.include.addEventListener("click", () => applySign(""));
     buttons.exclude.addEventListener("click", () => applySign("-"));
     buttons.or.addEventListener("click", () => applySign("~"));
-    form.append(input, el("button", { class: "btn btn-small", type: "submit", text: "Add tags" }));
+    form.append(input, buttonEl({ class: "btn btn-small", type: "submit", text: "Add tags" }));
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const value = input.value.trim();
@@ -8970,7 +8880,7 @@ ${defaultKeySummary()}`)) {
     }, { signal });
     const myTagButtons = [];
     if (handlers.watchTag) {
-      const watch = el("button", { class: "tag-menu-item", type: "button", text: "Watch tag" });
+      const watch = buttonEl({ class: "tag-menu-item", text: "Watch tag" });
       watch.addEventListener("click", () => {
         const runWatch = handlers.watchTag;
         if (runWatch) {
@@ -8981,7 +8891,7 @@ ${defaultKeySummary()}`)) {
       myTagButtons.push(watch);
     }
     if (handlers.hideTag) {
-      const hide = el("button", { class: "tag-menu-item", type: "button", text: "Hide tag" });
+      const hide = buttonEl({ class: "tag-menu-item", text: "Hide tag" });
       hide.addEventListener("click", () => {
         const runHide = handlers.hideTag;
         if (runHide) {
@@ -9005,11 +8915,7 @@ ${defaultKeySummary()}`)) {
         "aria-label": "Tag highlight colour",
         title: "Highlight colour"
       });
-      const apply = el("button", {
-        class: "tag-menu-item",
-        type: "button",
-        text: "Apply colour"
-      });
+      const apply = buttonEl({ class: "tag-menu-item", text: "Apply colour" });
       extraButtons.push(apply);
       apply.addEventListener("click", () => {
         const runColor = handlers.colorTag;
@@ -9160,17 +9066,9 @@ ${defaultKeySummary()}`)) {
     signal
   }) {
     const status = el("p", { class: "infinite-status", role: "status" });
-    const retryButton = el("button", {
-      class: "btn btn-small infinite-retry",
-      type: "button",
-      text: "Retry"
-    });
+    const retryButton = buttonEl({ class: "btn btn-small infinite-retry", text: "Retry" });
     retryButton.hidden = true;
-    const more = el("button", {
-      class: "btn btn-small infinite-more",
-      type: "button",
-      text: "Load more"
-    });
+    const more = buttonEl({ class: "btn btn-small infinite-more", text: "Load more" });
     more.hidden = true;
     const element = el("div", { class: "infinite-scroll" }, status, more, retryButton);
     element.hidden = next === null;
@@ -9543,9 +9441,8 @@ ${defaultKeySummary()}`)) {
             }, ctx.signal);
           };
           bindContextMenu(chip, openMenu, ctx.signal);
-          const trigger = el("button", {
+          const trigger = buttonEl({
             class: "tag-menu-trigger",
-            type: "button",
             "aria-label": `Tag actions for ${tag.name}`,
             "aria-haspopup": "dialog",
             title: "Tag actions",
@@ -9560,7 +9457,7 @@ ${defaultKeySummary()}`)) {
     }
     if (actions.config !== null) {
       const input = tagInput("field-input tag-add-input");
-      const submit = el("button", { class: "btn btn-small", type: "submit", text: "Add tags" });
+      const submit = buttonEl({ class: "btn btn-small", type: "submit", text: "Add tags" });
       const form = el("form", { class: "tag-add" }, input, submit);
       let adding = false;
       form.addEventListener("submit", (event) => {
@@ -9666,9 +9563,8 @@ ${defaultKeySummary()}`)) {
       href: entry.pageUrl,
       title: `${entry.counterText} · saved ${new Date(entry.savedAt).toLocaleDateString()}`
     }, el("span", { text: `Resume page ${entry.pageNum}` }), icon("arrowRight"));
-    const clear = el("button", {
+    const clear = buttonEl({
       class: "gallery-resume-clear",
-      type: "button",
       text: "×",
       "aria-label": "Clear saved reading position",
       title: "Clear saved reading position"
@@ -9772,10 +9668,7 @@ ${defaultKeySummary()}`)) {
     for (const thumb of data.thumbs) {
       grid.append(thumbTile(thumb));
     }
-    const emptyThumbs = data.thumbs.length === 0 ? statePanel({
-      text: "No page thumbnails found for this gallery.",
-      actions: [nativePageAction()]
-    }) : null;
+    const emptyThumbs = data.thumbs.length === 0 ? nativeEmptyPanel("No page thumbnails found for this gallery.") : null;
     const load = deps.loadDocument ?? ((url, documentOptions) => loader.document(url, { priority: priorityOf("navigation"), ...documentOptions }));
     const reload = async () => {
       const response = await load(data.url, { fresh: true, signal: ctx.signal });
@@ -10115,9 +10008,8 @@ ${defaultKeySummary()}`)) {
       text: name
     });
     const detailsSlot = el("div", { class: "gallery-torrent-details-slot", hidden: "" });
-    const button = el("button", {
+    const button = buttonEl({
       class: "btn btn-small gallery-torrent-details-button",
-      type: "button",
       "aria-expanded": "false",
       text: "Details"
     });
@@ -10184,10 +10076,7 @@ ${defaultKeySummary()}`)) {
       root.append(back);
     }
     if (data.torrents.length === 0) {
-      root.append(statePanel({
-        text: "No torrents were found for this gallery.",
-        actions: [nativePageAction()]
-      }));
+      root.append(nativeEmptyPanel("No torrents were found for this gallery."));
     } else {
       const list = el("div", { class: "gallery-torrent-list" });
       for (const torrent of data.torrents) {
@@ -10362,16 +10251,15 @@ ${defaultKeySummary()}`)) {
       entries.length = 0;
       row.replaceChildren();
       for (const tag of tags) {
-        const node = el("button", { class: "quick-tag", type: "button", "aria-pressed": "false" }, el("span", { class: "quick-tag-label", text: tag.name }));
+        const node = buttonEl({ class: "quick-tag", "aria-pressed": "false" }, el("span", { class: "quick-tag-label", text: tag.name }));
         node.addEventListener("click", () => {
           options.apply(toggleExpressionInSearch(options.getText(), tag.query));
         }, { signal });
         row.append(node);
         entries.push({ tag, node });
       }
-      const edit = el("button", {
+      const edit = buttonEl({
         class: "quick-tag-edit",
-        type: "button",
         text: tags.length === 0 ? "+ Quick tags" : "Edit tags",
         title: "Edit quick tags",
         "aria-haspopup": "dialog",
@@ -10415,9 +10303,8 @@ ${defaultKeySummary()}`)) {
   }
   function categoryChips(query, ctx) {
     const row = el("div", { class: "cat-row", role: "group", "aria-label": "Categories" });
-    const all = el("button", {
+    const all = buttonEl({
       class: "cat-chip",
-      type: "button",
       "aria-pressed": String(query.cats === 0),
       title: "Enable every category",
       text: "All"
@@ -10430,9 +10317,8 @@ ${defaultKeySummary()}`)) {
     row.append(all);
     for (const category of CATEGORIES) {
       const enabled = (query.cats & category.bit) === 0;
-      const chip = el("button", {
+      const chip = buttonEl({
         class: `cat-chip ${category.cls}`,
-        type: "button",
         "aria-pressed": String(enabled),
         title: enabled ? `Disable ${category.name}` : `Enable ${category.name}`,
         text: category.name
@@ -10585,12 +10471,12 @@ ${defaultKeySummary()}`)) {
       saveListFilters(next);
       ctx.navigate(buildSearchUrl(next));
     };
-    const applyButton = el("button", {
+    const applyButton = buttonEl({
       class: "btn btn-small",
       type: "submit",
       text: "Apply"
     });
-    const reset = el("button", { class: "btn btn-ghost btn-small", type: "button", text: "Reset" });
+    const reset = buttonEl({ class: "btn btn-ghost btn-small", text: "Reset" });
     reset.addEventListener("click", () => {
       const next = { ...query, ...emptyAdvancedFilters() };
       saveListFilters(next);
@@ -10802,16 +10688,11 @@ ${defaultKeySummary()}`)) {
     const hasEnable = tagset.fields.some((field) => field.name === "tagset_enable");
     const error = el("p", { class: "my-tags-tagset-error", role: "alert" });
     error.hidden = true;
-    const saveButton = el("button", {
+    const saveButton = buttonEl({
       class: "btn btn-primary my-tags-tagset-save",
-      type: "button",
       text: "Save tag set"
     });
-    const renameButton = el("button", {
-      class: "btn my-tags-tagset-rename",
-      type: "button",
-      text: "Rename tag set"
-    });
+    const renameButton = buttonEl({ class: "btn my-tags-tagset-rename", text: "Rename tag set" });
     let busy = false;
     const submit = async (change, message) => {
       if (busy) {
@@ -11018,7 +10899,7 @@ ${defaultKeySummary()}`)) {
       const inputs = tagInputs(null, false, ctx.signal);
       const error = el("p", { class: "my-tags-error", role: "alert" });
       error.hidden = true;
-      const submit = el("button", {
+      const submit = buttonEl({
         class: "btn btn-primary my-tags-add-submit",
         type: "submit",
         text: "Add tag"
@@ -11086,11 +10967,7 @@ ${defaultKeySummary()}`)) {
         "data-tag-name": tag.name.toLowerCase()
       }, el("div", { class: "my-tags-row-head" }, el("span", { class: "my-tags-row-name", text: tag.name }), summary), inputs.node, error);
       if (credentials !== null) {
-        const save = el("button", {
-          class: "btn btn-small my-tags-save",
-          type: "button",
-          text: "Save"
-        });
+        const save = buttonEl({ class: "btn btn-small my-tags-save", text: "Save" });
         const actions = el("div", { class: "my-tags-row-actions" }, save);
         row.append(actions);
         let busy = false;
@@ -11444,9 +11321,8 @@ ${defaultKeySummary()}`)) {
       return KEY_ACTIONS.find((field) => field.action === action)?.label ?? action;
     }
     function captureButton(action, label) {
-      const button = el("button", {
+      const button = buttonEl({
         class: "settings-key-capture",
-        type: "button",
         text: "Add key",
         "aria-label": `Add a key for ${label}`
       });
@@ -11491,9 +11367,8 @@ ${defaultKeySummary()}`)) {
     }
     function renderKeymap() {
       const rows = KEY_ACTIONS.map(({ action, label }) => {
-        const keys = keymapDraft[action].map((key) => el("span", { class: "settings-key" }, el("span", { class: "settings-key-name", text: keyLabel(key) }), el("button", {
+        const keys = keymapDraft[action].map((key) => el("span", { class: "settings-key" }, el("span", { class: "settings-key-name", text: keyLabel(key) }), buttonEl({
           class: "settings-key-remove",
-          type: "button",
           text: "×",
           "aria-label": `Remove ${keyLabel(key)} from ${label}`,
           onclick: () => removeKey(action, key)
@@ -11607,17 +11482,9 @@ ${defaultKeySummary()}`)) {
       setStatus(statusNode, "Imported settings; review the values and press Apply.");
       change();
     }
-    const exportButton = el("button", {
-      class: "btn btn-ghost settings-export",
-      type: "button",
-      text: "Export JSON"
-    });
+    const exportButton = buttonEl({ class: "btn btn-ghost settings-export", text: "Export JSON" });
     exportButton.addEventListener("click", exportSettings);
-    const importButton = el("button", {
-      class: "btn btn-ghost settings-import",
-      type: "button",
-      text: "Import JSON"
-    });
+    const importButton = buttonEl({ class: "btn btn-ghost settings-import", text: "Import JSON" });
     const fileInput = el("input", {
       class: VISUALLY_HIDDEN,
       type: "file",
@@ -11636,9 +11503,8 @@ ${defaultKeySummary()}`)) {
         fileInput.value = "";
       }, () => setStatus(statusNode, "Could not read that file.", true));
     });
-    const keymapReset = el("button", {
+    const keymapReset = buttonEl({
       class: "btn btn-ghost settings-keymap-reset",
-      type: "button",
       text: "Reset keys"
     });
     keymapReset.addEventListener("click", () => {
@@ -11839,9 +11705,8 @@ ${defaultKeySummary()}`)) {
         continue;
       }
       const input = el("input", { type: "hidden", name: field.name, value: field.value });
-      const chip = el("button", {
+      const chip = buttonEl({
         class: `cat-chip ${category.cls}`,
-        type: "button",
         text: category.name,
         title: "Show this category by default"
       });
@@ -11933,16 +11798,8 @@ ${defaultKeySummary()}`)) {
     sectionNodes.push(panel.element);
     jumpLinks.push(jumpLink(USERSCRIPT_SETTINGS_SECTION_ID, "Better EH", sections.length));
     const errorNode = el("p", { class: "settings-error", role: "alert", hidden: "" });
-    const apply = el("button", {
-      class: "btn btn-primary settings-apply",
-      type: "button",
-      text: "Apply"
-    });
-    const reset = el("button", {
-      class: "btn btn-ghost settings-reset",
-      type: "button",
-      text: "Reset"
-    });
+    const apply = buttonEl({ class: "btn btn-primary settings-apply", text: "Apply" });
+    const reset = buttonEl({ class: "btn btn-ghost settings-reset", text: "Reset" });
     const dirtyLabel = el("span", {
       class: "settings-dirty",
       role: "status",
@@ -12167,10 +12024,7 @@ ${defaultKeySummary()}`)) {
     return selected ? `${selected.group} · ${selected.label}` : "All categories";
   }
   function emptyState() {
-    return statePanel({
-      text: "No toplists were found on this page.",
-      actions: [nativePageAction()]
-    });
+    return nativeEmptyPanel("No toplists were found on this page.");
   }
   function categoryBody(data, ctx) {
     if (data.entries.length === 0) {
@@ -12285,7 +12139,7 @@ ${defaultKeySummary()}`)) {
       placeholder: "Search torrents",
       "aria-label": "Search torrents"
     });
-    const submit = el("button", { class: "btn btn-small", type: "submit", text: "Search" });
+    const submit = buttonEl({ class: "btn btn-small", type: "submit", text: "Search" });
     const form = el("form", { class: "torrent-search", role: "search" }, input, submit);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -12296,9 +12150,8 @@ ${defaultKeySummary()}`)) {
   function statusFilter(data, ctx) {
     const group = el("div", { class: "torrent-status", role: "group", "aria-label": "Status" });
     for (const option of STATUS_OPTIONS) {
-      const button = el("button", {
+      const button = buttonEl({
         class: "btn btn-small torrent-filter-btn",
-        type: "button",
         "aria-pressed": String(data.status === option.status),
         text: option.label
       });
@@ -12334,11 +12187,7 @@ ${defaultKeySummary()}`)) {
     if (data.uploaderFilter === null || mineActive(data)) {
       return null;
     }
-    const clear = el("button", {
-      class: "btn btn-ghost btn-small",
-      type: "button",
-      text: "Clear"
-    });
+    const clear = buttonEl({ class: "btn btn-ghost btn-small", text: "Clear" });
     clear.addEventListener("click", () => ctx.navigate(filterUrl(data.url, { mine: false })), {
       signal: ctx.signal
     });
@@ -13562,9 +13411,8 @@ ${defaultKeySummary()}`)) {
         alt: `${data.galleryTitle.primary} — page ${data.counterText}`,
         loading: "lazy"
       });
-      const retry = el("button", {
+      const retry = buttonEl({
         class: "btn btn-small reader-page-retry",
-        type: "button",
         text: "Retry",
         style: "position: absolute; z-index: 1;"
       });
@@ -14373,9 +14221,8 @@ ${defaultKeySummary()}`)) {
       icon("warning"),
       el("span", { class: "eh-banner-text", text: message.text }),
       message.count > 1 ? el("span", { class: "eh-banner-count", text: `×${message.count}` }) : null,
-      el("button", {
+      buttonEl({
         class: "eh-banner-close",
-        type: "button",
         "aria-label": "Dismiss",
         onclick: () => {
           dismiss(message, banner);

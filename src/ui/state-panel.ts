@@ -1,5 +1,5 @@
 import { nativeUrl } from "../routes/identity";
-import { el, icon } from "./dom";
+import { buttonEl, el, icon } from "./dom";
 import type { Child } from "./dom";
 
 interface StateAction {
@@ -28,6 +28,11 @@ export function nativePageAction(href: string = nativeUrl()): StateAction {
   return { label: "Open native page", href, native: true };
 }
 
+/** The dead end whose only action is the site's own page, e.g. an empty listing. */
+export function nativeEmptyPanel(text: string): HTMLElement {
+  return statePanel({ text, actions: [nativePageAction()] });
+}
+
 function actionNode(action: StateAction): HTMLElement {
   const classes = action.primary === true ? "btn btn-primary" : "btn";
   if (action.href !== undefined) {
@@ -41,12 +46,7 @@ function actionNode(action: StateAction): HTMLElement {
       action.label,
     );
   }
-  return el("button", {
-    class: classes,
-    type: "button",
-    text: action.label,
-    onclick: action.onClick,
-  });
+  return buttonEl({ class: classes, text: action.label, onclick: action.onClick });
 }
 
 /**

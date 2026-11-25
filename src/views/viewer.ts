@@ -15,7 +15,7 @@ import shellHtml from "../shell.html" with { type: "text" };
 import type { PageData } from "../types";
 import type { ContinuousStack } from "../ui/continuous-stack";
 import { createContinuousStack } from "../ui/continuous-stack";
-import { el, icon, isEditableTarget } from "../ui/dom";
+import { buttonEl, el, icon, isEditableTarget } from "../ui/dom";
 import { titleNodes } from "../ui/title";
 import { showToast } from "../ui/toast";
 import { applyViewMode, setCursorHidden } from "../view-mode";
@@ -497,9 +497,8 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
       alt: `${data.galleryTitle.primary} — page ${data.counterText}`,
       loading: "lazy",
     });
-    const retry = el("button", {
+    const retry = buttonEl({
       class: "btn btn-small reader-page-retry",
-      type: "button",
       text: "Retry",
       style: "position: absolute; z-index: 1;",
     });

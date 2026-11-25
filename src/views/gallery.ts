@@ -26,7 +26,7 @@ import { fold, parseSearchTerms, tagIdentity, toggleTagInSearch } from "../tags/
 import type { GalleryApiConfig, GalleryData, GalleryThumb, TagRef } from "../types";
 import type { ActionMenuItem } from "../ui/action-menu";
 import { bindContextMenu, openActionMenu } from "../ui/action-menu";
-import { appendChildren, el, icon, tagInput } from "../ui/dom";
+import { appendChildren, buttonEl, el, icon, tagInput } from "../ui/dom";
 import { errorText } from "../ui/error-text";
 import { favoriteButton } from "../ui/favmenu";
 import { createFavoriteState } from "../ui/favorite-state";
@@ -39,7 +39,7 @@ import { createPagedRegion } from "../ui/paged-region";
 import { pager } from "../ui/pager";
 import { openPopup } from "../ui/popup-window";
 import { starRow } from "../ui/stars";
-import { nativePageAction, statePanel } from "../ui/state-panel";
+import { nativeEmptyPanel, nativePageAction } from "../ui/state-panel";
 import { countText } from "../ui/text";
 import { titleNodes } from "../ui/title";
 import { showToast } from "../ui/toast";
@@ -273,11 +273,9 @@ function tagSection(data: GalleryData, actions: TagActions, ctx: ViewContext): T
         bindContextMenu(chip, openMenu, ctx.signal);
         // Touch has no right-click. A visible trigger appears only on coarse/no-hover pointers, so
         // the desktop chip row stays a single line of tags.
-        const trigger = el(
-          "button",
+        const trigger = buttonEl(
           {
             class: "tag-menu-trigger",
-            type: "button",
             "aria-label": `Tag actions for ${tag.name}`,
             "aria-haspopup": "dialog",
             title: "Tag actions",
@@ -304,7 +302,7 @@ function tagSection(data: GalleryData, actions: TagActions, ctx: ViewContext): T
   // The site's own tag form, so adding a tag is not hidden behind the per-tag menu.
   if (actions.config !== null) {
     const input = tagInput("field-input tag-add-input");
-    const submit = el("button", { class: "btn btn-small", type: "submit", text: "Add tags" });
+    const submit = buttonEl({ class: "btn btn-small", type: "submit", text: "Add tags" });
     const form = el("form", { class: "tag-add" }, input, submit);
     let adding = false;
     form.addEventListener(
@@ -464,9 +462,8 @@ function resumeAction(data: GalleryData, ctx: ViewContext): HTMLElement | null {
     el("span", { text: `Resume page ${entry.pageNum}` }),
     icon("arrowRight"),
   );
-  const clear = el("button", {
+  const clear = buttonEl({
     class: "gallery-resume-clear",
-    type: "button",
     text: "×",
     "aria-label": "Clear saved reading position",
     title: "Clear saved reading position",
@@ -633,10 +630,7 @@ export function renderGallery(
 
   const emptyThumbs =
     data.thumbs.length === 0
-      ? statePanel({
-          text: "No page thumbnails found for this gallery.",
-          actions: [nativePageAction()],
-        })
+      ? nativeEmptyPanel("No page thumbnails found for this gallery.")
       : null;
 
   const load =

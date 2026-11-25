@@ -1,4 +1,4 @@
-import { el } from "./dom";
+import { buttonEl, el } from "./dom";
 import { setPageAdvance } from "./page-advance";
 import type { PageCursorState, PageFeedOptions } from "./page-cursor";
 import { createPageCursor } from "./page-cursor";
@@ -62,17 +62,9 @@ export function infiniteScroll<T>({
   signal,
 }: InfiniteScrollOptions<T>): InfiniteScrollHandle {
   const status = el("p", { class: "infinite-status", role: "status" });
-  const retryButton = el("button", {
-    class: "btn btn-small infinite-retry",
-    type: "button",
-    text: "Retry",
-  });
+  const retryButton = buttonEl({ class: "btn btn-small infinite-retry", text: "Retry" });
   retryButton.hidden = true;
-  const more = el("button", {
-    class: "btn btn-small infinite-more",
-    type: "button",
-    text: "Load more",
-  });
+  const more = buttonEl({ class: "btn btn-small infinite-more", text: "Load more" });
   more.hidden = true;
   const element = el("div", { class: "infinite-scroll" }, status, more, retryButton);
   element.hidden = next === null;

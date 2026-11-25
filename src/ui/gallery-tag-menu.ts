@@ -1,7 +1,8 @@
 import type { TagVoteTransports } from "../data/gallery-actions";
 import type { MyTagTransports } from "../data/my-tags";
 import type { TagSign } from "../tags/model";
-import { el, icon, tagInput } from "./dom";
+import { SIGN_PRESENTATION } from "../tags/model";
+import { buttonEl, el, icon, tagInput } from "./dom";
 import { errorText } from "./error-text";
 import { bindPopover, closePopovers } from "./popover";
 import type { PopoverBinding } from "./popover";
@@ -50,31 +51,11 @@ export function openTagMenu(
   const input = tagInput("field-input");
   const extraButtons: HTMLButtonElement[] = [];
   const buttons = {
-    up: el("button", {
-      class: "tag-menu-item",
-      type: "button",
-      text: "Vote up",
-    }),
-    down: el("button", {
-      class: "tag-menu-item",
-      type: "button",
-      text: "Vote down",
-    }),
-    include: el("button", {
-      class: "tag-menu-item",
-      type: "button",
-      text: "Include in search",
-    }),
-    exclude: el("button", {
-      class: "tag-menu-item",
-      type: "button",
-      text: "Exclude from search",
-    }),
-    or: el("button", {
-      class: "tag-menu-item",
-      type: "button",
-      text: "Make optional (OR)",
-    }),
+    up: buttonEl({ class: "tag-menu-item", text: "Vote up" }),
+    down: buttonEl({ class: "tag-menu-item", text: "Vote down" }),
+    include: buttonEl({ class: "tag-menu-item", text: SIGN_PRESENTATION[""].action }),
+    exclude: buttonEl({ class: "tag-menu-item", text: SIGN_PRESENTATION["-"].action }),
+    or: buttonEl({ class: "tag-menu-item", text: SIGN_PRESENTATION["~"].action }),
   };
 
   const setBusy = (busy: boolean): void => {
@@ -152,7 +133,7 @@ export function openTagMenu(
   buttons.exclude.addEventListener("click", () => applySign("-"));
   buttons.or.addEventListener("click", () => applySign("~"));
 
-  form.append(input, el("button", { class: "btn btn-small", type: "submit", text: "Add tags" }));
+  form.append(input, buttonEl({ class: "btn btn-small", type: "submit", text: "Add tags" }));
   form.addEventListener(
     "submit",
     (event) => {
@@ -168,7 +149,7 @@ export function openTagMenu(
 
   const myTagButtons: HTMLButtonElement[] = [];
   if (handlers.watchTag) {
-    const watch = el("button", { class: "tag-menu-item", type: "button", text: "Watch tag" });
+    const watch = buttonEl({ class: "tag-menu-item", text: "Watch tag" });
     watch.addEventListener("click", () => {
       const runWatch = handlers.watchTag;
       if (runWatch) {
@@ -179,7 +160,7 @@ export function openTagMenu(
     myTagButtons.push(watch);
   }
   if (handlers.hideTag) {
-    const hide = el("button", { class: "tag-menu-item", type: "button", text: "Hide tag" });
+    const hide = buttonEl({ class: "tag-menu-item", text: "Hide tag" });
     hide.addEventListener("click", () => {
       const runHide = handlers.hideTag;
       if (runHide) {
@@ -204,11 +185,7 @@ export function openTagMenu(
       "aria-label": "Tag highlight colour",
       title: "Highlight colour",
     });
-    const apply = el("button", {
-      class: "tag-menu-item",
-      type: "button",
-      text: "Apply colour",
-    });
+    const apply = buttonEl({ class: "tag-menu-item", text: "Apply colour" });
     extraButtons.push(apply);
     apply.addEventListener("click", () => {
       const runColor = handlers.colorTag;

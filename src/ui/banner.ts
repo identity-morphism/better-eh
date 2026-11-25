@@ -1,4 +1,4 @@
-import { appendChildren, el, icon } from "./dom";
+import { appendChildren, buttonEl, el, icon } from "./dom";
 
 interface Message {
   text: string;
@@ -41,11 +41,9 @@ function build(message: Message): HTMLElement {
     icon("warning"),
     el("span", { class: "eh-banner-text", text: message.text }),
     message.count > 1 ? el("span", { class: "eh-banner-count", text: `×${message.count}` }) : null,
-    el(
-      "button",
+    buttonEl(
       {
         class: "eh-banner-close",
-        type: "button",
         "aria-label": "Dismiss",
         onclick: () => {
           dismiss(message, banner);

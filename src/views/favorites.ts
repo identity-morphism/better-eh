@@ -5,7 +5,7 @@ import { formatPageRange } from "../parse/gallery";
 import { SITE_PATHS } from "../site";
 import type { ListItem } from "../types";
 import { createCardGrid } from "../ui/card-grid";
-import { el } from "../ui/dom";
+import { buttonEl, el } from "../ui/dom";
 import { errorText } from "../ui/error-text";
 import { trackScrollEdges } from "../ui/jump-row";
 import { listHeader } from "../ui/list-header";
@@ -197,19 +197,10 @@ export function renderFavorites(
   const statusText = el("span", { class: "favorites-bulk-status", role: "status" });
   statusText.hidden = true;
 
-  const retryButton = el("button", {
-    class: "btn btn-small favorites-retry",
-    type: "button",
-    text: "Retry",
-  });
-  const removeButton = el("button", {
-    class: "btn btn-small favorites-delete",
-    type: "button",
-    text: "Delete",
-  });
-  const moveButton = el("button", {
+  const retryButton = buttonEl({ class: "btn btn-small favorites-retry", text: "Retry" });
+  const removeButton = buttonEl({ class: "btn btn-small favorites-delete", text: "Delete" });
+  const moveButton = buttonEl({
     class: "btn btn-small favorites-move",
-    type: "button",
     text: "Move to…",
     "aria-haspopup": "menu",
     "aria-expanded": "false",
@@ -320,9 +311,8 @@ export function renderFavorites(
     }
 
     for (const folder of data.folders) {
-      const choice = el(
-        "button",
-        { class: "favorites-move-item", type: "button", role: "menuitem" },
+      const choice = buttonEl(
+        { class: "favorites-move-item", role: "menuitem" },
         el("span", { class: "favorites-move-name", text: folder.name }),
         el("span", { class: "favorites-move-count", text: String(folder.count) }),
       );
@@ -496,10 +486,7 @@ export function renderFavorites(
     placeholder: "Search favorites",
     "aria-label": "Search favorites",
   });
-  search.append(
-    searchInput,
-    el("button", { class: "btn btn-small", type: "submit", text: "Search" }),
-  );
+  search.append(searchInput, buttonEl({ class: "btn btn-small", type: "submit", text: "Search" }));
   search.addEventListener(
     "submit",
     (event) => {

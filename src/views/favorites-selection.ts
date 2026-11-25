@@ -1,3 +1,6 @@
+import type { Unsubscribe } from "../emitter";
+import { createEmitter } from "../emitter";
+
 /** Bulk-selection state for the favorites grid: chosen gids, range anchor and select-all. */
 
 /** Modifiers reported by one card checkbox change. */
@@ -31,7 +34,7 @@ export interface FavoritesSelection {
   /** Clear the selection and the anchor. */
   clear(): void;
   /** Observe mutations; returns the unsubscribe function. */
-  subscribe(listener: () => void): () => void;
+  subscribe(listener: () => void): Unsubscribe;
 }
 
 /** Create the selection for one page's gids, kept in the order they were rendered. */
@@ -39,13 +42,11 @@ export function createSelection(gids: readonly string[]): FavoritesSelection {
   const order = [...gids];
   const positions = new Map(order.map((gid, index) => [gid, index]));
   const chosen = new Set<string>();
-  const listeners = new Set<() => void>();
+  const selectionChanged = createEmitter<void>();
   let anchor: number | null = null;
 
   const notify = (): void => {
-    for (const listener of listeners) {
-      listener();
-    }
+    selectionChanged.emit();
   };
 
   return {
@@ -120,10 +121,7 @@ export function createSelection(gids: readonly string[]): FavoritesSelection {
       }
     },
     subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return selectionChanged.subscribe(listener);
     },
   };
 }

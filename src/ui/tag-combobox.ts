@@ -22,7 +22,7 @@ import type { SearchTerm, TagSign } from "../tags/model";
 import { removeTerm, replaceTerm } from "../tags/model";
 import { buildSuggestions, effectiveSign, suggestionInsertion } from "../tags/suggest";
 import type { Suggestion, SuggestResult } from "../tags/suggest";
-import { el } from "./dom";
+import { buttonEl, el } from "./dom";
 import { openPopover } from "./popover";
 import type { Popover } from "./popover";
 import { countText } from "./text";
@@ -516,9 +516,8 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       text: "↑↓ move · Enter apply · Ctrl/Cmd exclude",
     });
 
-    excludeButton = el("button", {
+    excludeButton = buttonEl({
       class: "tag-combobox-exclude tag-combobox-exclude-toggle",
-      type: "button",
       tabindex: "-1",
       "aria-pressed": "false",
       title: "Apply the next tag as an exclusion (hold Ctrl/Cmd)",
@@ -532,9 +531,8 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       render();
     });
 
-    retryButton = el("button", {
+    retryButton = buttonEl({
       class: "tag-combobox-exclude is-retry",
-      type: "button",
       tabindex: "-1",
       text: "Retry",
       hidden: "hidden",

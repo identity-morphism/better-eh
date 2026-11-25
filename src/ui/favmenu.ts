@@ -2,7 +2,7 @@ import { getFavoriteNote, getFolders, setFavorite } from "../data/favorites";
 import type { FavoriteFolder } from "../data/favorites";
 import { isLoggedIn } from "../session";
 import { galleryPopupUrl, SITE_PATHS, siteUrl } from "../site";
-import { el, icon } from "./dom";
+import { buttonEl, el, icon } from "./dom";
 import { errorText } from "./error-text";
 import type { FavoriteSnapshot, FavoriteState } from "./favorite-state";
 import { announceInto } from "./live-region";
@@ -194,11 +194,9 @@ export function openFavoriteMenu(options: FavoriteMenuOptions): void {
     for (const folder of folders) {
       const current = isCurrentFavoriteFolder(folder, snapshot);
       grid.append(
-        el(
-          "button",
+        buttonEl(
           {
             class: current ? "fav-item is-current" : "fav-item",
-            type: "button",
             "aria-current": current ? "true" : null,
             onclick: () => {
               void apply(folder);
@@ -214,11 +212,9 @@ export function openFavoriteMenu(options: FavoriteMenuOptions): void {
 
     if (snapshot.favorited !== false) {
       content.append(
-        el(
-          "button",
+        buttonEl(
           {
             class: "fav-item fav-remove",
-            type: "button",
             onclick: () => {
               void apply(null);
             },
@@ -302,9 +298,8 @@ export function openFavoriteMenu(options: FavoriteMenuOptions): void {
 
 /** A star button wired to the favorite menu. */
 export function favoriteButton(state: FavoriteState, signal?: AbortSignal): HTMLButtonElement {
-  const button = el("button", {
+  const button = buttonEl({
     class: "fav-btn",
-    type: "button",
     "aria-label": "Favorite",
     "aria-haspopup": "dialog",
     "aria-expanded": "false",
