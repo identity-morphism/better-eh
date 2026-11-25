@@ -6,6 +6,8 @@
  * forces an exact tag match and is kept inside the quotes, matching the site's own tag links.
  */
 
+import { collapseWhitespace } from "../strings";
+
 export type TagSign = "" | "~" | "-";
 
 export interface TagNamespace {
@@ -57,7 +59,7 @@ export function fold(text: string): string {
 
 /** Normalize a raw tag key the same way for downloads, caches, and the compact asset. */
 export function cleanTagKey(key: string): string {
-  return key.replace(/_/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
+  return collapseWhitespace(key.replace(/_/gu, " ")).toLowerCase();
 }
 
 /** Canonical matching form of a tag key: cleaned, accent-folded and lowercased. */
@@ -292,7 +294,7 @@ export function setTermSign(text: string, term: SearchTerm, sign: TagSign): stri
 
 /** Serialize a tag with the site's exact-match syntax, preferring the short namespace alias. */
 export function formatTagToken(ns: string, key: string, sign: TagSign = ""): string {
-  const value = key.trim().replace(/\s+/gu, " ");
+  const value = collapseWhitespace(key);
   const prefix = tagNamespace(ns)?.alias ?? ns;
   const body = /\s/u.test(value) ? `"${value}$"` : `${value}$`;
   return `${sign}${prefix}:${body}`;

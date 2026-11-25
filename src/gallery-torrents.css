@@ -41,15 +41,15 @@ a.gallery-torrent-name:hover {
 }
 
 .gallery-torrent-meta-item {
-  @apply flex items-baseline gap-1;
+  @apply flex-row items-baseline gap-1;
 }
 
-.gallery-torrent-meta-label {
-  @apply text-muted;
+.gallery-torrent-meta-item .fact-label {
+  @apply text-meta normal-case tracking-normal;
 }
 
-.gallery-torrent-meta-value {
-  @apply text-fg tabular-nums;
+.gallery-torrent-meta-item .fact-value {
+  @apply text-meta font-normal text-fg tabular-nums;
 }
 
 .gallery-torrent-details {
@@ -61,11 +61,15 @@ a.gallery-torrent-name:hover {
 }
 
 .gallery-torrent-info-row {
-  @apply flex flex-wrap items-baseline gap-x-2 gap-y-1 text-control;
+  @apply flex-row flex-wrap items-baseline gap-x-2 gap-y-1;
 }
 
-.gallery-torrent-info-label {
-  @apply text-muted;
+.gallery-torrent-info-row .fact-label {
+  @apply text-control normal-case tracking-normal;
+}
+
+.gallery-torrent-info-row .fact-value {
+  @apply text-control font-normal;
 }
 
 .gallery-torrent-info-link {

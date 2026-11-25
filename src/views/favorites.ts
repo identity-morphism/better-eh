@@ -1,6 +1,8 @@
 import { deleteFavorites, moveFavorites } from "../data/favorites";
 import type { FavoriteOrder, FavoritesPage } from "../parse/favorites";
+import { orderParam } from "../parse/favorites";
 import { formatPageRange } from "../parse/gallery";
+import { SITE_PATHS } from "../site";
 import type { ListItem } from "../types";
 import { createCardGrid } from "../ui/card-grid";
 import { el } from "../ui/dom";
@@ -17,9 +19,6 @@ import { showToast } from "../ui/toast";
 import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
 import { createSelection } from "./favorites-selection";
-
-const FAVORITES_PATH = "/favorites.php";
-const ORDER_PARAM: Record<FavoriteOrder, string> = { published: "fs_p", favorited: "fs_f" };
 
 interface BulkAction {
   run: () => Promise<void>;
@@ -116,7 +115,7 @@ function summaryText(data: FavoritesPage): string {
 }
 
 function folderHref(baseUrl: string, active: number | "all"): string {
-  const url = new URL(FAVORITES_PATH, baseUrl);
+  const url = new URL(SITE_PATHS.favorites, baseUrl);
   // Keep the search text and sort order; the folder and every page cursor drop, so switching
   // folders or searching starts at the first page instead of a stale offset.
   for (const [key, value] of new URL(baseUrl).searchParams) {
@@ -132,7 +131,7 @@ function folderHref(baseUrl: string, active: number | "all"): string {
 
 function orderHref(baseUrl: string, active: number | "all", order: FavoriteOrder): string {
   const url = new URL(folderHref(baseUrl, active));
-  url.searchParams.set("inline_set", ORDER_PARAM[order]);
+  url.searchParams.set("inline_set", orderParam(order));
   return url.href;
 }
 

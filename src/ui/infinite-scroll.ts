@@ -1,6 +1,6 @@
 import { el } from "./dom";
 import { setPageAdvance } from "./page-advance";
-import type { CursorPage, PageCursorState } from "./page-cursor";
+import type { PageCursorState, PageFeedOptions } from "./page-cursor";
 import { createPageCursor } from "./page-cursor";
 
 /** How far ahead of the viewport the next page is requested, in CSS pixels. */
@@ -9,15 +9,8 @@ const DEFAULT_ROOT_MARGIN = "800px 0px";
 /** Pages one scroll gesture may chain before the sentinel asks for a deliberate next step. */
 const DEFAULT_MAX_CHAINED_PAGES = 3;
 
-/** Options for the infinite-scroll sentinel. */
-interface InfiniteScrollOptions<T> {
-  /** URL of the page after the rendered one, or null when there is nothing more. */
-  next: string | null;
-  /** Stable identity of an item, so overlapping pages cannot append a card twice. */
-  key: (item: T) => string;
-  /** Keys already rendered by the initial page. */
-  initialKeys?: readonly string[];
-  load: (url: string, signal: AbortSignal) => Promise<CursorPage<T>>;
+/** Options for the infinite-scroll sentinel: the feed contract plus its own presentation. */
+interface InfiniteScrollOptions<T> extends PageFeedOptions<T> {
   /** Append one page's fresh items to the view. */
   append: (items: readonly T[]) => void;
   /** Plural subject for the failure line, e.g. "galleries". */

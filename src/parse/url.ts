@@ -39,6 +39,33 @@ export function galleryIdentity(
   return { gid: match[1], token: match[2] };
 }
 
+/** In-app address of one gallery. */
+export function galleryHref({ gid, token }: GalleryIdentity): string {
+  return `/g/${gid}/${token}/`;
+}
+
+/** In-app torrent list for one gallery. */
+export function galleryTorrentsHref({ gid, token }: GalleryIdentity): string {
+  return `/gallerytorrents.php?gid=${gid}&t=${token}`;
+}
+
+/**
+ * Gallery identity carried as query values, or null when either value is not gallery-shaped.
+ *
+ * The popups spell the token parameter differently (`token` on the archiver, `t` on the torrent
+ * list), so the caller names both keys.
+ */
+export function queryGalleryIdentity(
+  url: string,
+  gidParam: string,
+  tokenParam: string,
+): GalleryIdentity | null {
+  const parsed = safeUrl(url);
+  const gid = parsed?.searchParams.get(gidParam) ?? "";
+  const token = parsed?.searchParams.get(tokenParam) ?? "";
+  return GALLERY_PATH.test(galleryHref({ gid, token })) ? { gid, token } : null;
+}
+
 /**
  * Gallery id from any gallery-shaped link.
  *

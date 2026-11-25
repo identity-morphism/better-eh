@@ -4,6 +4,7 @@ import type { ArchiveCost, ArchiveOption, ArchivePage } from "../parse/archive";
 import { nativeUrl } from "../routes/identity";
 import { appendChildren, el } from "../ui/dom";
 import { errorText } from "../ui/error-text";
+import { factRow } from "../ui/fact-row";
 import { listHeader } from "../ui/list-header";
 import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
@@ -52,15 +53,6 @@ function unavailableNote(option: ArchiveOption): string | null {
     case "gp":
       return "The site does not offer this download for the gallery.";
   }
-}
-
-function metaItem(label: string, value: string): HTMLElement {
-  return el(
-    "div",
-    { class: "archive-option-meta-item" },
-    el("span", { class: "archive-option-meta-label", text: label }),
-    el("span", { class: "archive-option-meta-value", text: value }),
-  );
 }
 
 interface OptionControl {
@@ -137,8 +129,8 @@ function optionCard(
     el(
       "div",
       { class: "archive-option-meta" },
-      metaItem("Size", option.size ?? "N/A"),
-      metaItem("Cost", cost),
+      factRow("Size", option.size ?? "N/A"),
+      factRow("Cost", cost),
     ),
     option.cost.kind === "gp"
       ? el("p", {

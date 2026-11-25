@@ -1,8 +1,9 @@
-import { memberId } from "../data/favorites";
 import type { TorrentPage, TorrentRow, TorrentStatus } from "../parse/torrents";
+import { memberId } from "../session";
+import { SITE_PATHS } from "../site";
 import { el, searchInput } from "../ui/dom";
 import { listHeader } from "../ui/list-header";
-import { pageHref, pager } from "../ui/pager";
+import { numberedPager } from "../ui/pager";
 import { nativePageAction, statePanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
 import { siteNav } from "../ui/topbar";
@@ -359,7 +360,9 @@ export function renderTorrents(host: HTMLElement, data: TorrentPage, ctx: ViewCo
             ? "No torrents match this filter."
             : "No torrents were found on this page.",
           actions: [
-            ...(filtered ? [{ label: "Clear filters", primary: true, href: "/torrents.php" }] : []),
+            ...(filtered
+              ? [{ label: "Clear filters", primary: true, href: SITE_PATHS.torrents }]
+              : []),
             nativePageAction(),
           ],
         })
@@ -371,19 +374,13 @@ export function renderTorrents(host: HTMLElement, data: TorrentPage, ctx: ViewCo
   const total = data.pages[data.pages.length - 1] ?? data.page;
   if (total > 1) {
     host.append(
-      pager({
+      numberedPager({
+        baseUrl: data.url,
+        page: data.page,
+        total,
+        param: "page",
         label: "Torrent pages",
-        prev: null,
-        next: null,
-        pages: {
-          current: data.page,
-          total,
-          href: (page) => pageHref(data.url, page, "page"),
-        },
-        jump: {
-          current: data.page,
-          go: (page) => ctx.navigate(pageHref(data.url, page, "page")),
-        },
+        navigate: ctx.navigate,
       }),
     );
   }

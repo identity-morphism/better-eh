@@ -3,7 +3,14 @@ import { filterByDateRange, isDateRangeActive, withDateRange } from "../data/lis
 import { isListPanelOpen, saveListFilters, setListPanelOpen } from "../data/list-filters";
 import { seekHref } from "../data/list-seek";
 import type { SearchQuery } from "../parse/query";
-import { buildSearchUrl, CATEGORIES, singleCategoryName, tagTokenFromHref } from "../parse/query";
+import {
+  buildSearchUrl,
+  CATEGORIES,
+  emptyAdvancedFilters,
+  emptySearchQuery,
+  singleCategoryName,
+  tagTokenFromHref,
+} from "../parse/query";
 import type { ListScope } from "../router";
 import {
   getSearchDraft,
@@ -12,11 +19,13 @@ import {
   setSearchQuery,
   subscribeSearchDraft,
 } from "../search-draft";
+import { FRONT_PATH } from "../site";
 import type { ListItem, ListPageData } from "../types";
 import { createCardGrid } from "../ui/card-grid";
 import { el, icon } from "../ui/dom";
 import { createSelect } from "../ui/form-controls";
 import { listHeader } from "../ui/list-header";
+import type { PageSource } from "../ui/page-cursor";
 import { createPagedRegion } from "../ui/paged-region";
 import { pager } from "../ui/pager";
 import { renderQuickTags } from "../ui/quick-tags";
@@ -25,7 +34,7 @@ import { resultCard } from "../ui/result-card";
 import { nativePageAction, statePanel } from "../ui/state-panel";
 import { countText, plural } from "../ui/text";
 import { renderTopbar } from "../ui/topbar";
-import type { PageSource, ViewContext } from "./context";
+import type { ViewContext } from "./context";
 
 /** Optional route-owned page source so tests can drive appended pages without the network. */
 interface ListViewDeps {
@@ -296,19 +305,7 @@ function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
   reset.addEventListener(
     "click",
     () => {
-      const next = {
-        ...query,
-        rating: 0,
-        pageFrom: "",
-        pageTo: "",
-        since: "",
-        until: "",
-        expunged: false,
-        torrent: false,
-        disableLanguage: false,
-        disableUploader: false,
-        disableTags: false,
-      };
+      const next = { ...query, ...emptyAdvancedFilters() };
       saveListFilters(next);
       ctx.navigate(buildSearchUrl(next));
     },
@@ -521,23 +518,8 @@ export function renderList(
   const footer = el("div");
 
   const clearFilters = (): void => {
-    const cleared = {
-      ...urlQuery,
-      text: "",
-      cats: 0,
-      rating: 0,
-      expunged: false,
-      torrent: false,
-      pageFrom: "",
-      pageTo: "",
-      since: "",
-      until: "",
-      disableLanguage: false,
-      disableUploader: false,
-      disableTags: false,
-    };
-    saveListFilters(cleared);
-    ctx.navigate("/");
+    saveListFilters(emptySearchQuery());
+    ctx.navigate(FRONT_PATH);
   };
 
   const canReset =

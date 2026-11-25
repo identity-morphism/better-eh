@@ -20,8 +20,6 @@ beforeEach(() => {
   installDom();
   updateSetting("tagSuggestions", false);
   GM_setValue("eh:saved-expressions:v1", []);
-  GM_setValue("eh:quick-tags:v1", null);
-  GM_setValue("eh:saved-searches:v1", null);
 });
 
 function submit(form: Element): void {

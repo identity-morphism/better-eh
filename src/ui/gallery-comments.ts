@@ -1,5 +1,9 @@
-import type { GalleryPost } from "../data/gallery-actions";
-import { editComment as postCommentEdit, voteComment } from "../data/gallery-actions";
+import type { CommentTransports } from "../data/gallery-actions";
+import {
+  editComment as postCommentEdit,
+  postComment as postCommentRequest,
+  voteComment,
+} from "../data/gallery-actions";
 import type { GalleryApiConfig, GalleryComment, GalleryData } from "../types";
 import { appendChildren, el } from "./dom";
 import { errorText } from "./error-text";
@@ -11,15 +15,7 @@ function isAborted(signal: AbortSignal): boolean {
 }
 
 /** Transports and defaults for one comment section render. */
-export interface CommentSectionDeps {
-  post?: GalleryPost;
-  postComment: (url: string, text: string, signal?: AbortSignal) => Promise<void>;
-  editComment?: (
-    url: string,
-    commentId: number,
-    text: string,
-    signal?: AbortSignal,
-  ) => Promise<void>;
+export interface CommentSectionDeps extends CommentTransports {
   /** Re-read the gallery after a mutation and re-render the comments from the fresh page. */
   refresh: () => Promise<void>;
 }
@@ -259,6 +255,7 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
   const section = el("section", { class: "gallery-comments", "aria-label": "Comments" });
   const list = el("div", { class: "comment-list" });
   const edit = deps.editComment ?? postCommentEdit;
+  const postComment = deps.postComment ?? postCommentRequest;
 
   section.append(
     el("h2", { class: "comments-title", text: `Comments (${data.comments.length})` }),
@@ -337,7 +334,7 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
 
       void (async () => {
         try {
-          await deps.postComment(data.url, text, signal);
+          await postComment(data.url, text, signal);
           if (signal.aborted) {
             return;
           }

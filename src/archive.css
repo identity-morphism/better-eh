@@ -21,19 +21,6 @@
   @apply flex flex-wrap gap-x-8 gap-y-2;
 }
 
-.archive-option-meta-item {
-  @apply flex flex-col gap-0.5;
-}
-
-.archive-option-meta-label {
-  @apply text-meta text-muted uppercase;
-  letter-spacing: 0.06em;
-}
-
-.archive-option-meta-value {
-  @apply text-body font-semibold;
-}
-
 .archive-option-note {
   @apply m-0 text-meta text-muted;
 }

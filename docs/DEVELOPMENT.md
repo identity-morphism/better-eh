@@ -119,8 +119,8 @@ this script), and any minifier would break the unminified requirement.
 
 ## Settings & Debugging
 
-- Settings are stored as one versioned `eh:settings:v2` value; legacy `defaultFitHeight`, `debug`,
-  and `keymap` values are migrated on first load.
+- Settings are stored as one versioned `eh:settings:v2` value. An absent or outdated record starts
+  from the schema defaults; the pre-public-release scalar keys are no longer read.
 - Site preferences are **not** ours: `/uconfig.php` renders them in-app, and the model is parsed
   from the live form (`parseUconfig`), so a save posts every field back with only your changes
   applied. Fields the script has never heard of survive the round trip.
@@ -130,8 +130,7 @@ this script), and any minifier would break the unminified requirement.
 - The tag index lives in `eh:tag-index:v2` (refreshed weekly from the compact repository asset),
   tag popularity in `eh:tag-counts:v3` (refreshed weekly from the repository asset), tag usage in
   `eh:tag-usage:v1`, prefix completions in `eh:tag-completions:v1`, recent searches in
-  `eh:search-history:v1`, quick tags in `eh:saved-expressions:v1` (the key keeps its old name;
-  `eh:saved-searches:v1` records import as quick tags and `eh:quick-tags:v1` migrates once),
+  `eh:search-history:v1`, quick tags in `eh:saved-expressions:v1` (the key keeps its old name),
   per-gallery reading
   positions in `eh:resume:v1`, and the tab's current search in `eh:search-context:v1` and its draft
   in `eh:search-draft:v1`. Remembered listing filters use `eh:list-filters:v1`, and the filter

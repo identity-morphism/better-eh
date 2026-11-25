@@ -1,5 +1,5 @@
 import { ParseMismatchError } from "../fetch/errors";
-import { isSiteHost } from "../site";
+import { galleryPopupUrl, isSiteHost } from "../site";
 import type {
   FavoriteMark,
   GalleryActions,
@@ -12,7 +12,7 @@ import type {
   TagGroup,
   TagRef,
 } from "../types";
-import { anchorHref, categoryFromNode, cleanText, parseNumber } from "./helpers";
+import { anchorHref, categoryFromNode, cleanText, parseNumber, parseSignedNumber } from "./helpers";
 import { parseTitle } from "./title";
 import { galleryIdentity, safeUrl } from "./url";
 
@@ -185,16 +185,6 @@ function normalizeBody(text: string): string {
     .trim();
 }
 
-/** Signed score such as `+78` or `-4`; `parseNumber` would drop the sign. */
-function signedNumber(value: string | null | undefined): number | null {
-  const match = /^\s*([+-]?\d[\d,]*)/.exec(value ?? "");
-  if (!match?.[1]) {
-    return null;
-  }
-  const parsed = Number.parseInt(match[1].replace(/,/g, ""), 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 /** The site prints Edit only on the signed-in author's comments, so its presence is the flag. */
 function commentIsEditable(block: Element, id: number): boolean {
   if (block.querySelector(`#comment_edit_${id}, [data-comment-edit="${id}"]`)) {
@@ -233,7 +223,7 @@ function parseComments(doc: Document, url: string): GalleryComment[] {
       authorHref: anchorHref(authorAnchor ?? null, url),
       posted,
       body: normalizeBody(bodyText(body)),
-      score: signedNumber(scoreNode?.textContent),
+      score: parseSignedNumber(scoreNode?.textContent),
       votes: cleanText(voteNode?.textContent) || null,
       uploader: marker !== null,
       editable: commentIsEditable(block, id),
@@ -274,15 +264,10 @@ function parseActions(doc: Document, url: string): GalleryActions {
   const rename = doc.getElementById("renamelink");
   const base = popupBase(scriptValue(doc, "base_url"), url);
   const identity = galleryIdentity(url);
-  const popup = rename ? safeUrl("gallerypopups.php", base) : null;
-
-  let renameHref: string | null = null;
-  if (identity && popup) {
-    popup.searchParams.set("gid", identity.gid);
-    popup.searchParams.set("t", identity.token);
-    popup.searchParams.set("act", "rename");
-    renameHref = popup.href;
-  }
+  const renameHref =
+    identity === null || rename === null
+      ? null
+      : galleryPopupUrl(identity.gid, identity.token, "rename", base);
 
   return {
     archiverHref: popupTarget(doc, "archiver.php", url),

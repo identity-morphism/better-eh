@@ -1,3 +1,4 @@
+import { SITE_PATHS } from "../site";
 import { anchorHref, cleanText, parseNumber } from "./helpers";
 import { parseListPage } from "./list";
 import { pagerArrows, pagerCurrent, pagerPages, pagerTable } from "./pager";
@@ -136,7 +137,7 @@ function catalogueSources(url: string): TabSource[] {
   for (const category of CATEGORIES) {
     for (const period of PERIODS) {
       const key = String(category.base + Number.parseInt(period.digit, 10));
-      const path = `/toplist.php?tl=${key}`;
+      const path = `${SITE_PATHS.toplist}?tl=${key}`;
       sources.push({
         key,
         href: base ? new URL(path, base).href : path,

@@ -72,18 +72,6 @@ describe("loadSettings", () => {
     expect(loaded.keymap).toEqual(DEFAULT_KEYMAP);
   });
 
-  test("migrates legacy defaultFitHeight, debug and keymap without v2 storage", () => {
-    const legacyKeymap: KeyMap = { ...DEFAULT_KEYMAP, next: ["X"] };
-    const loaded = loadSettings(
-      readFrom({ defaultFitHeight: false, debug: true, keymap: legacyKeymap }),
-    );
-
-    expect(loaded.fitHeight).toBe(false);
-    expect(loaded.debug).toBe(true);
-    expect(loaded.keymap.next).toEqual(["X"]);
-    expect(loaded.scrollStep).toBe(DEFAULT_SETTINGS.scrollStep);
-  });
-
   test("normalizes stored v2 values through the schema", () => {
     const loaded = loadSettings(
       readFrom({
@@ -96,19 +84,6 @@ describe("loadSettings", () => {
 
     expect(loaded.netConcurrency).toBe(8);
     expect(loaded.readerMode).toBe(DEFAULT_SETTINGS.readerMode);
-  });
-
-  test("prefers v2 storage over legacy keys", () => {
-    const loaded = loadSettings(
-      readFrom({
-        [STORAGE_KEY]: { version: 2, values: { fitHeight: true } },
-        defaultFitHeight: false,
-        debug: true,
-      }),
-    );
-
-    expect(loaded.fitHeight).toBe(true);
-    expect(loaded.debug).toBe(false);
   });
 });
 

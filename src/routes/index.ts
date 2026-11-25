@@ -28,11 +28,11 @@ import { parseToplist } from "../parse/toplist";
 import { parseTorrents } from "../parse/torrents";
 import { parseUconfig } from "../parse/uconfig";
 import { parseViewer } from "../parse/viewer";
-import { documentTitle } from "../site";
+import { documentTitle, SITE_PATHS } from "../site";
 import type { GalleryThumb, ListItem } from "../types";
-import type { CursorPage } from "../ui/page-cursor";
+import type { CursorPage, PageSource } from "../ui/page-cursor";
 import { renderArchive } from "../views/archive";
-import type { PageSource, ViewContext } from "../views/context";
+import type { ViewContext } from "../views/context";
 import { favoritesLabels, renderFavorites } from "../views/favorites";
 import { renderGallery } from "../views/gallery";
 import { renderGalleryTorrents } from "../views/gallery-torrents";
@@ -47,6 +47,7 @@ import {
   ALL_CATEGORY_BITS,
   categoryPathBit,
   GALLERY_PATH,
+  isPath,
   SCOPE_PATHS,
   UPLOADER_PATH,
   VIEWER_PATH,
@@ -252,7 +253,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     torrents: {
       match: (url) =>
-        url.pathname === "/torrents.php" ? { kind: "torrents", url: url.href } : null,
+        url.pathname === SITE_PATHS.torrents ? { kind: "torrents", url: url.href } : null,
       ...documentView<"torrents">(deps, {
         tag: "torrents",
         parse: parseTorrents,
@@ -263,7 +264,9 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     galleryTorrents: {
       match: (url) =>
-        url.pathname === "/gallerytorrents.php" ? { kind: "galleryTorrents", url: url.href } : null,
+        url.pathname === SITE_PATHS.galleryTorrents
+          ? { kind: "galleryTorrents", url: url.href }
+          : null,
       ...documentView<"galleryTorrents">(deps, {
         tag: "gallery-torrents",
         parse: parseGalleryTorrents,
@@ -275,7 +278,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     archive: {
       match: (url) =>
-        url.pathname === "/archiver.php" ? { kind: "archive", url: url.href } : null,
+        url.pathname === SITE_PATHS.archive ? { kind: "archive", url: url.href } : null,
       ...documentView<"archive">(deps, {
         tag: "archive",
         parse: parseArchivePage,
@@ -287,7 +290,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       }),
     },
     home: {
-      match: (url) => (url.pathname === "/home.php" ? { kind: "home", url: url.href } : null),
+      match: (url) => (url.pathname === SITE_PATHS.home ? { kind: "home", url: url.href } : null),
       ...documentView<"home">(deps, {
         tag: "home",
         parse: parseHome,
@@ -298,7 +301,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     myTags: {
       match: (url) =>
-        /^\/mytags\/?$/u.test(url.pathname) ? { kind: "myTags", url: url.href } : null,
+        isPath(url.pathname, SITE_PATHS.myTags) ? { kind: "myTags", url: url.href } : null,
       ...documentView<"myTags">(deps, {
         tag: "my-tags",
         parse: parseMyTags,
@@ -309,7 +312,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     favorites: {
       match: (url) =>
-        url.pathname === "/favorites.php" ? { kind: "favorites", url: url.href } : null,
+        url.pathname === SITE_PATHS.favorites ? { kind: "favorites", url: url.href } : null,
       ...documentView<"favorites">(deps, {
         tag: "favorites",
         parse: parseFavorites,
@@ -319,7 +322,8 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       }),
     },
     toplist: {
-      match: (url) => (url.pathname === "/toplist.php" ? { kind: "toplist", url: url.href } : null),
+      match: (url) =>
+        url.pathname === SITE_PATHS.toplist ? { kind: "toplist", url: url.href } : null,
       ...documentView<"toplist">(deps, {
         tag: "toplist",
         parse: parseToplist,
@@ -331,7 +335,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     settings: {
       match: (url) =>
-        url.pathname === "/uconfig.php" ? { kind: "settings", url: url.href } : null,
+        url.pathname === SITE_PATHS.uconfig ? { kind: "settings", url: url.href } : null,
       ...documentView<"settings">(deps, {
         tag: "settings",
         // The settings page reads no URL.

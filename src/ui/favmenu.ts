@@ -1,5 +1,7 @@
-import { getFavoriteNote, getFolders, isLoggedIn, setFavorite } from "../data/favorites";
+import { getFavoriteNote, getFolders, setFavorite } from "../data/favorites";
 import type { FavoriteFolder } from "../data/favorites";
+import { isLoggedIn } from "../session";
+import { galleryPopupUrl, SITE_PATHS, siteUrl } from "../site";
 import { el, icon } from "./dom";
 import { errorText } from "./error-text";
 import type { FavoriteSnapshot, FavoriteState } from "./favorite-state";
@@ -143,7 +145,7 @@ export function openFavoriteMenu(options: FavoriteMenuOptions): void {
   activeMenu = { close: () => popover.close(), anchor };
   popover.open();
 
-  const nativeFavoriteUrl = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(state.gid)}&t=${encodeURIComponent(state.token)}&act=addfav`;
+  const nativeFavoriteUrl = galleryPopupUrl(state.gid, state.token, "addfav");
 
   const nativeLink = (label: string): HTMLElement => {
     const link = el(
@@ -230,7 +232,7 @@ export function openFavoriteMenu(options: FavoriteMenuOptions): void {
     content.append(
       el("a", {
         class: "fav-link",
-        href: `${location.origin}/uconfig.php`,
+        href: siteUrl(SITE_PATHS.uconfig),
         "data-native": "",
         target: "_blank",
         rel: "noopener",

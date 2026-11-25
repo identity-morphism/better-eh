@@ -1,3 +1,5 @@
+import type { TagVoteTransports } from "../data/gallery-actions";
+import type { MyTagTransports } from "../data/my-tags";
 import type { TagSign } from "../tags/model";
 import { el, icon, tagInput } from "./dom";
 import { errorText } from "./error-text";
@@ -5,17 +7,11 @@ import { bindPopover, closePopovers } from "./popover";
 import type { PopoverBinding } from "./popover";
 
 /** Callbacks the tag menu invokes. Mutations reject so the panel can report the failure inline. */
-export interface TagMenuHandlers {
-  vote: (tag: string, vote: 1 | -1) => Promise<void>;
-  addTags: (tags: string) => Promise<void>;
+export interface TagMenuHandlers extends TagVoteTransports, MyTagTransports {
   /** Apply a sign to the tag in the draft search; `null` when the tag has no search token. */
   add: (token: string, sign: TagSign) => void;
   /** Exact-match search token for this tag, if the page carried one. */
   token: string | null;
-  /** My Tags mutations; omitted on anonymous pages. */
-  watchTag?: (tag: string) => Promise<void>;
-  hideTag?: (tag: string) => Promise<void>;
-  colorTag?: (tag: string, color: string) => Promise<void>;
 }
 
 function wikiHref(tag: string): string {

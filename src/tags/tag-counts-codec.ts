@@ -1,4 +1,5 @@
 import { bytesFromBase64 } from "./base64";
+import { hasCodecHeader } from "./codec-header";
 import { normaliseTagKey } from "./model";
 
 /**
@@ -139,15 +140,7 @@ export function encodeTagCountsBytes(counts: ReadonlyMap<string, number>): Uint8
 
 /** Decode a raw binary payload; returns `null` for corrupt or unexpected data. */
 export function decodeTagCountsFromBytes(bytes: Uint8Array): TagCounts | null {
-  if (bytes.length < HEADER_BYTES) {
-    return null;
-  }
-  for (let index = 0; index < MAGIC.length; index++) {
-    if (bytes[index] !== MAGIC[index]) {
-      return null;
-    }
-  }
-  if (bytes[4] !== VERSION) {
+  if (!hasCodecHeader(bytes, MAGIC, VERSION, HEADER_BYTES)) {
     return null;
   }
 

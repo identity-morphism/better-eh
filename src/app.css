@@ -407,6 +407,20 @@ input[type="radio"] {
   font-family: inherit;
 }
 
+/* Label/value pairs: archive options, torrent details and their info rows share one shape. */
+.fact-row {
+  @apply flex flex-col gap-0.5;
+}
+
+.fact-label {
+  @apply text-meta text-muted uppercase;
+  letter-spacing: 0.06em;
+}
+
+.fact-value {
+  @apply text-body font-semibold;
+}
+
 .topbar-kbd {
   @apply mr-1;
 }

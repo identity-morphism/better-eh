@@ -1,5 +1,5 @@
 import { anchorHref, cleanText, parseNumber } from "./helpers";
-import { safeUrl } from "./url";
+import { galleryHref, galleryTorrentsHref, queryGalleryIdentity, safeUrl } from "./url";
 
 /** Which archive the site offers for a gallery. */
 export type ArchiveKind = "original" | "resample";
@@ -46,9 +46,6 @@ export interface ArchivePage {
   /** In-app torrent list for the same gallery. */
   torrentsHref: string | null;
 }
-
-const GID = /^\d+$/;
-const GALLERY_TOKEN = /^[0-9a-f]+$/i;
 
 /** Read the strong value after a label, falling back to the label's own inline text. */
 function labelledText(container: Element, label: string): string {
@@ -160,16 +157,10 @@ function parseFunds(doc: Document): ArchivePage["funds"] {
 
 /** The gallery's in-app addresses, when the archiver query names a complete gallery. */
 function galleryLinks(url: string): Pick<ArchivePage, "galleryHref" | "torrentsHref"> {
-  const parsed = safeUrl(url);
-  const gid = parsed?.searchParams.get("gid") ?? "";
-  const token = parsed?.searchParams.get("token") ?? "";
-  if (!GID.test(gid) || !GALLERY_TOKEN.test(token)) {
-    return { galleryHref: null, torrentsHref: null };
-  }
-  return {
-    galleryHref: `/g/${gid}/${token}/`,
-    torrentsHref: `/gallerytorrents.php?gid=${gid}&t=${token}`,
-  };
+  const identity = queryGalleryIdentity(url, "gid", "token");
+  return identity === null
+    ? { galleryHref: null, torrentsHref: null }
+    : { galleryHref: galleryHref(identity), torrentsHref: galleryTorrentsHref(identity) };
 }
 
 /**
