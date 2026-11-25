@@ -4685,27 +4685,21 @@ ${defaultKeySummary()}`)) {
     return row;
   }
 
-  // src/data/saved-expressions.ts
+  // src/data/quick-tags.ts
   var KEY2 = "eh:saved-expressions:v1";
   var LEGACY_QUICK_TAGS = "eh:quick-tags:v1";
   var LEGACY_SAVED_SEARCHES = "eh:saved-searches:v1";
   var VERSION4 = 1;
-  var EXPRESSION_LIMIT = 30;
+  var QUICK_TAG_LIMIT = 30;
   function normalize2(text) {
     return text.replace(/\s+/gu, " ").trim();
   }
-  function isMode(value) {
-    return value === "run" || value === "toggle";
-  }
-  function expressionMode(mode, pinned) {
-    return pinned ? "toggle" : mode;
-  }
-  function isExpression(value) {
+  function isQuickTag(value) {
     if (typeof value !== "object" || value === null) {
       return false;
     }
     const record = value;
-    return typeof record.name === "string" && typeof record.query === "string" && isMode(record.mode) && typeof record.pinned === "boolean" && typeof record.savedAt === "number";
+    return typeof record.name === "string" && typeof record.query === "string" && typeof record.savedAt === "number";
   }
   var store2 = createStore({ key: KEY2, version: VERSION4, empty: () => [], guard: isUnknownArray }, gmStorage());
   function legacyValues2(key) {
@@ -4732,15 +4726,7 @@ ${defaultKeySummary()}`)) {
       if (query === "") {
         return [];
       }
-      return [
-        {
-          name: normalize2(record.label) || query,
-          query,
-          mode: "toggle",
-          pinned: true,
-          savedAt: 0
-        }
-      ];
+      return [{ name: normalize2(record.label) || query, query, savedAt: 0 }];
     });
     const saved = legacyValues2(LEGACY_SAVED_SEARCHES).flatMap((value) => {
       if (typeof value !== "object" || value === null) {
@@ -4759,8 +4745,6 @@ ${defaultKeySummary()}`)) {
         {
           name,
           query,
-          mode: "run",
-          pinned: false,
           savedAt: typeof record.savedAt === "number" ? record.savedAt : 0
         }
       ];
@@ -4768,12 +4752,12 @@ ${defaultKeySummary()}`)) {
     if (quick.length === 0 && saved.length === 0) {
       return;
     }
-    store2.write([...quick, ...saved].slice(0, EXPRESSION_LIMIT));
+    store2.write([...quick, ...saved].slice(0, QUICK_TAG_LIMIT));
     gmStorage().remove(LEGACY_QUICK_TAGS);
     gmStorage().remove(LEGACY_SAVED_SEARCHES);
   }
   var listeners3 = new Set;
-  function subscribeExpressions(listener) {
+  function subscribeQuickTags(listener) {
     listeners3.add(listener);
     return () => {
       listeners3.delete(listener);
@@ -4784,42 +4768,29 @@ ${defaultKeySummary()}`)) {
       listener();
     }
   }
-  function savedExpressions() {
+  function quickTags() {
     let values = store2.read();
     if (values.length === 0) {
       migrateLegacy();
       values = store2.read();
     }
-    return values.filter(isExpression).map((entry) => {
-      const pinned = entry.pinned;
-      return {
-        name: normalize2(entry.name),
-        query: normalize2(entry.query),
-        mode: expressionMode(entry.mode, pinned),
-        pinned,
-        savedAt: entry.savedAt
-      };
-    }).filter((entry) => entry.name !== "" && entry.query !== "").sort((a, b) => b.savedAt - a.savedAt).slice(0, EXPRESSION_LIMIT);
+    return values.filter(isQuickTag).map((entry) => ({
+      name: normalize2(entry.name),
+      query: normalize2(entry.query),
+      savedAt: entry.savedAt
+    })).filter((entry) => entry.name !== "" && entry.query !== "").sort((a, b) => b.savedAt - a.savedAt).slice(0, QUICK_TAG_LIMIT);
   }
-  function quickExpressions() {
-    return savedExpressions().filter((entry) => entry.pinned && entry.mode === "toggle");
-  }
-  function removeExpression(name) {
+  function removeQuickTag(name) {
     const key = normalize2(name).toLowerCase();
-    store2.write(savedExpressions().filter((entry) => entry.name.toLowerCase() !== key));
+    store2.write(quickTags().filter((entry) => entry.name.toLowerCase() !== key));
     notify2();
   }
-  function replaceExpressions(expressions) {
-    const next = expressions.map((entry) => {
-      const pinned = entry.pinned === true;
-      return {
-        name: normalize2(entry.name),
-        query: normalize2(entry.query),
-        mode: expressionMode(entry.mode, pinned),
-        pinned,
-        savedAt: entry.savedAt
-      };
-    }).filter((entry) => entry.name !== "" && entry.query !== "").slice(0, EXPRESSION_LIMIT);
+  function replaceQuickTags(tags) {
+    const next = tags.map((entry) => ({
+      name: normalize2(entry.name),
+      query: normalize2(entry.query),
+      savedAt: entry.savedAt
+    })).filter((entry) => entry.name !== "" && entry.query !== "").slice(0, QUICK_TAG_LIMIT);
     store2.write(next);
     notify2();
   }
@@ -6413,27 +6384,18 @@ ${defaultKeySummary()}`)) {
     };
   }
 
-  // src/ui/saved-expressions.ts
-  var MODES = [
-    { value: "run", label: "Run search" },
-    { value: "toggle", label: "Toggle terms" }
-  ];
-  var TOGGLE_MODE_INDEX = MODES.findIndex((mode) => mode.value === "toggle");
-  function modeSelect(value, index) {
-    const select = el("select", { class: "field-select expression-mode", "aria-label": `Expression ${index + 1} action` }, ...MODES.map((mode) => el("option", { value: mode.value, text: mode.label, selected: mode.value === value })));
-    return select;
-  }
-  function openExpressionEditor(anchor, signal, onSaved, options = {}) {
-    const draft = savedExpressions().map((entry) => ({ ...entry }));
+  // src/ui/quick-tags-editor.ts
+  function openQuickTagEditor(anchor, signal, onSaved, options = {}) {
+    const draft = quickTags().map((entry) => ({ ...entry }));
     const seed = options.seed?.trim() ?? "";
     if (seed !== "") {
-      draft.push({ name: "", query: seed, mode: "run", pinned: false, savedAt: Date.now() });
+      draft.push({ name: "", query: seed, savedAt: Date.now() });
     }
-    const list = el("div", { class: "expression-list" });
+    const list = el("div", { class: "quick-tag-list" });
     let panel = null;
     let rowSignal = null;
     const focusQuery = (index) => {
-      list.querySelectorAll(".expression-query")[index]?.focus();
+      list.querySelectorAll(".quick-tag-query")[index]?.focus();
     };
     const renderRows = (focusIndex) => {
       rowSignal?.abort();
@@ -6441,10 +6403,10 @@ ${defaultKeySummary()}`)) {
       rowSignal = rows;
       list.replaceChildren(...draft.map((entry, index) => {
         const name = textInput({
-          class: "field-input expression-input expression-name",
+          class: "field-input quick-tag-input quick-tag-name",
           value: entry.name,
           placeholder: "Name",
-          "aria-label": `Expression ${index + 1} name`
+          "aria-label": `Quick tag ${index + 1} name`
         });
         name.addEventListener("input", () => {
           const current = draft[index];
@@ -6453,10 +6415,10 @@ ${defaultKeySummary()}`)) {
           }
         });
         const query = textInput({
-          class: "field-input expression-input expression-query",
+          class: "field-input quick-tag-input quick-tag-query",
           value: entry.query,
           placeholder: 'f:tag$ ~p:"other tag$"',
-          "aria-label": `Expression ${index + 1} search`
+          "aria-label": `Quick tag ${index + 1} search`
         });
         query.addEventListener("input", () => {
           const current = draft[index];
@@ -6467,49 +6429,18 @@ ${defaultKeySummary()}`)) {
         if (getSettings().tagSuggestions) {
           attachTagCombobox({ input: query, signal: rows.signal });
         }
-        const mode = modeSelect(entry.mode, index);
-        const pin = el("input", {
-          type: "checkbox",
-          checked: entry.pinned ? "checked" : null,
-          "aria-label": `Show ${entry.name || "expression"} as a quick tag`
-        });
-        mode.addEventListener("change", () => {
-          const current = draft[index];
-          if (current === undefined) {
-            return;
-          }
-          const next = mode.options[mode.selectedIndex]?.value === "run" ? "run" : "toggle";
-          const pinned = next === "toggle" && current.pinned;
-          draft[index] = { ...current, mode: next, pinned };
-          pin.checked = pinned;
-        });
-        pin.addEventListener("change", () => {
-          const current = draft[index];
-          if (current === undefined) {
-            return;
-          }
-          const pinned = pin.checked === true;
-          draft[index] = {
-            ...current,
-            pinned,
-            mode: pinned ? "toggle" : current.mode
-          };
-          if (pinned) {
-            mode.selectedIndex = TOGGLE_MODE_INDEX;
-          }
-        });
         const remove = el("button", {
-          class: "expression-remove",
+          class: "quick-tag-remove",
           type: "button",
           text: "×",
-          title: "Remove expression",
-          "aria-label": `Remove expression ${index + 1}`
+          title: "Remove quick tag",
+          "aria-label": `Remove quick tag ${index + 1}`
         });
         remove.addEventListener("click", () => {
           draft.splice(index, 1);
           renderRows();
         });
-        return el("div", { class: "expression-row" }, name, query, remove, el("div", { class: "expression-options" }, mode, el("label", { class: "check expression-pin" }, pin, el("span", { text: "Quick tag" }))));
+        return el("div", { class: "quick-tag-row" }, name, query, remove);
       }));
       if (focusIndex !== undefined) {
         focusQuery(focusIndex);
@@ -6521,13 +6452,7 @@ ${defaultKeySummary()}`)) {
       text: "+ Add"
     });
     add.addEventListener("click", () => {
-      draft.push({
-        name: "",
-        query: "",
-        mode: "run",
-        pinned: false,
-        savedAt: Date.now()
-      });
+      draft.push({ name: "", query: "", savedAt: Date.now() });
       renderRows(draft.length - 1);
     });
     const save = el("button", { class: "btn btn-small", type: "submit", text: "Save" });
@@ -6539,13 +6464,13 @@ ${defaultKeySummary()}`)) {
     cancel.addEventListener("click", () => {
       panel?.close();
     });
-    const form = el("form", { class: "expression-editor" }, el("p", { class: "expression-editor-title", text: "Saved searches and quick tags" }), el("p", {
-      class: "expression-editor-hint",
-      text: "Saved searches replace the search. Quick tags toggle their terms and also appear under the search field."
-    }), list, el("div", { class: "expression-editor-actions" }, add, el("span", { class: "expression-editor-spacer" }), cancel, save));
+    const form = el("form", { class: "quick-tag-editor" }, el("p", { class: "quick-tag-editor-title", text: "Quick tags" }), el("p", {
+      class: "quick-tag-editor-hint",
+      text: "Click a quick tag to add its terms to the search, or remove them when all are present."
+    }), list, el("div", { class: "quick-tag-editor-actions" }, add, el("span", { class: "quick-tag-editor-spacer" }), cancel, save));
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      replaceExpressions(draft.map((entry) => ({
+      replaceQuickTags(draft.map((entry) => ({
         ...entry,
         name: entry.name.trim() || entry.query.trim(),
         query: entry.query.trim()
@@ -6557,8 +6482,8 @@ ${defaultKeySummary()}`)) {
     panel = openPopover({
       content: form,
       anchor,
-      label: "Saved searches and quick tags",
-      className: "expression-editor-panel",
+      label: "Quick tags",
+      className: "quick-tag-editor-panel",
       signal,
       autoFocus: true,
       onClose: () => {
@@ -6580,7 +6505,7 @@ ${defaultKeySummary()}`)) {
       class: "topbar-history",
       type: "button",
       "aria-label": "Search history",
-      title: "Recent and saved searches",
+      title: "Recent searches and quick tags",
       "aria-haspopup": "dialog",
       "aria-expanded": "false"
     });
@@ -6611,80 +6536,60 @@ ${defaultKeySummary()}`)) {
         });
         container.append(clear);
       }
-      const saved = savedExpressions();
-      if (saved.length > 0) {
-        container.append(el("h3", { class: "search-history-heading", text: "Saved" }));
+      const tags = quickTags();
+      if (tags.length > 0) {
+        container.append(el("h3", { class: "search-history-heading", text: "Quick tags" }));
         const list = el("div", { class: "search-history-list" });
-        for (const entry of saved) {
-          const row = el("div", { class: "search-history-saved" });
+        for (const entry of tags) {
+          const row = el("div", { class: "search-history-quick-tag" });
           row.append(queryButton(entry.query, entry.name, () => {
             close();
-            if (entry.mode === "toggle") {
-              options.onToggle(entry.query);
-            } else {
-              options.onPick(entry.query);
-            }
+            options.onToggle(entry.query);
           }));
-          const keepsTerms = entry.mode === "toggle";
-          const toggle = el("button", {
-            class: "search-history-toggle",
-            type: "button",
-            text: keepsTerms ? "▶" : "±",
-            "aria-label": `${keepsTerms ? "Run" : "Toggle terms of"} ${entry.name}`,
-            title: keepsTerms ? "Replace the search with these terms" : "Add or remove these terms"
-          });
-          toggle.addEventListener("click", () => {
-            close();
-            if (keepsTerms) {
-              options.onPick(entry.query);
-            } else {
-              options.onToggle(entry.query);
-            }
-          });
           const remove = el("button", {
             class: "search-history-remove",
             type: "button",
             text: "×",
-            "aria-label": `Remove saved search ${entry.name}`,
+            "aria-label": `Remove quick tag ${entry.name}`,
             title: `Remove ${entry.name}`
           });
           remove.addEventListener("click", () => {
-            removeExpression(entry.name);
+            removeQuickTag(entry.name);
             renderInto(container, close);
           });
-          row.append(toggle, remove);
+          row.append(remove);
           list.append(row);
         }
         container.append(list);
         const edit = el("button", {
           class: "search-history-edit",
           type: "button",
-          text: "Edit saved",
-          title: "Edit saved searches and quick tags"
+          text: "Edit quick tags",
+          title: "Edit quick tags"
         });
         edit.addEventListener("click", () => {
-          openExpressionEditor(edit, options.signal, () => {
+          openQuickTagEditor(edit, options.signal, () => {
             renderInto(container, close);
           });
         });
         container.append(edit);
       }
-      if (recent.length === 0 && saved.length === 0) {
+      if (recent.length === 0 && tags.length === 0) {
         container.append(el("p", {
           class: "search-history-empty",
-          text: "No recent searches yet. Queries you submit appear here."
+          text: "No recent searches or quick tags yet."
         }));
       }
       const saveCurrent = el("button", {
         class: "btn btn-small search-history-save-current",
         type: "button",
-        text: "Save current search",
-        title: "Save the current search",
+        text: "Save current as quick tag",
+        title: "Save the current search as a quick tag",
         "aria-haspopup": "dialog",
         "aria-expanded": "false"
       });
       saveCurrent.addEventListener("click", () => {
-        openExpressionEditor(saveCurrent, options.signal, () => {
+        openQuickTagEditor(saveCurrent, options.signal, () => {
           renderInto(container, close);
         }, { seed: options.getQuery() });
       });
@@ -10472,7 +10377,7 @@ ${defaultKeySummary()}`)) {
   // src/ui/quick-tags.ts
   function renderQuickTags(options) {
     const { signal } = options;
-    let tags = quickExpressions();
+    let tags = quickTags();
     let text = options.getText();
     const entries = [];
     const row = el("div", { class: "quick-tags", role: "group", "aria-label": "Quick tags" });
@@ -10499,13 +10404,13 @@ ${defaultKeySummary()}`)) {
         class: "quick-tag-edit",
         type: "button",
         text: tags.length === 0 ? "+ Quick tags" : "Edit tags",
-        title: "Edit saved searches and quick tags",
+        title: "Edit quick tags",
         "aria-haspopup": "dialog",
         "aria-expanded": "false"
       });
       edit.addEventListener("click", () => {
-        openExpressionEditor(edit, signal, () => {
-          tags = quickExpressions();
+        openQuickTagEditor(edit, signal, () => {
+          tags = quickTags();
           render();
         });
       }, { signal });
@@ -10513,8 +10418,8 @@ ${defaultKeySummary()}`)) {
       refresh();
     };
     render();
-    const unsubscribe = subscribeExpressions(() => {
-      tags = quickExpressions();
+    const unsubscribe = subscribeQuickTags(() => {
+      tags = quickTags();
       render();
     });
     signal.addEventListener("abort", unsubscribe, { once: true });
@@ -15088,7 +14993,7 @@ ${defaultKeySummary()}`)) {
     border-color: var(--color-accent);
     color: var(--color-fg);
   }
-  .topbar-clear, .topbar-history, .expression-remove {
+  .topbar-clear, .topbar-history, .quick-tag-remove {
     display: inline-grid;
     cursor: pointer;
     place-items: center;
@@ -15099,7 +15004,7 @@ ${defaultKeySummary()}`)) {
     color: var(--color-muted);
     transition: color 0.15s, background-color 0.15s;
   }
-  .topbar-clear:hover, .topbar-history:hover, .expression-remove:hover {
+  .topbar-clear:hover, .topbar-history:hover, .quick-tag-remove:hover {
     background-color: var(--color-panel-hover);
     color: var(--color-fg);
   }
@@ -15746,10 +15651,10 @@ ${defaultKeySummary()}`)) {
     border-color: var(--color-accent);
     color: var(--color-fg);
   }
-  .expression-editor-panel {
+  .quick-tag-editor-panel {
     max-width: calc(100vw - 2rem);
   }
-  .expression-editor {
+  .quick-tag-editor {
     display: flex;
     width: 460px;
     max-width: 100%;
@@ -15758,63 +15663,47 @@ ${defaultKeySummary()}`)) {
     padding: calc(var(--spacing) * 3);
     font-size: var(--text-control);
   }
-  .expression-editor-title {
+  .quick-tag-editor-title {
     margin: 0px;
     --tw-font-weight: var(--font-weight-semibold);
     font-weight: var(--font-weight-semibold);
     color: var(--color-fg);
   }
-  .expression-editor-hint {
+  .quick-tag-editor-hint {
     margin: 0px;
     font-size: var(--text-meta);
     color: var(--color-muted);
   }
-  .expression-list {
+  .quick-tag-list {
     display: flex;
     max-height: 320px;
     flex-direction: column;
     gap: calc(var(--spacing) * 2);
     overflow-y: auto;
   }
-  .expression-row {
+  .quick-tag-row {
     display: grid;
     grid-template-columns: minmax(72px,0.7fr) minmax(0,1.6fr) auto;
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
   }
-  .expression-options {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    gap: calc(var(--spacing) * 2);
-  }
-  .expression-input {
+  .quick-tag-input {
     width: 100%;
     padding-inline: calc(var(--spacing) * 2);
     font-size: var(--text-meta);
   }
-  .expression-mode {
-    height: calc(var(--spacing) * 7);
-    width: auto;
-    padding-inline: calc(var(--spacing) * 1.5);
-    font-size: var(--text-meta);
-  }
-  .expression-pin {
-    font-size: var(--text-meta);
-    color: var(--color-muted);
-  }
-  .expression-remove {
+  .quick-tag-remove {
     height: calc(var(--spacing) * 6);
     width: calc(var(--spacing) * 6);
     font-size: var(--text-control);
   }
-  .expression-editor-actions {
+  .quick-tag-editor-actions {
     margin-top: var(--spacing);
     display: flex;
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
   }
-  .expression-editor-spacer {
+  .quick-tag-editor-spacer {
     flex: 1;
   }
   .filters {
@@ -17028,7 +16917,7 @@ ${defaultKeySummary()}`)) {
     display: grid;
     gap: var(--spacing);
   }
-  .search-history-saved {
+  .search-history-quick-tag {
     display: flex;
     align-items: stretch;
     gap: var(--spacing);
@@ -17075,7 +16964,7 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-meta);
     color: var(--color-muted);
   }
-  .search-history-remove, .search-history-toggle {
+  .search-history-remove {
     width: calc(var(--spacing) * 7);
     flex-shrink: 0;
     background-color: transparent;
@@ -17087,11 +16976,6 @@ ${defaultKeySummary()}`)) {
   .search-history-remove:hover, .search-history-remove:focus-visible {
     background-color: var(--color-panel);
     color: var(--color-danger-text);
-    border-color: var(--color-accent);
-  }
-  .search-history-toggle:hover, .search-history-toggle:focus-visible {
-    background-color: var(--color-panel);
-    color: var(--color-accent-text);
     border-color: var(--color-accent);
   }
   .search-history-edit {

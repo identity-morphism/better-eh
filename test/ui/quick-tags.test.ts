@@ -1,21 +1,15 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import {
-  replaceExpressions,
-  type SavedExpression,
-  savedExpressions,
-} from "../../src/data/saved-expressions";
+import { type QuickTag, quickTags, replaceQuickTags } from "../../src/data/quick-tags";
 import { updateSetting } from "../../src/settings";
 import { closePopovers } from "../../src/ui/popover";
 import { renderQuickTags } from "../../src/ui/quick-tags";
 import { installDom } from "./dom";
 
-function expression(patch: Partial<SavedExpression> = {}): SavedExpression {
+function tag(patch: Partial<QuickTag> = {}): QuickTag {
   return {
     name: "TAGS",
     query: "f:keyword$",
-    mode: "run",
-    pinned: true,
     savedAt: 1,
     ...patch,
   };
@@ -35,7 +29,7 @@ function submit(form: Element): void {
 }
 
 describe("quick tags", () => {
-  test("saves an edited expression and applies it to the draft", () => {
+  test("saves an edited quick tag and applies it to the draft", () => {
     const searched: string[] = [];
     const handle = renderQuickTags({
       getText: () => "cat",
@@ -45,27 +39,28 @@ describe("quick tags", () => {
 
     handle.element.querySelector<HTMLButtonElement>(".quick-tag-edit")?.click();
 
-    const panel = document.querySelector(".expression-editor-panel");
+    const panel = document.querySelector(".quick-tag-editor-panel");
     if (!panel) {
       throw new Error("editor did not open");
     }
+    // Quick tags only toggle, so the editor has no run/toggle or pin controls.
+    expect(panel.querySelector("select")).toBeNull();
+    expect(panel.querySelector("input[type='checkbox']")).toBeNull();
+
     const add = [...panel.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "+ Add",
     );
     add?.click();
 
-    const name = panel.querySelector<HTMLInputElement>(".expression-name");
-    const query = panel.querySelector<HTMLInputElement>(".expression-query");
-    const pin = panel.querySelector<HTMLInputElement>(".expression-pin input");
-    if (!name || !query || !pin) {
+    const name = panel.querySelector<HTMLInputElement>(".quick-tag-name");
+    const query = panel.querySelector<HTMLInputElement>(".quick-tag-query");
+    if (!name || !query) {
       throw new Error("editor row missing");
     }
     name.value = "TAGS";
     name.dispatchEvent(new Event("input", { bubbles: true }));
     query.value = "f:keyword$";
     query.dispatchEvent(new Event("input", { bubbles: true }));
-    pin.checked = true;
-    pin.dispatchEvent(new Event("change", { bubbles: true }));
 
     const form = panel.querySelector("form");
     if (!form) {
@@ -73,10 +68,8 @@ describe("quick tags", () => {
     }
     submit(form);
 
-    expect(document.querySelector(".expression-editor-panel")).toBeNull();
-    expect(savedExpressions()).toMatchObject([
-      { name: "TAGS", query: "f:keyword$", mode: "toggle", pinned: true },
-    ]);
+    expect(document.querySelector(".quick-tag-editor-panel")).toBeNull();
+    expect(quickTags()).toMatchObject([{ name: "TAGS", query: "f:keyword$" }]);
 
     const pill = handle.element.querySelector<HTMLButtonElement>(".quick-tag");
     expect(pill?.textContent).toBe("TAGS");
@@ -86,8 +79,8 @@ describe("quick tags", () => {
     expect(searched).toEqual(["cat f:keyword$"]);
   });
 
-  test("a click always toggles the terms, ignoring Alt", () => {
-    replaceExpressions([expression()]);
+  test("a click toggles the terms in and back out", () => {
+    replaceQuickTags([tag()]);
     const searched: string[] = [];
     let draft = "cat";
     const handle = renderQuickTags({
@@ -103,15 +96,13 @@ describe("quick tags", () => {
     expect(pill?.getAttribute("aria-pressed")).toBe("false");
 
     pill?.click();
-    const alt = new Event("click", { bubbles: true, cancelable: true });
-    Object.assign(alt, { altKey: true });
-    pill?.dispatchEvent(alt);
+    pill?.click();
 
     expect(searched).toEqual(["cat f:keyword$", "cat"]);
   });
 
-  test("restores pinned expressions in a later view and marks them active", () => {
-    replaceExpressions([expression({ mode: "toggle" })]);
+  test("restores quick tags in a later view and marks them active", () => {
+    replaceQuickTags([tag()]);
 
     const handle = renderQuickTags({
       getText: () => "f:keyword$ other",
@@ -127,55 +118,9 @@ describe("quick tags", () => {
     expect(pill?.getAttribute("aria-pressed")).toBe("false");
   });
 
-  test("unpinned expressions stay out of the chip row", () => {
-    replaceExpressions([expression({ pinned: false })]);
-
-    const handle = renderQuickTags({
-      getText: () => "",
-      search: () => undefined,
-      signal: new AbortController().signal,
-    });
-
-    expect(handle.element.querySelector(".quick-tag")).toBeNull();
-  });
-
-  test("switching a quick tag to run unpins it", () => {
-    replaceExpressions([expression({ mode: "toggle" })]);
-    const handle = renderQuickTags({
-      getText: () => "",
-      search: () => undefined,
-      signal: new AbortController().signal,
-    });
-
-    handle.element.querySelector<HTMLButtonElement>(".quick-tag-edit")?.click();
-    const panel = document.querySelector(".expression-editor-panel");
-    if (!panel) {
-      throw new Error("editor did not open");
-    }
-
-    const mode = panel.querySelector<HTMLSelectElement>(".expression-mode");
-    if (!mode) {
-      throw new Error("editor mode select missing");
-    }
-    mode.selectedIndex = 0;
-    mode.dispatchEvent(new Event("change", { bubbles: true }));
-
-    const pin = panel.querySelector<HTMLInputElement>(".expression-pin input");
-    expect(pin?.checked).toBe(false);
-
-    const form = panel.querySelector("form");
-    if (!form) {
-      throw new Error("editor form missing");
-    }
-    submit(form);
-
-    expect(savedExpressions()).toMatchObject([{ mode: "run", pinned: false }]);
-    expect(handle.element.querySelector(".quick-tag")).toBeNull();
-  });
-
-  test("offers tag suggestions while editing an expression query", () => {
+  test("offers tag suggestions while editing a quick tag", () => {
     updateSetting("tagSuggestions", true);
-    replaceExpressions([expression({ mode: "toggle" })]);
+    replaceQuickTags([tag()]);
     const handle = renderQuickTags({
       getText: () => "",
       search: () => undefined,
@@ -183,10 +128,10 @@ describe("quick tags", () => {
     });
 
     handle.element.querySelector<HTMLButtonElement>(".quick-tag-edit")?.click();
-    const panel = document.querySelector(".expression-editor-panel");
-    const query = panel?.querySelector<HTMLInputElement>(".expression-query");
+    const panel = document.querySelector(".quick-tag-editor-panel");
+    const query = panel?.querySelector<HTMLInputElement>(".quick-tag-query");
     if (!query) {
-      throw new Error("expression query missing");
+      throw new Error("quick tag query missing");
     }
     expect(query.getAttribute("role")).toBe("combobox");
 
@@ -205,8 +150,8 @@ describe("quick tags", () => {
     }
   });
 
-  test("removes an expression through the editor", () => {
-    replaceExpressions([expression()]);
+  test("removes a quick tag through the editor", () => {
+    replaceQuickTags([tag()]);
     const handle = renderQuickTags({
       getText: () => "",
       search: () => undefined,
@@ -214,15 +159,15 @@ describe("quick tags", () => {
     });
 
     handle.element.querySelector<HTMLButtonElement>(".quick-tag-edit")?.click();
-    const panel = document.querySelector(".expression-editor-panel");
-    panel?.querySelector<HTMLButtonElement>(".expression-remove")?.click();
+    const panel = document.querySelector(".quick-tag-editor-panel");
+    panel?.querySelector<HTMLButtonElement>(".quick-tag-remove")?.click();
     const form = panel?.querySelector("form");
     if (!form) {
       throw new Error("editor form missing");
     }
     submit(form);
 
-    expect(savedExpressions()).toEqual([]);
+    expect(quickTags()).toEqual([]);
     expect(handle.element.querySelector(".quick-tag")).toBeNull();
   });
 });

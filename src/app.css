@@ -115,7 +115,7 @@ a {
 /* Icon-only controls that sit on the chrome rather than inside a panel. */
 .topbar-clear,
 .topbar-history,
-.expression-remove {
+.quick-tag-remove {
   @apply inline-grid cursor-pointer place-items-center border-0 bg-transparent p-0;
   color: var(--color-muted);
   transition:
@@ -125,7 +125,7 @@ a {
 
 .topbar-clear:hover,
 .topbar-history:hover,
-.expression-remove:hover {
+.quick-tag-remove:hover {
   @apply bg-panel-hover text-fg;
 }
 
@@ -653,55 +653,43 @@ input[type="radio"] {
   @apply border-accent text-fg;
 }
 
-.expression-editor-panel {
+.quick-tag-editor-panel {
   @apply max-w-[calc(100vw-2rem)];
 }
 
-.expression-editor {
+.quick-tag-editor {
   @apply flex w-[460px] max-w-full flex-col gap-2 p-3 text-control;
 }
 
-.expression-editor-title {
+.quick-tag-editor-title {
   @apply m-0 font-semibold text-fg;
 }
 
-.expression-editor-hint {
+.quick-tag-editor-hint {
   @apply m-0 text-meta text-muted;
 }
 
-.expression-list {
+.quick-tag-list {
   @apply flex max-h-[320px] flex-col gap-2 overflow-y-auto;
 }
 
-.expression-row {
+.quick-tag-row {
   @apply grid grid-cols-[minmax(72px,0.7fr)_minmax(0,1.6fr)_auto] items-center gap-1.5;
 }
 
-.expression-options {
-  @apply col-span-full flex items-center gap-2;
-}
-
-.expression-input {
+.quick-tag-input {
   @apply w-full px-2 text-meta;
 }
 
-.expression-mode {
-  @apply h-7 w-auto px-1.5 text-meta;
-}
-
-.expression-pin {
-  @apply text-meta text-muted;
-}
-
-.expression-remove {
+.quick-tag-remove {
   @apply h-6 w-6 text-control;
 }
 
-.expression-editor-actions {
+.quick-tag-editor-actions {
   @apply mt-1 flex items-center gap-1.5;
 }
 
-.expression-editor-spacer {
+.quick-tag-editor-spacer {
   @apply flex-1;
 }
 
@@ -1686,7 +1674,7 @@ body.is-loading .eh-loading {
   @apply grid gap-1;
 }
 
-.search-history-saved {
+.search-history-quick-tag {
   @apply flex items-stretch gap-1;
 }
 
@@ -1708,20 +1696,13 @@ body.is-loading .eh-loading {
   @apply w-full truncate text-meta text-muted;
 }
 
-.search-history-remove,
-.search-history-toggle {
+.search-history-remove {
   @apply w-7 shrink-0 bg-transparent text-control leading-none text-muted;
 }
 
 .search-history-remove:hover,
 .search-history-remove:focus-visible {
   @apply bg-panel text-danger-text;
-  border-color: var(--color-accent);
-}
-
-.search-history-toggle:hover,
-.search-history-toggle:focus-visible {
-  @apply bg-panel text-accent-text;
   border-color: var(--color-accent);
 }
 

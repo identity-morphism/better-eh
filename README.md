@@ -28,9 +28,9 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
 - **Posted-date range**: a posted-since/posted-until bound narrows a listing in-app. The range is
   app-owned (`eh_since`/`eh_until`) rather than a site filter, and the bound is applied
   client-side, so result counts are approximate.
-- **Search expressions**: recent queries, named saved searches and quick tags share one store;
-  quick tags toggle their terms in the current search, their editor uses the tag combobox, and
-  active filter chips can be removed or flipped to include/exclude/optional without retyping.
+- **Quick tags**: recent queries and named quick tags share the search field; every quick tag
+  toggles its terms in the current draft, its editor uses the tag combobox, and active filter chips
+  can be removed or flipped to include/exclude/optional without retyping.
 - **Tag autocomplete**: namespace-aware suggestions that work immediately from an embedded core
   vocabulary, quoted/exact/signed terms, short aliases (`f:`, `a:`), popularity ranking and local
   usage learning. Clicking a gallery tag adds it to the current search; `Alt+click` excludes it.

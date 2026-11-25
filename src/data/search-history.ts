@@ -2,7 +2,7 @@
  * Recent queries.
  *
  * Deduplicated by their normalized text (case and whitespace ignored, so the same search is not
- * stored twice), capped, and expiring. Named saved searches live in `saved-expressions`.
+ * stored twice), capped, and expiring. Named quick tags live in `quick-tags`.
  */
 
 import { isUnknownArray } from "../guards";
