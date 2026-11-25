@@ -135,116 +135,132 @@ export interface PageImageSlot<Img extends PageImage = PageImage> {
   upgrade: (level: number) => void;
 }
 
-interface PageImageSlotOptions {
-  page: PageData;
-  retry: (page: PageData) => Promise<PageData | null>;
-  maxRetries: number;
+/** Per-surface callbacks and stale check; the shared ladder stays in the factory. */
+export interface PageImageSlotHooks {
+  /** False once the element or layout no longer shows this page. */
+  isCurrent?: () => boolean;
   onLoaded?: (page: PageData) => void;
   onGiveUp?: () => void;
+}
+
+export interface PageImageSlotFactoryOptions {
+  /** Refetch the page when its image fails; `null` means there is nothing to retry. */
+  retry: (page: PageData) => Promise<PageData | null>;
+  /** Read at failure time so a settings change reaches slots created earlier. */
+  maxRetries: () => number;
   /** View lifetime; a probe that resolves after abort must not swap the source. */
   signal?: AbortSignal;
-  /** Guards stale probes and retries when the element is reused by a newer page. */
-  isCurrent?: () => boolean;
   /** Probe factory, injectable so tests can drive the load without a network. */
   probe?: () => PageImage;
 }
 
+/** Build slots that share one retry ladder, retry limit and abort check. */
+export interface PageImageSlotFactory {
+  create<Img extends PageImage>(
+    img: Img,
+    page: PageData,
+    hooks?: PageImageSlotHooks,
+  ): PageImageSlot<Img>;
+}
+
 /**
- * Bind one image element to one page.
+ * Build one slot factory for a view.
  *
- * The slot owns the per-page state the viewer would otherwise scatter across its mode branches: the
- * current page after a retry, the reload token, and the one-shot original upgrade, including the
- * probe that confirms the original actually has more pixels.
+ * The factory owns the retry ladder, the retry limit provider and the abort/currency composition;
+ * each surface only says whether its element still shows the page and what its paints are.
  */
-export function createPageImageSlot<Img extends PageImage>(
-  img: Img,
-  {
-    page: initialPage,
-    retry,
-    maxRetries,
-    onLoaded,
-    onGiveUp,
-    signal,
-    isCurrent,
-    probe: createProbe,
-  }: PageImageSlotOptions,
-): PageImageSlot<Img> {
-  let page = initialPage;
-  let upgradePending = false;
-  let upgradeFailed = false;
-  let upgraded = false;
-
-  const show = (): void => {
-    showPageImage({
-      img,
-      page,
-      retry,
-      maxRetries,
-      onGiveUp: onGiveUp ?? (() => undefined),
-      onLoaded: (loaded) => {
-        page = loaded;
-        onLoaded?.(loaded);
-      },
-      isCurrent,
-    });
-  };
-
-  const reload = (): boolean => {
-    const source = img.getAttribute("src");
-    if (source === null || source === "") {
-      return false;
-    }
-    const base = source.replace(/([?&])nl=[^&]*/u, "");
-    const token = page.nlToken ?? String(Date.now());
-    img.src = `${base}${base.includes("?") ? "&" : "?"}nl=${token}`;
-    return true;
-  };
-
-  const upgrade = (level: number): void => {
-    if (upgradePending || upgradeFailed || upgraded) {
-      return;
-    }
-    const source = page.originalHref;
-    if (source === null || source === page.imgSrc) {
-      return;
-    }
-    const dpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
-    if (level <= nativeZoomLimit(img.clientHeight * dpr, img.naturalHeight)) {
-      return;
-    }
-
-    upgradePending = true;
-    const probe: PageImage = createProbe ? createProbe() : new Image();
-    probe.onload = () => {
-      upgradePending = false;
-      if (signal?.aborted || isCurrent?.() === false) {
-        return;
-      }
-      // The link exists on resized pages; if the server still handed back the same pixels, keep
-      // the current image instead of swapping sources for nothing.
-      if (probe.naturalWidth <= img.naturalWidth && probe.naturalHeight <= img.naturalHeight) {
-        upgradeFailed = true;
-        return;
-      }
-      upgraded = true;
-      // The source has pixels now; the CSS size and the zoom transform stay put.
-      img.src = source;
-      log("original image", source);
-    };
-    probe.onerror = () => {
-      upgradePending = false;
-      upgradeFailed = true;
-    };
-    probe.src = source;
-  };
-
+export function createPageImageSlotFactory({
+  retry,
+  maxRetries,
+  signal,
+  probe: createProbe,
+}: PageImageSlotFactoryOptions): PageImageSlotFactory {
   return {
-    img,
-    get page() {
-      return page;
+    create<Img extends PageImage>(
+      img: Img,
+      initialPage: PageData,
+      hooks: PageImageSlotHooks = {},
+    ): PageImageSlot<Img> {
+      let page = initialPage;
+      let upgradePending = false;
+      let upgradeFailed = false;
+      let upgraded = false;
+
+      const isCurrent = (): boolean => signal?.aborted !== true && (hooks.isCurrent?.() ?? true);
+
+      const show = (): void => {
+        showPageImage({
+          img,
+          page,
+          retry,
+          maxRetries: maxRetries(),
+          onGiveUp: hooks.onGiveUp ?? (() => undefined),
+          onLoaded: (loaded) => {
+            page = loaded;
+            hooks.onLoaded?.(loaded);
+          },
+          isCurrent,
+        });
+      };
+
+      const reload = (): boolean => {
+        const source = img.getAttribute("src");
+        if (source === null || source === "") {
+          return false;
+        }
+        const base = source.replace(/([?&])nl=[^&]*/u, "");
+        const token = page.nlToken ?? String(Date.now());
+        img.src = `${base}${base.includes("?") ? "&" : "?"}nl=${token}`;
+        return true;
+      };
+
+      const upgrade = (level: number): void => {
+        if (upgradePending || upgradeFailed || upgraded) {
+          return;
+        }
+        const source = page.originalHref;
+        if (source === null || source === page.imgSrc) {
+          return;
+        }
+        const dpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+        if (level <= nativeZoomLimit(img.clientHeight * dpr, img.naturalHeight)) {
+          return;
+        }
+
+        upgradePending = true;
+        const probe: PageImage = createProbe ? createProbe() : new Image();
+        probe.onload = () => {
+          upgradePending = false;
+          if (!isCurrent()) {
+            return;
+          }
+          // The link exists on resized pages; if the server still handed back the same pixels, keep
+          // the current image instead of swapping sources for nothing.
+          if (probe.naturalWidth <= img.naturalWidth && probe.naturalHeight <= img.naturalHeight) {
+            upgradeFailed = true;
+            return;
+          }
+          upgraded = true;
+          // The source has pixels now; the CSS size and the zoom transform stay put.
+          img.src = source;
+          log("original image", source);
+        };
+        probe.onerror = () => {
+          upgradePending = false;
+          upgradeFailed = true;
+        };
+        probe.src = source;
+      };
+
+      return {
+        img,
+        get page() {
+          return page;
+        },
+        show,
+        reload,
+        upgrade,
+      };
     },
-    show,
-    reload,
-    upgrade,
   };
 }

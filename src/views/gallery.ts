@@ -1,17 +1,13 @@
-import type {
-  CommentTransports,
-  GalleryActionDeps,
-  TagVoteTransports,
-} from "../data/gallery-actions";
+import type { CommentTransports, GalleryActionDeps } from "../data/gallery-actions";
 import { voteTag } from "../data/gallery-actions";
-import type { MyTagChange, MyTagTransports } from "../data/my-tags";
+import type { MyTagChange } from "../data/my-tags";
 import { applyMyTag } from "../data/my-tags";
 import { clearResume, getResume } from "../data/resume";
 import type { DocumentOptions, HtmlResponse } from "../fetch/loader";
 import { loader } from "../fetch/loader";
 import { priorityOf } from "../net/priority";
 import { formatPageRange, parseGalleryPage } from "../parse/gallery";
-import { buildSearchUrl, tagTokenFromHref } from "../parse/query";
+import { buildSearchUrl } from "../parse/query";
 import { galleryGid } from "../parse/url";
 import {
   getSearchDraft,
@@ -21,19 +17,18 @@ import {
 } from "../search-draft";
 import { isLoggedIn } from "../session";
 import { SITE_PATHS } from "../site";
-import type { SearchTerm, TagSign } from "../tags/model";
-import { fold, parseSearchTerms, tagIdentity, toggleTagInSearch } from "../tags/model";
-import type { GalleryApiConfig, GalleryData, GalleryThumb, TagRef } from "../types";
+import { toggleTagInSearch } from "../tags/model";
+import type { GalleryApiConfig, GalleryData, GalleryThumb } from "../types";
 import type { ActionMenuItem } from "../ui/action-menu";
 import { bindContextMenu, openActionMenu } from "../ui/action-menu";
-import { appendChildren, buttonEl, el, icon, tagInput } from "../ui/dom";
-import { errorText } from "../ui/error-text";
+import { appendChildren, buttonEl, el, icon } from "../ui/dom";
 import { favoriteButton } from "../ui/favmenu";
 import { createFavoriteState } from "../ui/favorite-state";
 import { commentsSection } from "../ui/gallery-comments";
 import type { CommentSectionDeps } from "../ui/gallery-comments";
 import { ratingControl } from "../ui/gallery-rating";
-import { openTagMenu } from "../ui/gallery-tag-menu";
+import { createTagRow } from "../ui/gallery-tag-row";
+import type { TagRow, TagRowActions } from "../ui/gallery-tag-row";
 import type { PageSource } from "../ui/page-cursor";
 import { createPagedRegion } from "../ui/paged-region";
 import { pager } from "../ui/pager";
@@ -96,259 +91,6 @@ function cover(data: GalleryData): HTMLElement {
 function writableConfig(data: GalleryData): GalleryApiConfig | null {
   const config = data.apiConfig;
   return config !== null && config.apiUid !== "-1" ? config : null;
-}
-
-interface TagActions extends TagVoteTransports, MyTagTransports {
-  /** URL for a modified click, reflecting the live draft query. */
-  href: (token: string, sign: TagSign) => string;
-  /** Add, toggle or exclude the tag in the draft query. */
-  add: (token: string, sign: TagSign) => void;
-  /** Undefined on anonymous pages, which hide the tag menu. */
-  config: GalleryApiConfig | null;
-}
-
-interface TagSection {
-  element: HTMLElement;
-  /** Recompute every link and applied state against the current draft query. */
-  refresh: () => void;
-}
-
-/** Whether two terms name the same tag, regardless of alias, quoting or exact marker. */
-function sameTag(a: SearchTerm, b: SearchTerm): boolean {
-  if (a.nsRaw === null || b.nsRaw === null) {
-    return a.nsRaw === b.nsRaw && fold(a.value) === fold(b.value);
-  }
-  const aNs = a.ns ?? a.nsRaw;
-  const bNs = b.ns ?? b.nsRaw;
-  return tagIdentity(aNs, a.value) === tagIdentity(bNs, b.value);
-}
-
-function tagState(term: SearchTerm): string {
-  if (term.sign === "-") {
-    return " — excluded from the search";
-  }
-  if (term.sign === "~") {
-    return " — optional (OR) in the search";
-  }
-  return " — in the search";
-}
-
-/** Sentence-case the state phrase used inside a tooltip. */
-function stateTitle(term: SearchTerm): string {
-  const state = tagState(term).replace(/^ — /u, "");
-  return `${state.charAt(0).toUpperCase()}${state.slice(1)}`;
-}
-
-/**
- * What a plain click does to a tag already in the query.
- *
- * An included or optional tag is dropped; an excluded tag is flipped back to inclusion. Saying
- * "remove" for every applied state sent excluded terms the wrong way.
- */
-function tagHint(match: SearchTerm | undefined, actionsHint: string): string {
-  if (match === undefined) {
-    return `Click to add to search · Alt-click to exclude · Middle-click for results${actionsHint}`;
-  }
-  const click = match.sign === "-" ? "Click to include" : "Click to remove";
-  const alt = match.sign === "-" ? "Alt-click to remove" : "Alt-click to exclude";
-  return `${stateTitle(match)} · ${click} · ${alt} · Middle-click for results${actionsHint}`;
-}
-
-/** The tag plus the site's editorial note, for screen readers and the full-string tooltip. */
-function tagLabel(tag: TagRef): string {
-  return tag.note === null ? tag.name : `${tag.name} — ${tag.note}`;
-}
-
-/** Keep the site's original `name | note` string as context ahead of the interaction hint. */
-function tagTitle(tag: TagRef, hint: string): string {
-  return tag.note === null ? hint : `${tag.name} | ${tag.note} · ${hint}`;
-}
-
-function tagSection(data: GalleryData, actions: TagActions, ctx: ViewContext): TagSection {
-  const section = el("section", { class: "tag-section", "aria-label": "Tags" });
-  section.append(el("h2", { class: "tag-title", text: "Tags" }));
-  const links: Array<{
-    chip: HTMLAnchorElement;
-    token: string;
-    target: SearchTerm | null;
-    tag: TagRef;
-  }> = [];
-  const actionsHint = actions.config === null ? "" : " · Right-click for tag actions";
-
-  const refresh = (): void => {
-    const terms = parseSearchTerms(getSearchDraft().text);
-    for (const { chip, token, target, tag } of links) {
-      chip.setAttribute("href", actions.href(token, ""));
-      if (target === null) {
-        continue;
-      }
-      const match = terms.find((term) => sameTag(term, target));
-      chip.classList.toggle("is-added", match !== undefined);
-      chip.classList.toggle("is-excluded", match?.sign === "-");
-      chip.classList.toggle("is-or", match?.sign === "~");
-      chip.title = tagTitle(tag, tagHint(match, actionsHint));
-      const label = tagLabel(tag);
-      chip.setAttribute(
-        "aria-label",
-        match === undefined ? label : `${label} — ${tagState(match).replace(/^ — /u, "")}`,
-      );
-    }
-  };
-
-  for (const group of data.tags) {
-    const chips = el("div", { class: "tag-chips" });
-    const nsClass = group.ns.replace(/[^a-z0-9_-]/gi, "");
-
-    for (const tag of group.tags) {
-      const token = tagTokenFromHref(tag.href, data.url);
-      const target = token === null ? null : (parseSearchTerms(token)[0] ?? null);
-      const chip = el(
-        "a",
-        {
-          class: `tag-chip ns-${nsClass}`,
-          href: token ? actions.href(token, "") : tag.href,
-          "data-tag": `${group.ns}:${tag.name}`,
-          title: tagTitle(
-            tag,
-            token ? tagHint(undefined, actionsHint) : `Open tag search${actionsHint}`,
-          ),
-          "aria-label": tag.note === null ? null : tagLabel(tag),
-        },
-        el("span", { class: "tag-name", text: tag.name }),
-        tag.note === null ? null : el("span", { class: "tag-note", text: tag.note }),
-      );
-      if (actions.config !== null) {
-        // The tag menu lives on the right button; it keeps the chip row compact.
-        chip.setAttribute("aria-haspopup", "dialog");
-      }
-
-      if (token) {
-        links.push({ chip, token, target, tag });
-        const sign = (event: MouseEvent): TagSign => (event.altKey ? "-" : "");
-        // Modified clicks open a new tab; refresh the href first so it carries draft tags.
-        chip.addEventListener(
-          "pointerdown",
-          (event) => {
-            if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) {
-              chip.setAttribute("href", actions.href(token, sign(event)));
-            }
-          },
-          { signal: ctx.signal },
-        );
-        chip.addEventListener(
-          "click",
-          (event) => {
-            if (event.button !== 0) {
-              return;
-            }
-            if (event.metaKey || event.ctrlKey || event.shiftKey) {
-              chip.setAttribute("href", actions.href(token, sign(event)));
-              return;
-            }
-            event.preventDefault();
-            actions.add(token, sign(event));
-          },
-          { signal: ctx.signal },
-        );
-      }
-
-      if (actions.config !== null) {
-        const openMenu = (): void => {
-          openTagMenu(
-            chip,
-            { ns: group.ns, name: tag.name },
-            tag.href,
-            {
-              vote: actions.vote,
-              addTags: actions.addTags,
-              add: actions.add,
-              token,
-              watchTag: actions.watchTag,
-              hideTag: actions.hideTag,
-              colorTag: actions.colorTag,
-            },
-            ctx.signal,
-          );
-        };
-        bindContextMenu(chip, openMenu, ctx.signal);
-        // Touch has no right-click. A visible trigger appears only on coarse/no-hover pointers, so
-        // the desktop chip row stays a single line of tags.
-        const trigger = buttonEl(
-          {
-            class: "tag-menu-trigger",
-            "aria-label": `Tag actions for ${tag.name}`,
-            "aria-haspopup": "dialog",
-            title: "Tag actions",
-            onclick: openMenu,
-          },
-          "⋯",
-        );
-        chips.append(el("span", { class: "tag-chip-wrap" }, chip, trigger));
-      } else {
-        chips.append(chip);
-      }
-    }
-
-    section.append(
-      el(
-        "div",
-        { class: "tag-row" },
-        el("span", { class: `tag-ns ns-${nsClass}`, text: `${group.ns}:` }),
-        chips,
-      ),
-    );
-  }
-
-  // The site's own tag form, so adding a tag is not hidden behind the per-tag menu.
-  if (actions.config !== null) {
-    const input = tagInput("field-input tag-add-input");
-    const submit = buttonEl({ class: "btn btn-small", type: "submit", text: "Add tags" });
-    const form = el("form", { class: "tag-add" }, input, submit);
-    let adding = false;
-    form.addEventListener(
-      "submit",
-      (event) => {
-        event.preventDefault();
-        const value = input.value.trim();
-        if (value === "" || adding) {
-          return;
-        }
-        // Disabling the focused submit button would drop focus to <body>, and the refresh below
-        // then has no idea the composer held it. Keep it enabled and guard the request instead.
-        adding = true;
-        submit.textContent = "Adding…";
-        void actions
-          .addTags(value)
-          .then(() => {
-            input.value = "";
-          })
-          .catch((error: unknown) => {
-            // Keep the text so the action can be retried from the composer.
-            if (!ctx.signal.aborted) {
-              showToast(errorText(error));
-            }
-          })
-          .finally(() => {
-            adding = false;
-            submit.textContent = "Add tags";
-          });
-      },
-      { signal: ctx.signal },
-    );
-    // The composer starts in the chip column, under the namespace labels.
-    section.append(
-      el(
-        "div",
-        { class: "tag-row tag-add-row" },
-        el("span", { class: "tag-ns", "aria-hidden": "true" }),
-        form,
-      ),
-    );
-  }
-
-  refresh();
-
-  return { element: section, refresh };
 }
 
 /** Signed-in site pages for the gallery, plus the reader's own escape hatch. */
@@ -490,7 +232,7 @@ export function renderGallery(
 ): void {
   host.replaceChildren();
 
-  let tagsSection: TagSection | null = null;
+  let tagRow: TagRow | null = null;
   const topbar = renderTopbar({
     onSearch: (text) => {
       const next = { ...getSearchDraft().query, text };
@@ -503,7 +245,7 @@ export function renderGallery(
 
   // Tag clicks and chip edits only touch the draft; every chip's link and applied state follows.
   const unsubscribe = subscribeSearchDraft(() => {
-    tagsSection?.refresh();
+    tagRow?.refresh();
   });
   ctx.signal.addEventListener("abort", unsubscribe, { once: true });
 
@@ -687,58 +429,6 @@ export function renderGallery(
     section.querySelector<HTMLTextAreaElement>(".comment-input")?.focus();
   }
 
-  const refreshTags = async (): Promise<void> => {
-    const next = await reload();
-    if (next === null) {
-      return;
-    }
-    const nextSection = buildTags(next);
-    if (nextSection === null) {
-      return;
-    }
-
-    // The refresh replaces every chip, including the one whose menu (or the composer) held focus.
-    // Remember which tag the user was acting on so it can take focus back afterwards.
-    const previous = tagsSection?.element ?? null;
-    let restoreTag: string | null = null;
-    let restoreComposer = false;
-    if (previous !== null) {
-      const openChip = previous.querySelector<HTMLElement>('.tag-chip[aria-expanded="true"]');
-      if (openChip?.dataset.tag !== undefined) {
-        restoreTag = openChip.dataset.tag;
-      } else {
-        const active = document.activeElement;
-        if (active != null && previous.contains(active)) {
-          const chip = active.closest<HTMLElement>(".tag-chip");
-          if (chip?.dataset.tag === undefined) {
-            restoreComposer = true;
-          } else {
-            restoreTag = chip.dataset.tag;
-          }
-        }
-      }
-    }
-
-    if (tagsSection === null) {
-      host.insertBefore(nextSection.element, grid);
-    } else {
-      tagsSection.element.replaceWith(nextSection.element);
-    }
-    tagsSection = nextSection;
-
-    const chip =
-      restoreTag === null
-        ? undefined
-        : [...nextSection.element.querySelectorAll<HTMLElement>(".tag-chip")].find(
-            (node) => node.dataset.tag === restoreTag,
-          );
-    if (chip !== undefined) {
-      chip.focus();
-    } else if (restoreTag !== null || restoreComposer) {
-      nextSection.element.querySelector<HTMLElement>(".tag-add-input")?.focus();
-    }
-  };
-
   const runTagVote = async (tag: string, vote: 1 | -1): Promise<void> => {
     if (config === null) {
       return;
@@ -769,35 +459,48 @@ export function renderGallery(
     showToast(result === "added" ? "Tag added to My Tags" : "My Tags updated");
   };
 
-  const buildTags = (source: GalleryData): TagSection | null =>
-    source.tags.length > 0
-      ? tagSection(
-          source,
-          {
-            href: (token, sign) => {
-              const current = getSearchDraft();
-              return buildSearchUrl({
-                ...current.query,
-                text: toggleTagInSearch(current.text, token, sign, false),
-              });
-            },
-            add: (token, sign) => {
-              setSearchDraftText(toggleTagInSearch(getSearchDraft().text, token, sign));
-            },
-            // Rejections stay with the caller: the tag menu reports them inline.
-            vote: (tag, vote) => runTagVote(tag, vote),
-            addTags: (tags) => runTagVoteBatch(tags),
-            watchTag: (tag) => runMyTag(tag, { watched: true }),
-            hideTag: (tag) => runMyTag(tag, { hidden: true }),
-            colorTag: (tag, color) => runMyTag(tag, { color }),
-            config,
-          },
-          ctx,
-        )
-      : null;
+  const tagActions: TagRowActions = {
+    href: (token, sign) => {
+      const current = getSearchDraft();
+      return buildSearchUrl({
+        ...current.query,
+        text: toggleTagInSearch(current.text, token, sign, false),
+      });
+    },
+    add: (token, sign) => {
+      setSearchDraftText(toggleTagInSearch(getSearchDraft().text, token, sign));
+    },
+    // Rejections stay with the caller: the tag menu reports them inline.
+    vote: (tag, vote) => runTagVote(tag, vote),
+    addTags: (tags) => runTagVoteBatch(tags),
+    watchTag: (tag) => runMyTag(tag, { watched: true }),
+    hideTag: (tag) => runMyTag(tag, { hidden: true }),
+    colorTag: (tag, color) => runMyTag(tag, { color }),
+    config,
+    text: () => getSearchDraft().text,
+  };
 
-  const tags = buildTags(data);
-  tagsSection = tags;
+  /** The tag row replaces itself from the refreshed page; it also owns focus return. */
+  const refreshTags = async (): Promise<void> => {
+    const next = await reload();
+    if (next === null) {
+      return;
+    }
+    if (next.tags.length === 0) {
+      return;
+    }
+    if (tagRow === null) {
+      const created = createTagRow(next, tagActions, ctx.signal);
+      if (created !== null) {
+        tagRow = created;
+        host.insertBefore(created.element, grid);
+      }
+      return;
+    }
+    tagRow.update(next);
+  };
+
+  tagRow = createTagRow(data, tagActions, ctx.signal);
 
   commentsNode = buildComments(data);
 
@@ -855,7 +558,7 @@ export function renderGallery(
 
   const navigation = el("div", { class: "gallery-paging" });
   // The site prints the page summary and pager immediately above the thumbnails.
-  appendChildren(host, [topbar, header, tags?.element ?? null, emptyThumbs ?? navigation]);
+  appendChildren(host, [topbar, header, tagRow?.element ?? null, emptyThumbs ?? navigation]);
   if (data.thumbs.length > 0) {
     host.append(grid);
   }

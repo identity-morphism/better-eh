@@ -111,6 +111,8 @@ describe("archive view", () => {
     expect(requireNode(host, ".archive-option-status").textContent).toBe(
       "Archive ready. Starting the download…",
     );
+    // The prepared download owns the tab; a second purchase must not be possible.
+    expect(buttons.every((button) => button.disabled)).toBe(true);
   });
 
   test("restores the buttons and shows the failure inline", async () => {

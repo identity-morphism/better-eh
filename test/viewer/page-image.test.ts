@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import type { PageImage, PageImageSlot } from "../../src/page-image";
-import { createPageImageSlot, showPageImage } from "../../src/page-image";
+import type { PageImage, PageImageSlot, PageImageSlotHooks } from "../../src/page-image";
+import { createPageImageSlotFactory, showPageImage } from "../../src/page-image";
 import type { PageData } from "../../src/types";
 import { installDom } from "../ui/dom";
 
@@ -342,25 +342,34 @@ describe("showPageImage", () => {
   });
 });
 
-describe("createPageImageSlot", () => {
-  function slot(image: PageImage, overrides: Partial<PageData> = {}): PageImageSlot {
-    return createPageImageSlot(image, {
-      page: page({ nlToken: "777", originalHref: ORIGINAL_SRC, ...overrides }),
+describe("createPageImageSlotFactory", () => {
+  function slot(
+    image: PageImage,
+    overrides: Partial<PageData> = {},
+    hooks: PageImageSlotHooks = {},
+  ): PageImageSlot {
+    return createPageImageSlotFactory({
       retry: () => Promise.resolve(null),
-      maxRetries: 2,
-    });
+      maxRetries: () => 2,
+    }).create(image, page({ nlToken: "777", originalHref: ORIGINAL_SRC, ...overrides }), hooks);
+  }
+
+  function probeSlot(
+    image: PageImage,
+    probe: PageImage,
+    hooks: PageImageSlotHooks = {},
+  ): PageImageSlot {
+    return createPageImageSlotFactory({
+      retry: () => Promise.resolve(null),
+      maxRetries: () => 2,
+      probe: () => probe,
+    }).create(image, page({ originalHref: ORIGINAL_SRC }), hooks);
   }
 
   test("does not show a page once the slot is stale", () => {
     const img = fakeImage();
     const onLoaded = mock(() => {});
-    const pageSlot = createPageImageSlot(img, {
-      page: page(),
-      retry: () => Promise.resolve(null),
-      maxRetries: 2,
-      onLoaded,
-      isCurrent: () => false,
-    });
+    const pageSlot = slot(img, {}, { onLoaded, isCurrent: () => false });
 
     pageSlot.show();
 
@@ -394,12 +403,7 @@ describe("createPageImageSlot", () => {
       clientHeight: 400,
     });
     const probe = fakeImage({ naturalWidth: 1600, naturalHeight: 2400 });
-    const pageSlot = createPageImageSlot(img, {
-      page: page({ originalHref: ORIGINAL_SRC }),
-      retry: () => Promise.resolve(null),
-      maxRetries: 2,
-      probe: () => probe,
-    });
+    const pageSlot = probeSlot(img, probe);
 
     pageSlot.upgrade(3);
     expect(probe.src).toBe("");
@@ -419,12 +423,7 @@ describe("createPageImageSlot", () => {
       clientHeight: 400,
     });
     const probe = fakeImage({ naturalWidth: 800, naturalHeight: 1200 });
-    const pageSlot = createPageImageSlot(img, {
-      page: page({ originalHref: ORIGINAL_SRC }),
-      retry: () => Promise.resolve(null),
-      maxRetries: 2,
-      probe: () => probe,
-    });
+    const pageSlot = probeSlot(img, probe);
 
     pageSlot.upgrade(4);
     probe.onload?.(loadEvent);
@@ -441,16 +440,33 @@ describe("createPageImageSlot", () => {
       clientHeight: 400,
     });
     const probe = fakeImage({ naturalWidth: 1600, naturalHeight: 2400 });
-    const pageSlot = createPageImageSlot(img, {
-      page: page({ originalHref: ORIGINAL_SRC }),
-      retry: () => Promise.resolve(null),
-      maxRetries: 2,
-      isCurrent: () => current,
-      probe: () => probe,
-    });
+    const pageSlot = probeSlot(img, probe, { isCurrent: () => current });
 
     pageSlot.upgrade(4);
     current = false;
+    probe.onload?.(loadEvent);
+
+    expect(img.src).toBe(FIRST_SRC);
+  });
+
+  test("the factory drops work after its view aborts", () => {
+    const controller = new AbortController();
+    const img = fakeImage({
+      src: FIRST_SRC,
+      naturalWidth: 800,
+      naturalHeight: 1200,
+      clientHeight: 400,
+    });
+    const probe = fakeImage({ naturalWidth: 1600, naturalHeight: 2400 });
+    const pageSlot = createPageImageSlotFactory({
+      retry: () => Promise.resolve(null),
+      maxRetries: () => 2,
+      signal: controller.signal,
+      probe: () => probe,
+    }).create(img, page({ originalHref: ORIGINAL_SRC }));
+
+    pageSlot.upgrade(4);
+    controller.abort();
     probe.onload?.(loadEvent);
 
     expect(img.src).toBe(FIRST_SRC);

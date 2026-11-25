@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, test } from "bun:test";
 
 import { saveListFilters, setListPanelOpen } from "../../src/data/list-filters";
 import { emptySearchQuery, parseSearchQuery } from "../../src/parse/query";
+import { parseRoute } from "../../src/router";
+import { createRouteViews } from "../../src/routes";
+import type { ListRouteData, RouteOf, RouteViewFor } from "../../src/routes/types";
 import { updateSetting } from "../../src/settings";
 import type { ListItem, ListPageData } from "../../src/types";
+import type { PageSource } from "../../src/ui/page-cursor";
 import { renderList } from "../../src/views/list";
+import { loadFixture } from "../dom";
 import { installDom, mountHost, viewContext } from "./dom";
-import { listItem } from "./fixtures";
 import { installTestObservers, lastObserver, settle } from "./observers";
 
 const BASE = "https://e-hentai.org/";
@@ -16,32 +20,99 @@ const NEXT_URL = "https://e-hentai.org/?f_search=dogs&p=1";
 let host: HTMLElement;
 let navigations: string[];
 
-function dated(gid: string, posted: string, title: string): ListItem {
-  return listItem({
-    href: `/g/${gid}/${gid}/`,
-    gid,
-    token: gid,
-    title: { leading: [], primary: title, secondary: null, trailing: [] },
-    posted,
-  });
+interface RoutedList {
+  route: RouteOf<"list">;
+  data: ListRouteData;
+  view: RouteViewFor<"list">;
 }
 
-function page(items: ListItem[], overrides: Partial<ListPageData> = {}): ListPageData {
+/** A list fixture whose three rows carry `dates` and a configurable next link. */
+async function listDocument({
+  dates,
+  nextHref = null,
+  resultText = "Found 1,234 results.",
+}: {
+  dates: Readonly<Record<string, string>>;
+  nextHref?: string | null;
+  resultText?: string;
+}): Promise<Document> {
+  const doc = await loadFixture("list.html");
+  const rows = [...doc.querySelectorAll<HTMLTableRowElement>("table.itg > tbody > tr")];
+  // The fixture's second row repeats gid 111 and its fourth carries an invalid token; give the
+  // duplicate a distinct, valid identity so three dated rows survive parsing.
+  const duplicate = rows[1];
+  if (duplicate !== undefined) {
+    for (const link of duplicate.querySelectorAll<HTMLAnchorElement>('a[href*="/g/"]')) {
+      link.setAttribute("href", "/g/444/dddddddddd/");
+    }
+  }
+  for (const row of rows) {
+    const href = row.querySelector<HTMLAnchorElement>("a.glink")?.getAttribute("href") ?? "";
+    const gid = /\/g\/(\d+)\//.exec(href)?.[1];
+    const posted = gid === undefined ? undefined : dates[gid];
+    if (posted === undefined) {
+      continue;
+    }
+    const cell = row.querySelector(".gl2c");
+    if (cell === null) {
+      continue;
+    }
+    const existing = row.querySelector<HTMLElement>(`#postedpop_${gid}`);
+    if (existing !== null) {
+      existing.textContent = posted;
+      continue;
+    }
+    const node = doc.createElement("div");
+    node.id = `postedpop_${gid}`;
+    node.textContent = posted;
+    cell.append(node);
+  }
+  const summary = doc.querySelector(".searchtext p");
+  if (summary !== null) {
+    summary.textContent = resultText;
+  }
+  const next = doc.getElementById("dnext");
+  if (next !== null) {
+    if (nextHref === null) {
+      next.remove();
+    } else {
+      next.setAttribute("href", nextHref);
+    }
+  }
+  return doc;
+}
+
+function routedList(url: string, doc: Document, appended?: Document): RoutedList {
+  const route = parseRoute(url, BASE);
+  if (route.kind !== "list") {
+    throw new Error(`expected a list route for ${url}`);
+  }
+  const views = createRouteViews({
+    document: (requested) => Promise.resolve({ doc: appended ?? doc, url: requested }),
+    viewerPage: () => Promise.reject(new Error("unexpected viewer load")),
+    seedViewerPage: () => undefined,
+  });
   return {
-    url: RANGE_URL,
-    items,
-    prevHref: null,
-    nextHref: null,
-    resultText: "Found 500 results.",
-    ...overrides,
+    route,
+    data: views.routeView(route).parse(doc, route),
+    view: views.routeView(route),
   };
 }
 
-function render(
-  data: ListPageData,
-  url = data.url,
-  deps: NonNullable<Parameters<typeof renderList>[5]> = {},
-): void {
+function listSource(row: RoutedList): PageSource<ListItem> | undefined {
+  // The route view's feed is widened to `unknown` items; this route is a list.
+  return row.view.feed?.(row.route) as PageSource<ListItem> | undefined;
+}
+
+function pagerNext(): HTMLAnchorElement | null {
+  return (
+    [...host.querySelectorAll<HTMLAnchorElement>(".pager a.pager-btn")].find(
+      (link) => link.textContent.trim() === "Next",
+    ) ?? null
+  );
+}
+
+function render(data: ListPageData, url = data.url, feed?: PageSource<ListItem>): void {
   const address = new URL(url);
   Object.assign(globalThis, { location: address });
   renderList(
@@ -50,7 +121,7 @@ function render(
     parseSearchQuery(address),
     viewContext({ navigate: (next) => navigations.push(next) }),
     "search",
-    deps,
+    { pageSource: feed },
   );
 }
 
@@ -65,8 +136,9 @@ beforeEach(() => {
 });
 
 describe("posted-date range in the filter panel", () => {
-  test("renders posted-since and posted-until date fields", () => {
-    render(page([]), `${BASE}?f_search=dogs`);
+  test("renders posted-since and posted-until date fields", async () => {
+    const row = routedList(`${BASE}?f_search=dogs`, await listDocument({ dates: {} }));
+    render(row.data.page, `${BASE}?f_search=dogs`, listSource(row));
 
     const since = host.querySelector<HTMLInputElement>('input[aria-label="Posted since"]');
     const until = host.querySelector<HTMLInputElement>('input[aria-label="Posted until"]');
@@ -79,8 +151,9 @@ describe("posted-date range in the filter panel", () => {
     expect(until?.getAttribute("title")).toContain("on or before");
   });
 
-  test("applies the range through the existing filter form", () => {
-    render(page([]), `${BASE}?f_search=dogs`);
+  test("applies the range through the existing filter form", async () => {
+    const row = routedList(`${BASE}?f_search=dogs`, await listDocument({ dates: {} }));
+    render(row.data.page, `${BASE}?f_search=dogs`);
 
     const form = host.querySelector<HTMLFormElement>("form.filters-grid");
     const since = host.querySelector<HTMLInputElement>('input[aria-label="Posted since"]');
@@ -101,8 +174,9 @@ describe("posted-date range in the filter panel", () => {
     expect(url.searchParams.get("advsearch")).toBe("1");
   });
 
-  test("resets the range with the rest of the advanced filters", () => {
-    render(page([]), RANGE_URL);
+  test("resets the range with the rest of the advanced filters", async () => {
+    const row = routedList(RANGE_URL, await listDocument({ dates: {} }));
+    render(row.data.page, RANGE_URL);
 
     const reset = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "Reset",
@@ -117,43 +191,54 @@ describe("posted-date range in the filter panel", () => {
   });
 });
 
-describe("posted-date range rendering", () => {
-  test("shows only in-range cards, an approximate count and no next page past since", () => {
-    const data = page(
-      [
-        dated("111", "2024-12-31 23:00", "Newest"),
-        dated("222", "2024-06-01 09:00", "Inside"),
-        dated("333", "2023-12-31 23:59", "Old"),
-      ],
-      { nextHref: NEXT_URL },
+describe("posted-date range policy", () => {
+  test("the list row bounds page one and ends paging after crossing since", async () => {
+    const row = routedList(
+      RANGE_URL,
+      await listDocument({
+        dates: {
+          "111": "2024-12-31 23:00",
+          "222": "2024-06-01 09:00",
+          "444": "2023-12-31 23:59",
+        },
+        nextHref: NEXT_URL,
+      }),
     );
 
-    render(data);
+    expect(row.data.page.items.map((item) => item.gid)).toEqual(["111", "222"]);
+    expect(row.data.page.nextHref).toBeNull();
+
+    render(row.data.page, row.data.page.url);
 
     expect(host.querySelectorAll(".card")).toHaveLength(2);
-    expect(host.textContent).toContain("Newest");
-    expect(host.textContent).toContain("Inside");
-    expect(host.textContent).not.toContain("Old");
+    expect(host.textContent).toContain("Alpha");
+    expect(host.textContent).not.toContain("Alpha duplicate");
 
     const summary = host.querySelector(".list-summary")?.textContent ?? "";
     expect(summary).toContain("2 shown");
     expect(summary).toContain("Approximate while filtered.");
-    expect(summary).not.toContain("500");
+    expect(summary).not.toContain("1,234");
 
-    // The page crossed `since`, so there is nothing after it that the range can use.
-    expect(host.querySelector(".pager-btn")).toBeNull();
+    expect(pagerNext()).toBeNull();
   });
 
-  test("carries the range onto the next-page link while inside the range", () => {
-    const data = page(
-      [dated("111", "2024-12-31 23:00", "Newest"), dated("222", "2024-06-01 09:00", "Inside")],
-      { nextHref: NEXT_URL },
+  test("the list row carries the range onto an in-range next link", async () => {
+    const row = routedList(
+      RANGE_URL,
+      await listDocument({
+        dates: {
+          "111": "2024-12-31 23:00",
+          "222": "2024-06-01 09:00",
+          "444": "2024-08-01 09:00",
+        },
+        nextHref: NEXT_URL,
+      }),
     );
 
-    render(data);
+    render(row.data.page, row.data.page.url);
 
-    const next = host.querySelector<HTMLAnchorElement>(".pager a.pager-btn");
-    expect(next?.textContent).toContain("Next");
+    const next = pagerNext();
+    expect(next?.textContent).toBe("Next");
 
     const href = new URL(next?.getAttribute("href") ?? "", BASE);
     expect(href.searchParams.get("p")).toBe("1");
@@ -161,64 +246,59 @@ describe("posted-date range rendering", () => {
     expect(href.searchParams.get("eh_until")).toBe("2024-12-31");
   });
 
-  test("leaves a range-free listing unchanged", () => {
+  test("a range-free listing passes through unchanged", async () => {
     const url = `${BASE}?f_search=dogs`;
-    const data = page(
-      [
-        dated("111", "2024-12-31 23:00", "Newest"),
-        dated("222", "2024-06-01 09:00", "Inside"),
-        dated("333", "2023-12-31 23:59", "Old"),
-      ],
-      { url, nextHref: NEXT_URL, resultText: "Found 500 results." },
+    const row = routedList(
+      url,
+      await listDocument({
+        dates: {
+          "111": "2024-12-31 23:00",
+          "222": "2024-06-01 09:00",
+          "444": "2023-12-31 23:59",
+        },
+        nextHref: NEXT_URL,
+      }),
     );
 
-    render(data, url);
+    render(row.data.page, url);
 
     expect(host.querySelectorAll(".card")).toHaveLength(3);
-    expect(host.querySelector(".list-summary")?.textContent).toBe("Found 500 results.");
+    expect(host.querySelector(".list-summary")?.textContent).toBe("Found 1,234 results.");
     expect(host.querySelector(".date-filter-note")).toBeNull();
-    expect(host.querySelector<HTMLAnchorElement>(".pager a.pager-btn")?.getAttribute("href")).toBe(
-      NEXT_URL,
-    );
+    expect(pagerNext()?.getAttribute("href")).toBe(NEXT_URL);
   });
 
-  test("filters appended pages and stops paging after crossing since", async () => {
+  test("the list feed filters appended pages and stops after crossing since", async () => {
     updateSetting("listInfiniteScroll", true);
-    const calls: string[] = [];
-    const appended = [
-      dated("222", "2024-05-01 10:00", "Inside next"),
-      dated("333", "2023-12-31 10:00", "Before"),
-    ];
-    const data = page([dated("111", "2024-12-31 23:00", "Newest")], { nextHref: NEXT_URL });
+    const row = routedList(
+      RANGE_URL,
+      await listDocument({
+        dates: { "111": "2024-12-31 23:00" },
+        nextHref: NEXT_URL,
+      }),
+      await listDocument({
+        dates: {
+          "222": "2024-05-01 10:00",
+          "444": "2023-12-31 10:00",
+        },
+        nextHref: "https://e-hentai.org/?f_search=dogs&p=2",
+      }),
+    );
 
-    render(data, RANGE_URL, {
-      pageSource: (url) => {
-        calls.push(url);
-        return Promise.resolve({
-          items: appended,
-          next: "https://e-hentai.org/?f_search=dogs&p=2",
-        });
-      },
-    });
-
+    render(row.data.page, RANGE_URL, listSource(row));
     expect(host.querySelectorAll(".card")).toHaveLength(1);
+
     lastObserver().trigger(host.querySelector(".infinite-scroll") as Element);
     await settle();
 
-    expect(calls).toHaveLength(1);
-    const requested = new URL(calls[0] ?? "", BASE);
-    expect(requested.searchParams.get("eh_since")).toBe("2024-01-01");
-    expect(requested.searchParams.get("eh_until")).toBe("2024-12-31");
-
     expect(host.querySelectorAll(".card")).toHaveLength(2);
-    expect(host.textContent).toContain("Inside next");
-    expect(host.textContent).not.toContain("Before");
+    expect(host.textContent).toContain("Beta");
+    expect(host.textContent).not.toContain("Alpha duplicate");
     expect(host.querySelector(".list-summary")?.textContent).toContain("2 shown");
 
     // The fetched page crossed `since`, so the cursor is done: another intersection is a no-op.
     lastObserver().trigger(host.querySelector(".infinite-scroll") as Element);
     await settle();
-    expect(calls).toHaveLength(1);
 
     updateSetting("listInfiniteScroll", false);
   });

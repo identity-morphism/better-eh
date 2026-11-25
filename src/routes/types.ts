@@ -33,21 +33,49 @@ export type Route =
 /** Options a route load may receive from the shell: only a cache bypass. */
 export type LoadOptions = Pick<DocumentOptions, "fresh">;
 
-/** One adapter per owned route kind: load, parse, render and title a route. */
+/** The entry point a route is prepared from: a cold boot or a history/navigation move. */
+export interface PrepareContext {
+  /** The route currently mounted, or null during boot. */
+  readonly previous: Route | null;
+  /** True when the navigation replaces the current entry instead of pushing a new one. */
+  readonly replace: boolean;
+  /** The current history entry's state, for markers that must survive a replace-navigation. */
+  readonly previousState: Readonly<Record<string, unknown>>;
+}
+
+/** A route as the shell should address it. */
+export interface PreparedRoute<R extends Route> {
+  readonly route: R;
+  /**
+   * Address the browser must load before this route can render from the current document, or null
+   * when the document is usable. Boot redirects there instead of rendering the wrong document.
+   */
+  readonly bootUrl: string | null;
+  /** Extra history state for a newly pushed entry. */
+  readonly state: Readonly<Record<string, unknown>>;
+}
+
+/** One adapter per owned route kind: prepare its address, load, parse, render and title it. */
 export interface RouteView<D, R extends Route = Route> {
+  /**
+   * Apply the row's own address policy before an entry point uses the route: persisted filters, a
+   * request-only redirect, per-route history markers. Every shell path crosses this seam, so the
+   * shell never names a kind.
+   */
+  prepare(route: R, context: PrepareContext): PreparedRoute<R>;
   load(route: R, signal: AbortSignal, options?: LoadOptions): Promise<D>;
   parse(doc: Document, route: R): D;
-  render(host: HTMLElement, data: D, ctx: ViewContext): void;
+  render(host: HTMLElement, data: D, ctx: ViewContext, route: R): void;
   title(data: D): string;
   /**
-   * Load and parse one appended page with the same document loader and parser as page one. Absent
-   * on routes that do not paginate.
+   * The append feed for this route, after the row's own paging policy (e.g. a client-side date
+   * range). Absent on routes that do not paginate.
    */
-  pageSource?: PageSource<unknown>;
+  feed?(route: R): PageSource<unknown> | undefined;
 }
 
 /** The data a list route carries: the parsed page plus the query it was loaded for. */
-interface ListRouteData {
+export interface ListRouteData {
   page: ListPageData;
   query: SearchQuery;
   /** Which listing tab produced the page, for headings and titles. */

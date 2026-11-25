@@ -10,10 +10,11 @@
  * is loaded.
  */
 
+import { createEmitter } from "../emitter";
 import { isRecord } from "../guards";
 import { log, warn } from "../log";
 import { createStore, gmStorage } from "../store";
-import { coreVocabularyGroups } from "./core";
+import { coreTagData } from "./core";
 import { getTagCounts, loadTagCounts, onTagCountsChange } from "./counts";
 import { decodeTagVocabulary } from "./index-codec";
 import { ASSET_RETRY_MS, ASSET_TTL_MS, assetUrls, fetchAsset } from "./mirror";
@@ -45,7 +46,7 @@ export interface TagEntry {
   readonly key: string;
   readonly folded: string;
   /** Gallery count from the popularity snapshot; 0 when no snapshot is available. */
-  readonly count: number;
+  count: number;
 }
 
 export interface TagIndex {
@@ -120,15 +121,16 @@ export function tagId(ns: string, key: string): string {
   return `${ns}\u0000${key}`;
 }
 
-/** Largest popularity count in a snapshot; 0 when there is none. */
-function maxTagCount(counts: ReadonlyMap<number, number> | undefined): number {
-  let max = 0;
-  if (counts) {
-    for (const count of counts.values()) {
-      if (count > max) {
-        max = count;
-      }
-    }
+/**
+ * Write the snapshot's counts onto the entries, in place, and return the snapshot's maximum.
+ *
+ * This is the one popularity attachment: a freshly built index and a refreshed snapshot use the
+ * same join, and an index in use keeps its maps while only its counts change.
+ */
+function attachCounts(entries: readonly TagEntry[], counts: TagCounts | undefined): number {
+  const max = counts?.max ?? 0;
+  for (const entry of entries) {
+    entry.count = max > 0 ? (counts?.counts.get(tagKeyId(entry.folded)) ?? 0) : 0;
   }
   return max;
 }
@@ -136,12 +138,11 @@ function maxTagCount(counts: ReadonlyMap<number, number> | undefined): number {
 function buildIndex(
   groups: ReadonlyMap<string, readonly string[]>,
   updated: number,
-  counts?: ReadonlyMap<number, number>,
+  counts?: TagCounts,
 ): TagIndex {
   const entries: TagEntry[] = [];
   const byNamespace = new Map<string, TagEntry[]>();
   const lookup = new Map<string, TagEntry>();
-  const maxCount = maxTagCount(counts);
 
   for (const namespace of TAG_NAMESPACES) {
     const keys = groups.get(namespace.id);
@@ -151,8 +152,7 @@ function buildIndex(
     const scoped: TagEntry[] = [];
     for (const key of keys) {
       const folded = fold(key);
-      const count = counts?.get(tagKeyId(folded)) ?? 0;
-      const entry: TagEntry = { ns: namespace, key, folded, count };
+      const entry: TagEntry = { ns: namespace, key, folded, count: 0 };
       entries.push(entry);
       scoped.push(entry);
       lookup.set(tagId(namespace.id, key), entry);
@@ -161,6 +161,7 @@ function buildIndex(
     byNamespace.set(namespace.id, scoped);
   }
 
+  const maxCount = attachCounts(entries, counts);
   return { entries, updated, lookup, byNamespace, maxCount };
 }
 
@@ -168,7 +169,7 @@ function buildIndex(
 function buildTagIndexFromGroups(
   groups: ReadonlyMap<string, readonly string[]>,
   updated = Date.now(),
-  counts?: ReadonlyMap<number, number>,
+  counts?: TagCounts,
 ): TagIndex {
   const index = buildIndex(groups, updated, counts);
   if (index.entries.length === 0) {
@@ -178,11 +179,7 @@ function buildTagIndexFromGroups(
 }
 
 /** Build an index from the raw EhTagTranslation `db.html.json` payload. */
-export function buildTagIndex(
-  raw: unknown,
-  updated = Date.now(),
-  counts?: ReadonlyMap<number, number>,
-): TagIndex {
+export function buildTagIndex(raw: unknown, updated = Date.now(), counts?: TagCounts): TagIndex {
   return buildTagIndexFromGroups(vocabularyGroups(raw), updated, counts);
 }
 
@@ -199,7 +196,7 @@ function encodeIndex(index: TagIndex): Record<string, string[]> {
 function decodeIndex(
   payload: Record<string, unknown>,
   updated: number,
-  counts: ReadonlyMap<number, number> | undefined,
+  counts: TagCounts | undefined,
 ): TagIndex | null {
   const groups = new Map<string, readonly string[]>();
   for (const [id, keys] of Object.entries(payload)) {
@@ -218,51 +215,33 @@ function decodeIndex(
   return index.entries.length === 0 ? null : index;
 }
 
-/** Rebuild an index with a different popularity map, preserving entry order. */
-function withTagCounts(
-  current: TagIndex,
-  counts: ReadonlyMap<number, number> | undefined,
-): TagIndex {
-  if (!counts) {
+/** Attach a refreshed snapshot to an index already in use, preserving its maps and entry order. */
+function withTagCounts(current: TagIndex, counts: TagCounts | undefined): TagIndex {
+  if (!counts || counts.max <= 0) {
     return current;
   }
-  const maxCount = maxTagCount(counts);
-  if (maxCount === 0) {
-    return current;
-  }
-
-  const entries = current.entries.map((entry) => ({
-    ...entry,
-    count: counts.get(tagKeyId(entry.folded)) ?? 0,
-  }));
-  const lookup = new Map<string, TagEntry>();
-  const byNamespace = new Map<string, TagEntry[]>();
-  for (const entry of entries) {
-    lookup.set(tagId(entry.ns.id, entry.key), entry);
-    const scoped = byNamespace.get(entry.ns.id);
-    if (scoped) {
-      scoped.push(entry);
-    } else {
-      byNamespace.set(entry.ns.id, [entry]);
-    }
-  }
-  return { entries, updated: current.updated, lookup, byNamespace, maxCount };
+  const maxCount = attachCounts(current.entries, counts);
+  return { ...current, maxCount };
 }
 
 function readIndexCache(): CachedSnapshot<BoundIndex> | null {
   const stored = indexStore.read();
   const counts = getTagCounts();
-  const index = decodeIndex(stored.payload, stored.updated, counts?.counts);
+  const index = decodeIndex(stored.payload, stored.updated, counts ?? undefined);
   return index ? { value: { index, counts }, updated: stored.updated } : null;
 }
 
-/** The embedded vocabulary as an index; built on first use and never persisted. */
+/** The embedded vocabulary and its generated popularity; built on first use, never persisted. */
 let core: TagIndex | null | undefined;
+let coreCounts: TagCounts | null = null;
 
 function coreIndex(): TagIndex | null {
   if (core === undefined) {
-    const groups = coreVocabularyGroups();
-    core = groups === null ? null : buildTagIndexFromGroups(groups, 0);
+    const generated = coreTagData();
+    const counts = getTagCounts() ?? generated?.counts ?? null;
+    core =
+      generated === null ? null : buildTagIndexFromGroups(generated.groups, 0, counts ?? undefined);
+    coreCounts = counts;
   }
   return core;
 }
@@ -279,7 +258,7 @@ async function fetchIndex(): Promise<BoundIndex> {
   try {
     const vocabulary = await fetchVocabulary();
     const counts = getTagCounts();
-    const index = buildTagIndexFromGroups(vocabulary, Date.now(), counts?.counts);
+    const index = buildTagIndexFromGroups(vocabulary, Date.now(), counts ?? undefined);
     log(`Tag index downloaded: ${index.entries.length} tags`);
     return { index, counts };
   } catch (error) {
@@ -300,21 +279,40 @@ const indexSnapshot = createSnapshot<BoundIndex>({
   onError: "throw",
 });
 
+/** The embedded core's own change channel; the full index has the snapshot's. */
+const coreChanges = createEmitter<void>();
+
 /** Subscribe to a newly served index: a fresh download or a refreshed popularity snapshot. */
 export function onTagIndexChange(listener: () => void): () => void {
-  return indexSnapshot.onChange(listener);
+  const offSnapshot = indexSnapshot.onChange(listener);
+  const offCore = coreChanges.subscribe(listener);
+  return () => {
+    offSnapshot();
+    offCore();
+  };
 }
 
 function applyTagCounts(counts: TagCounts): void {
   const current = indexSnapshot.get();
-  if (!current || current.counts === counts) {
-    return;
+  if (current !== null && current.counts !== counts) {
+    const next = withTagCounts(current.index, counts);
+    if (next !== current.index) {
+      indexSnapshot.publish({ index: next, counts });
+    }
   }
-  const next = withTagCounts(current.index, counts.counts);
-  if (next === current.index) {
-    return;
+
+  // Without a full index the core is what suggestions rank, so a refresh must reach it too. While
+  // the full index is served the core is only kept current for a later reset.
+  if (core !== undefined && core !== null && coreCounts !== counts) {
+    const next = withTagCounts(core, counts);
+    if (next !== core) {
+      core = next;
+      coreCounts = counts;
+      if (current === null) {
+        coreChanges.emit();
+      }
+    }
   }
-  indexSnapshot.publish({ index: next, counts });
 }
 
 onTagCountsChange(applyTagCounts);

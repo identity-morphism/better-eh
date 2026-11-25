@@ -58,7 +58,7 @@ describe("tag index", () => {
       [tagKeyId("big brevity"), 500],
       [tagKeyId("big brother"), 25],
     ]);
-    const index = buildTagIndex(RAW, 1, counts);
+    const index = buildTagIndex(RAW, 1, { counts, max: 500 });
 
     expect(index.maxCount).toBe(500);
     expect(index.lookup.get(tagId("female", "big brevity"))?.count).toBe(500);

@@ -3,9 +3,10 @@ import { startArchiveDownload } from "../data/archive";
 import type { ArchiveCost, ArchiveOption, ArchivePage } from "../parse/archive";
 import { nativeUrl } from "../routes/identity";
 import { appendChildren, buttonEl, el } from "../ui/dom";
-import { errorText } from "../ui/error-text";
 import { factRow } from "../ui/fact-row";
 import { listHeader } from "../ui/list-header";
+import type { PendingAction } from "../ui/pending-action";
+import { createPendingAction } from "../ui/pending-action";
 import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
 
@@ -60,6 +61,11 @@ interface OptionControl {
   available: boolean;
 }
 
+/** One prepared download locks every choice; the page is leaving for the handoff. */
+interface ArchiveHandoff {
+  locked: boolean;
+}
+
 /**
  * One archive choice: its size, price, and the button that performs the POST.
  *
@@ -70,6 +76,8 @@ function optionCard(
   option: ArchiveOption,
   ctx: ViewContext,
   controls: OptionControl[],
+  pending: PendingAction,
+  handoff: ArchiveHandoff,
   startDownload: StartArchiveDownload,
   openDownload: (href: string) => void,
 ): HTMLElement {
@@ -88,34 +96,30 @@ function optionCard(
       if (!option.available) {
         return;
       }
-      for (const control of controls) {
-        control.button.disabled = true;
-      }
-      button.setAttribute("aria-busy", "true");
-      status.removeAttribute("role");
-      status.textContent = "Preparing the archive…";
-
-      void startDownload(option, ctx.signal).then(
-        (href) => {
-          if (ctx.signal.aborted) {
-            return;
+      void pending.run({
+        run: () => startDownload(option, ctx.signal),
+        signal: ctx.signal,
+        setBusy: (busy) => {
+          button.toggleAttribute("aria-busy", busy);
+          for (const control of controls) {
+            control.button.disabled = busy || handoff.locked || !control.available;
           }
-          button.removeAttribute("aria-busy");
+          if (busy) {
+            status.removeAttribute("role");
+            status.textContent = "Preparing the archive…";
+          }
+        },
+        success: (href) => {
+          handoff.locked = true;
           status.textContent = "Archive ready. Starting the download…";
           openDownload(href);
         },
-        (error: unknown) => {
-          if (ctx.signal.aborted) {
-            return;
-          }
-          button.removeAttribute("aria-busy");
-          for (const control of controls) {
-            control.button.disabled = !control.available;
-          }
+        failure: "The archive could not be prepared.",
+        failed: (message) => {
           status.setAttribute("role", "alert");
-          status.textContent = errorText(error, "The archive could not be prepared.");
+          status.textContent = message;
         },
-      );
+      });
     },
     { signal: ctx.signal },
   );
@@ -191,13 +195,17 @@ export function renderArchive(
     });
 
   const controls: OptionControl[] = [];
+  const pending = createPendingAction();
+  const handoff: ArchiveHandoff = { locked: false };
   const options = [data.original, data.resample].filter(
     (option): option is ArchiveOption => option !== null,
   );
   const grid = el(
     "div",
     { class: "archive-options" },
-    ...options.map((option) => optionCard(option, ctx, controls, startDownload, openDownload)),
+    ...options.map((option) =>
+      optionCard(option, ctx, controls, pending, handoff, startDownload, openDownload),
+    ),
   );
 
   const empty =

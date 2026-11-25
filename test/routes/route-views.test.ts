@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { saveListFilters } from "../../src/data/list-filters";
 import { ParseMismatchError } from "../../src/fetch/errors";
 import type { DocumentOptions, ViewerPageOptions } from "../../src/fetch/loader";
 import { priorityOf } from "../../src/net/priority";
@@ -7,7 +8,7 @@ import { parseArchivePage } from "../../src/parse/archive";
 import { parseGalleryPage } from "../../src/parse/gallery";
 import { parseGalleryTorrents } from "../../src/parse/gallery-torrents";
 import { parseListPage } from "../../src/parse/list";
-import { parseSearchQuery } from "../../src/parse/query";
+import { emptySearchQuery, parseSearchQuery } from "../../src/parse/query";
 import { parseTorrents } from "../../src/parse/torrents";
 import { parseViewer } from "../../src/parse/viewer";
 import type { Route } from "../../src/router";
@@ -298,13 +299,102 @@ describe("gallery route", () => {
     const signal = new AbortController().signal;
     const parsed = parseGalleryPage(galleryDoc, GALLERY_URL);
 
-    await expectPageSource(views.routeView(galleryRoute).pageSource, {
+    await expectPageSource(views.routeView(galleryRoute).feed?.(galleryRoute), {
       page: { items: parsed.thumbs, next: parsed.nextHref },
       url: GALLERY_URL,
       signal,
       tag: "gallery",
       calls: docCalls,
     });
+  });
+});
+
+describe("route address policy", () => {
+  test("a listing fills remembered filters and redirects boot to the effective address", () => {
+    saveListFilters({ ...emptySearchQuery(), cats: 6, rating: 4 });
+    try {
+      const { views } = harness();
+      const prepared = views.routeView(listRoute).prepare(listRoute, {
+        previous: null,
+        replace: true,
+        previousState: {},
+      });
+
+      const url = new URL(prepared.route.url);
+      expect(url.searchParams.get("f_cats")).toBe("6");
+      expect(url.searchParams.get("f_srdd")).toBe("4");
+      expect(prepared.bootUrl).toBe(prepared.route.url);
+
+      const moved = views.routeView(listRoute).prepare(listRoute, {
+        previous: galleryRoute,
+        replace: false,
+        previousState: {},
+      });
+      expect(moved.bootUrl).toBeNull();
+      expect(moved.route.url).toContain("f_cats=6");
+    } finally {
+      saveListFilters(emptySearchQuery());
+    }
+  });
+
+  test("a date range starts a cold listing at the site's seek cursor", () => {
+    const url = "https://e-hentai.org/?eh_since=2024-01-01&eh_until=2024-12-31";
+    const route = {
+      kind: "list",
+      url,
+      query: parseSearchQuery(new URL(url)),
+      scope: "search",
+    } satisfies RouteOf<"list">;
+    const { views } = harness();
+
+    const prepared = views.routeView(route).prepare(route, {
+      previous: null,
+      replace: true,
+      previousState: {},
+    });
+
+    expect(prepared.bootUrl).not.toBeNull();
+    expect(new URL(prepared.bootUrl ?? "").searchParams.get("seek")).toBe("2024-12-31");
+  });
+
+  test("the viewer carries the gallery-return marker through its own replace-navigations", () => {
+    const { views } = harness();
+
+    const entered = views.routeView(viewerRoute).prepare(viewerRoute, {
+      previous: galleryRoute,
+      replace: false,
+      previousState: {},
+    });
+    expect(entered.state).toEqual({ fromGallery: true });
+
+    const replaced = views.routeView(viewerRoute).prepare(viewerRoute, {
+      previous: viewerRoute,
+      replace: true,
+      previousState: { fromGallery: true },
+    });
+    expect(replaced.state).toEqual({ fromGallery: true });
+
+    const fromList = views.routeView(viewerRoute).prepare(viewerRoute, {
+      previous: listRoute,
+      replace: false,
+      previousState: {},
+    });
+    expect(fromList.state).toEqual({ fromGallery: false });
+  });
+
+  test("other routes leave their address and history state alone", () => {
+    const { views } = harness();
+    const prepared = views.routeView(galleryRoute).prepare(galleryRoute, {
+      previous: listRoute,
+      replace: false,
+      previousState: {},
+    });
+
+    expect(prepared.route).toBe(galleryRoute);
+    expect(prepared.bootUrl).toBeNull();
+    expect(prepared.state).toEqual({});
+    expect(views.routeView(galleryRoute).feed?.(galleryRoute)).toBeDefined();
+    expect(views.routeView(torrentsRoute).feed?.(torrentsRoute)).toBeUndefined();
   });
 });
 
@@ -370,7 +460,7 @@ describe("list route", () => {
     const signal = new AbortController().signal;
     const parsed = parseListPage(listDoc, LIST_URL);
 
-    await expectPageSource(views.routeView(listRoute).pageSource, {
+    await expectPageSource(views.routeView(listRoute).feed?.(listRoute), {
       page: { items: parsed.items, next: parsed.nextHref },
       url: LIST_URL,
       signal,

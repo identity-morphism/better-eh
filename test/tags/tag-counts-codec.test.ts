@@ -62,6 +62,15 @@ describe("tag counts codec", () => {
     expect(decoded.counts.get(tagKeyId("big brevity"))).toBe(1_329_025);
   });
 
+  test("writes an explicit denominator for a selected subset", () => {
+    const bytes = encodeTagCountsBytes(new Map([["english", 771_349]]), 1_334_048);
+    const decoded = decodeTagCountsFromBytes(bytes);
+
+    expect(decoded?.max).toBe(1_334_048);
+    expect(decoded?.counts.get(tagKeyId("english"))).toBeGreaterThan(750_000);
+    expect(decoded?.counts.get(tagKeyId("english"))).toBeLessThan(790_000);
+  });
+
   test("decodes the base64 payload", () => {
     const valid = encodeTagCountsBytes(new Map([["english", 771_349]]));
     const decoded = decodeTagCounts(toBase64(valid));

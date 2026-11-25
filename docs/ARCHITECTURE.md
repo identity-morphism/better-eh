@@ -1,20 +1,27 @@
 # Architecture
 
-- **`src/app.ts`**: boot, shell, history, loading/error states; every path mounts through the
-  view-lifecycle module.
+- **`src/app-shell.ts`**: boot, navigation, popstate and error rendering over one injected
+  environment (URL/location, history, document, navigator, window, route views); every path mounts
+  through the view-lifecycle module. **`src/app.ts`** is the production adapter that supplies the
+  browser globals and the route table.
 - **`src/view-lifecycle.ts`**: the one mount/teardown sequence (abort, panels, view mode, sticky,
   host clear, render, title, scroll) with its side effects injected for tests.
 - **`src/router.ts`**: route parsing, owned-route detection, link interception.
 - **`src/routes/`**: `identity` (the path-shape regexes, scope/category tables and native marker)
-  and one exhaustive table of route views (`load`, `parse`, `render`, `title`). Document-backed
-  kinds are rows of `parse`/`render`/`title` data behind the shared `documentView` builder, so
-  adding a document kind is one table row; `load` and `parse` share one parse function.
+  and one exhaustive table of route views (`prepare`, `load`, `parse`, `render`, `title`, `feed`).
+  A row prepares its own address (remembered list filters, the date-cursor redirect, per-route
+  history markers) and supplies the append feed with its paging policy (the list's client-side date
+  range), so the shell crosses one seam and never names a kind. Document-backed kinds are rows of
+  data behind the shared `documentView` builder; `load` and `parse` share one parse function.
 - **`src/net/queue.ts`**: priority request scheduler with concurrency/interval limits.
 - **`src/net/http.ts`**: response classification (HTML bodies, rate-limit notices, login wall) and
   the shared POST helpers (`postForm`, `postJson`) every site mutation goes through.
 - **`src/fetch/`**: page-fetch: one loader over transport and parser, with document and viewer-page
   caches, LRU eviction, image preloading and prefetch.
-- **`src/page-image.ts`**: page image display, retry ladder, and give-up handling.
+- **`src/page-image.ts`**: page image display, retry ladder and give-up handling behind one slot
+  factory per mount; the factory owns the retry limit and abort/currency composition.
+- **`src/reader-navigation.ts`**: the reader's movement seam: one adapter per mode, with HUD state,
+  layout switching, click/swipe/keyboard intents and the visible zoom surface.
 - **`src/site.ts`**: the site's domains, display name and owned page paths, document-title
   joining, and the one builder for site page and per-gallery popup URLs.
 - **`src/parse/`**: `viewer`, `gallery`, `gallery-torrents`, `list`, `favorites`, `toplist`,
@@ -54,13 +61,15 @@
 - **`src/settings-schema.ts`**: the single declaration of every scalar preference (default, control,
   bounds, hint); the settings store, panel, validation and import/export derive from it.
 - **`src/views/`**: `viewer`, `gallery`, `gallery-torrents`, `archive`, `list`, `favorites`,
-  `toplist`, `torrents`, `home`, `my-tags` and `settings` render modules; `shell.ts` names the viewer shell's
-  element contract.
+  `toplist`, `torrents`, `home`, `my-tags` and `settings` render modules; `shell.ts` names the viewer
+  shell's element contract. The gallery composes `src/ui/gallery-tag-row.ts` for its tag section and
+  keeps the header, grid and paging itself.
 - **`src/view-mode.ts`**: the one owner of the body view-mode classes.
 - **`src/ui/`**: DOM helpers (`el`, the non-submitting `buttonEl`, inputs, icons), top bar and site
   tabs, popover primitive (every panel, including the
   tag combobox), login gate, active filter chips, quick-tag buttons and editor, parsed title
-  renderer, favorite popover, gallery rating/comments/tag menu, banner/toast, the result-card
+  renderer, favorite popover, gallery tag row/rating/comments/tag menu, the pending-action protocol
+  every mutation control uses, banner/toast, the result-card
   assembly, label/value fact rows, form-control state helpers, live-region helpers, shared pager
   (prev/next or numbered, plus the numbered-strip builder), paged-region (pager ⇄ infinite sentinel and
   appended nodes), the empty/error panel builder, the sticky chrome measurer, the in-page jump-row

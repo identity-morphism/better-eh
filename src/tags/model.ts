@@ -22,26 +22,48 @@ export const TAG_SIGNS: readonly TagSign[] = Object.freeze(["", "-", "~"]);
  */
 export interface SignPresentation {
   readonly glyph: string;
+  /** One-word accessible state ("included"). */
   readonly state: string;
   readonly chipClass: string;
   readonly action: string;
+  /** Phrase that completes "… — …" in a tooltip and accessible name. */
+  readonly searchState: string;
 }
 
 export const SIGN_PRESENTATION: Readonly<Record<TagSign, SignPresentation>> = Object.freeze({
-  "": { glyph: "+", state: "included", chipClass: "term-chip", action: "Include in search" },
+  "": {
+    glyph: "+",
+    state: "included",
+    chipClass: "term-chip",
+    action: "Include in search",
+    searchState: "in the search",
+  },
   "-": {
     glyph: "−",
     state: "excluded",
     chipClass: "term-chip is-excluded",
     action: "Exclude from search",
+    searchState: "excluded from the search",
   },
   "~": {
     glyph: "~",
     state: "optional",
     chipClass: "term-chip is-or",
     action: "Make optional (OR)",
+    searchState: "optional (OR) in the search",
   },
 });
+
+/** The phrase that says how a term is applied, e.g. "in the search". */
+export function termState(term: SearchTerm): string {
+  return SIGN_PRESENTATION[term.sign].searchState;
+}
+
+/** The same phrase sentence-cased for the start of a tooltip. */
+export function termStateLabel(term: SearchTerm): string {
+  const state = termState(term);
+  return `${state.charAt(0).toUpperCase()}${state.slice(1)}`;
+}
 
 export interface TagNamespace {
   readonly id: string;
@@ -119,6 +141,30 @@ export interface SearchTerm {
   readonly value: string;
   readonly quoted: boolean;
   readonly exact: boolean;
+}
+
+/**
+ * Identity of the tag a term names, or `null` when the term is plain search text.
+ *
+ * A resolved namespace uses its canonical id, so `f:` and `female:` agree. An unknown prefix is
+ * still a namespaced tag, keyed by its folded prefix; this is the rule the gallery chips, the tag
+ * menu, the suggester and quick-tag expressions all share. Quoting, exact markers, signs, case,
+ * underscores, whitespace and accents do not participate.
+ */
+export function termTagIdentity(term: SearchTerm): string | null {
+  if (term.value.trim() === "") {
+    return null;
+  }
+  if (term.ns !== null) {
+    return tagIdentity(term.ns, term.value);
+  }
+  return term.nsRaw === null ? null : tagIdentity(term.nsRaw, term.value);
+}
+
+/** Identity of a term for expression matching: sign, quoting and exact markers do not matter. */
+export function termIdentity(term: SearchTerm): string {
+  const tag = termTagIdentity(term);
+  return tag ?? `v\u0000${fold(term.value)}`;
 }
 
 function blankTerm(position: number): SearchTerm {
@@ -240,11 +286,6 @@ export function termAt(text: string, caret: number): SearchTerm {
   return blankTerm(position);
 }
 
-/** Whether a term looks like a tag the site will interpret as `namespace:tag`. */
-export function isTagTerm(term: SearchTerm): boolean {
-  return term.ns !== null && term.value.trim() !== "";
-}
-
 interface TextEdit {
   readonly text: string;
   readonly caret: number;
@@ -350,17 +391,14 @@ export function toggleTagInSearch(
   if (incoming === undefined) {
     return text;
   }
-  const namespace = incoming.ns;
-  if (namespace === null || incoming.value === "") {
+  const namespace = incoming.ns?.id ?? incoming.nsRaw;
+  const wanted = termTagIdentity(incoming);
+  if (namespace === null || wanted === null) {
     return text;
   }
 
-  const wanted = tagIdentity(namespace, incoming.value);
   for (const term of parseSearchTerms(text)) {
-    if (term.ns === null) {
-      continue;
-    }
-    if (tagIdentity(term.ns, term.value) !== wanted) {
+    if (termTagIdentity(term) !== wanted) {
       continue;
     }
     // Compare the signs themselves: `~` and no sign are different states, and the menu's
@@ -371,7 +409,7 @@ export function toggleTagInSearch(
     return setTermSign(text, term, sign);
   }
 
-  const formatted = formatTagToken(namespace.id, incoming.value, sign);
+  const formatted = formatTagToken(namespace, incoming.value, sign);
   const trimmed = text.trim();
   return trimmed === "" ? formatted : `${trimmed} ${formatted}`;
 }
@@ -387,13 +425,6 @@ export function termLabel(term: SearchTerm): string {
   return term.value || term.raw.slice(term.sign.length);
 }
 
-/** Identity of a term for expression matching: sign, quoting and exact markers do not matter. */
-function expressionKey(term: SearchTerm): string {
-  return term.ns === null
-    ? `v\u0000${fold(term.value)}`
-    : `t\u0000${tagIdentity(term.ns, term.value)}`;
-}
-
 function expressionTerms(expression: string): SearchTerm[] {
   return parseSearchTerms(expression).filter((term) => term.value !== "");
 }
@@ -404,8 +435,8 @@ export function containsExpression(text: string, expression: string): boolean {
   if (wanted.length === 0) {
     return false;
   }
-  const present = new Set(parseSearchTerms(text).map(expressionKey));
-  return wanted.every((term) => present.has(expressionKey(term)));
+  const present = new Set(parseSearchTerms(text).map(termIdentity));
+  return wanted.every((term) => present.has(termIdentity(term)));
 }
 
 /**
@@ -423,16 +454,16 @@ export function toggleExpressionInSearch(text: string, expression: string): stri
   if (containsExpression(text, expression)) {
     let next = text;
     for (const term of terms) {
-      const key = expressionKey(term);
-      const located = parseSearchTerms(next).find((candidate) => expressionKey(candidate) === key);
+      const key = termIdentity(term);
+      const located = parseSearchTerms(next).find((candidate) => termIdentity(candidate) === key);
       if (located !== undefined) {
         next = removeTerm(next, located);
       }
     }
     return next;
   }
-  const present = new Set(parseSearchTerms(text).map(expressionKey));
-  const missing = terms.filter((term) => !present.has(expressionKey(term)));
+  const present = new Set(parseSearchTerms(text).map(termIdentity));
+  const missing = terms.filter((term) => !present.has(termIdentity(term)));
   const suffix = missing.map((term) => term.raw).join(" ");
   const trimmed = text.trim();
   return trimmed === "" ? suffix : `${trimmed} ${suffix}`;

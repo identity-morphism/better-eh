@@ -492,12 +492,15 @@ describe("mountViewer", () => {
     expect(continuous.querySelectorAll(".reader-page")).toHaveLength(1);
     expect(requireNode(host, "#main-img").hasAttribute("src")).toBe(false);
     expect(state.viewerCalls).toEqual([]);
+    // At the first page of the stack there is nowhere to step back, even mid-gallery.
+    expect(requireNode<HTMLButtonElement>(host, "#hud-prev").disabled).toBe(true);
 
     click(requireNode(host, "#hud-next"));
     await flushMicrotasks(12);
 
     expect(continuous.querySelectorAll(".reader-page")).toHaveLength(2);
     expect(host.querySelector("#hud-counter")?.textContent).toBe("3 / 5");
+    expect(requireNode<HTMLButtonElement>(host, "#hud-prev").disabled).toBe(false);
     expect(state.viewerCalls.some((call) => call.url === NEXT)).toBe(true);
   });
 

@@ -1,5 +1,5 @@
 import type { DateRange } from "../data/list-date";
-import { filterByDateRange, isDateRangeActive, withDateRange } from "../data/list-date";
+import { isDateRangeActive } from "../data/list-date";
 import { isListPanelOpen, saveListFilters, setListPanelOpen } from "../data/list-filters";
 import { seekHref } from "../data/list-seek";
 import type { SearchQuery } from "../parse/query";
@@ -447,17 +447,12 @@ export function renderList(
   const narrow = narrowCount(urlQuery);
   const relaxed = relaxedCount(urlQuery);
 
-  // Posted-date ranges are client-side: the site's `seek` starts near `until`, then every page is
-  // filtered here and paging stops once a page reaches past `since`.
+  // The route row has already bounded the page and carried the range onto its next link; the view
+  // only reports that a range is active.
   const range: DateRange = { since: urlQuery.since, until: urlQuery.until };
   const rangeActive = isDateRangeActive(range);
-  const filtered = rangeActive ? filterByDateRange(data.items, range) : null;
-  const shownItems = filtered?.items ?? data.items;
-  const crossedSince = filtered?.crossedSince ?? false;
-  let nextHref = data.nextHref;
-  if (rangeActive) {
-    nextHref = nextHref !== null && !crossedSince ? withDateRange(nextHref, range) : null;
-  }
+  const shownItems = data.items;
+  const nextHref = data.nextHref;
 
   // The fallback count has to describe what the grid currently shows, including pages appended
   // by infinite scroll. A site-provided result line is a total, so it stays fixed. While a range
@@ -576,17 +571,7 @@ export function renderList(
         if (pageSource === undefined) {
           return Promise.reject(new Error("No next-page source for this list route."));
         }
-        const request = pageSource(rangeActive ? withDateRange(url, range) : url, signal);
-        if (!rangeActive) {
-          return request;
-        }
-        return request.then((page) => {
-          const kept = filterByDateRange(page.items, range);
-          return {
-            items: kept.items,
-            next: kept.crossedSince || page.next === null ? null : withDateRange(page.next, range),
-          };
-        });
+        return pageSource(url, signal);
       },
       append: (incoming) => {
         const nodes = incoming.map((item) => resultCard(item, ctx.signal));

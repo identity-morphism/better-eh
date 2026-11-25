@@ -24,8 +24,9 @@ locality) is used exactly as defined by the codebase-design skill.
 - **My Tags**: `/mytags`, the account's per-tag watch/hide, colour and weight settings plus the
   add/edit form. Parsed into `MyTagsPage`; mutations live in the `my-tags` data module.
 - **Posted-date range**: an app-owned `eh_since`/`eh_until` bound on a listing URL, not a site
-  filter. Boot rewrites it to the site's date cursor (`seek`) and bounds the rows client-side, so
-  counts are approximate.
+  filter. The list route row rewrites a cold address to the site's date cursor (`seek`), bounds its
+  page one and append feed client-side, and stops paging once a page crosses `since`, so counts are
+  approximate.
 - **Uconfig**: `/uconfig.php`, the account's site settings form. Parsed into `UconfigSection[]`;
   saving posts every parsed field back with the changed values applied.
 - **Page**: one image inside a gallery. Its viewer URL is the unit the page cache is keyed on.
@@ -44,7 +45,9 @@ locality) is used exactly as defined by the codebase-design skill.
 - **Tag index**: the compact namespace/key vocabulary used for suggestions. The bundle embeds a
   generated core of its most popular tags (about 1,500); the full roughly 400 KB front-coded index
   stays remote and upgrades that core in the background on first use.
-- **Tag counts**: the cached gallery-frequency snapshot that ranks popular tags ahead of rare matches; empty until its asset download succeeds.
+- **Tag counts**: the cached gallery-frequency snapshot that ranks popular tags ahead of rare
+  matches. The generated core embeds the counts of its selected tags; the remote snapshot refreshes
+  the full index and the core when it is what suggestions serve.
 - **Search draft**: the tab's committed query plus the free text being edited, kept across list,
   gallery, and reloads. Submitting commits the draft; tag clicks and chip edits change only it.
 
@@ -64,8 +67,14 @@ locality) is used exactly as defined by the codebase-design skill.
   setters, and subscriptions for the top bar, chips and tag section. Persists both halves in the
   tab session.
 - **route table**: one entry per owned route kind, pairing the URL matcher with the **route view**
-  adapter, so `parseRoute` and the view table cannot drift. `load` and `parse` share one parse
-  function, so a document is parsed once per load.
+  adapter, so `parseRoute` and the view table cannot drift. A row owns its address policy
+  (`prepare`: remembered filters, request-only redirects, history markers) and its append feed
+  (`feed`: the paging policy applied to page one and every appended page); the shell never names a
+  kind. `load` and `parse` share one parse function, so a document is parsed once per load.
+- **app shell**: boot, navigation, popstate and error rendering built around one injected
+  environment (URL/location, history, document, navigator, window and route views). `src/app.ts` is
+  the production adapter; tests construct another environment, so multiple scenarios and shells
+  share one process.
 - **view-lifecycle**: the one mount/teardown sequence — abort the previous view, close panels, reset
   view mode, dispose sticky tracking, clear the host, render, title, restore scroll. Success, login
   gate and error paths all mount through it.
@@ -80,7 +89,12 @@ locality) is used exactly as defined by the codebase-design skill.
 - **gallery refresh**: the gallery view's one fresh fetch and parse after a mutation; the tag and
   comment sections receive the refreshed data instead of loading the page themselves.
 - **view-mode**: the single owner of body view-mode classes and per-view CSS variables.
-- **page-image**: show one page's image, refetch on failure up to the retry limit, then give up.
+- **page-image**: show one page's image, refetch on failure up to the retry limit, then give up. One
+  slot factory per mount owns the retry ladder, retry-limit provider and abort/currency composition;
+  a surface only supplies its stale check and paints.
+- **reader navigation**: one adapter per reader mode (single, spread, continuous), chosen when the
+  mode mounts. Movement, HUD state, layout sync, clicks, swipes, keyboard step and the visible zoom
+  surface all cross this seam, so the viewer never re-reads the mode.
 - **zoom**: the fit-height zoom/pan controller; reports each level so the viewer can swap in the
   original image once the served copy would be upscaled.
 - **pager**: the numbered, jump and seek pagination control shared by the gallery, list, favorites,
@@ -100,6 +114,17 @@ locality) is used exactly as defined by the codebase-design skill.
 - **home**: the `/home.php` account overview: the account subnav plus each titled stats box as
   prose, label/value facts and standalone links. Account-mutating forms stay on the native page.
 - **tags**: the search-expression grammar, the cached tag index, and the suggestion ranking; no DOM.
+  `model` owns term identity for known namespaces, aliases, unknown prefixes, quoting and exact
+  markers, plus the sign-presentation table every chip, menu and tooltip consumes. `db` attaches
+  the popularity snapshot in one place, using the snapshot's maximum as the denominator, and the
+  generated core carries the counts it was selected by so first-run ranking matches the full index.
 - **tag-combobox**: the accessible suggestion portal bound to the top bar's input.
 - **search-chips**: the structured view of the current query's terms.
+- **gallery tag row**: the gallery's tag section: chips, hints, context menus, touch trigger, tag
+  composer, applied state and focus return. It rebuilds itself from a refreshed gallery page while
+  the gallery keeps the header, grid and paging.
 - **action-menu**: the shared menu panel behind a button or a right-click on an element.
+- **pending action**: the one mutation protocol — in-flight guard, busy marking, abort check,
+  result/error paint and focus restore. Controls supply the request, paints and recovery target;
+  archive download, torrent details, comment vote/post/edit, rating, the tag menu and favorites bulk
+  actions all run through it.

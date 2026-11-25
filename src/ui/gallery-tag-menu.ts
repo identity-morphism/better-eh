@@ -3,7 +3,7 @@ import type { MyTagTransports } from "../data/my-tags";
 import type { TagSign } from "../tags/model";
 import { SIGN_PRESENTATION } from "../tags/model";
 import { buttonEl, el, icon, tagInput } from "./dom";
-import { errorText } from "./error-text";
+import { createPendingAction } from "./pending-action";
 import { bindPopover, closePopovers } from "./popover";
 import type { PopoverBinding } from "./popover";
 
@@ -64,8 +64,8 @@ export function openTagMenu(
     }
   };
 
-  const showError = (cause: unknown): void => {
-    error.textContent = errorText(cause, "The action failed.");
+  const showError = (message: string): void => {
+    error.textContent = message;
     error.hidden = false;
   };
 
@@ -90,37 +90,30 @@ export function openTagMenu(
     signal,
   );
 
-  let running = false;
-  const run = async (action: () => Promise<void>, focusTarget: HTMLElement): Promise<void> => {
-    if (running) {
-      return;
-    }
-    running = true;
-    error.hidden = true;
-    setBusy(true);
-    let failed = false;
-    try {
-      await action();
-      binding.close();
-    } catch (cause) {
+  const pending = createPendingAction();
+  const run = (action: () => Promise<void>, focusTarget: HTMLElement): void => {
+    void pending.run({
+      run: action,
+      signal,
+      setBusy: (busy) => {
+        if (busy) {
+          error.hidden = true;
+        }
+        setBusy(busy);
+      },
+      success: () => {
+        binding.close();
+      },
       // Keep the panel (and any typed tags) so the action can be retried.
-      showError(cause);
-      failed = true;
-    } finally {
-      running = false;
-      setBusy(false);
-      if (failed) {
-        // Disabling the action buttons during the request dropped focus to <body>; put it back.
-        focusTarget.focus();
-      }
-    }
+      failure: "The action failed.",
+      failed: showError,
+      // Disabling the action buttons during the request dropped focus to <body>; put it back.
+      recover: () => focusTarget,
+    });
   };
 
-  buttons.up.addEventListener("click", () => void run(() => handlers.vote(raw, 1), buttons.up));
-  buttons.down.addEventListener(
-    "click",
-    () => void run(() => handlers.vote(raw, -1), buttons.down),
-  );
+  buttons.up.addEventListener("click", () => run(() => handlers.vote(raw, 1), buttons.up));
+  buttons.down.addEventListener("click", () => run(() => handlers.vote(raw, -1), buttons.down));
 
   const applySign = (sign: TagSign): void => {
     if (handlers.token === null) {
@@ -142,7 +135,7 @@ export function openTagMenu(
       if (value === "") {
         return;
       }
-      void run(() => handlers.addTags(value), input);
+      run(() => handlers.addTags(value), input);
     },
     { signal },
   );
@@ -153,7 +146,7 @@ export function openTagMenu(
     watch.addEventListener("click", () => {
       const runWatch = handlers.watchTag;
       if (runWatch) {
-        void run(() => runWatch(raw), watch);
+        run(() => runWatch(raw), watch);
       }
     });
     extraButtons.push(watch);
@@ -164,7 +157,7 @@ export function openTagMenu(
     hide.addEventListener("click", () => {
       const runHide = handlers.hideTag;
       if (runHide) {
-        void run(() => runHide(raw), hide);
+        run(() => runHide(raw), hide);
       }
     });
     extraButtons.push(hide);
@@ -190,7 +183,7 @@ export function openTagMenu(
     apply.addEventListener("click", () => {
       const runColor = handlers.colorTag;
       if (runColor) {
-        void run(() => runColor(raw, color.value), apply);
+        run(() => runColor(raw, color.value), apply);
       }
     });
     actionRows.push(el("div", { class: "tag-menu-actions" }, color, apply));

@@ -6,10 +6,10 @@ import { SITE_PATHS } from "../site";
 import type { ListItem } from "../types";
 import { createCardGrid } from "../ui/card-grid";
 import { buttonEl, el } from "../ui/dom";
-import { errorText } from "../ui/error-text";
 import { trackScrollEdges } from "../ui/jump-row";
 import { listHeader } from "../ui/list-header";
 import { pager } from "../ui/pager";
+import { createPendingAction } from "../ui/pending-action";
 import type { Popover } from "../ui/popover";
 import { openPopover } from "../ui/popover";
 import { resultCard } from "../ui/result-card";
@@ -186,7 +186,7 @@ export function renderFavorites(
   const move = deps?.move ?? moveFavorites;
 
   const selection = createSelection(data.items.map((item) => item.gid));
-  let busy = false;
+  const pending = createPendingAction();
   let retryAction: BulkAction | null = null;
   let movePopover: Popover | null = null;
   let armedDelete = false;
@@ -250,9 +250,9 @@ export function renderFavorites(
     countLabel.textContent = `${total} selected`;
     statusText.hidden = retryAction === null;
     retryButton.hidden = retryAction === null;
-    removeButton.disabled = total === 0 || busy;
-    moveButton.disabled = total === 0 || busy;
-    retryButton.disabled = busy;
+    removeButton.disabled = total === 0 || pending.busy;
+    moveButton.disabled = total === 0 || pending.busy;
+    retryButton.disabled = pending.busy;
     // A confirmation names the count it will delete; a different selection needs a fresh one.
     if (total === 0 || (armedDelete && total !== armedCount)) {
       disarmDelete();
@@ -265,34 +265,34 @@ export function renderFavorites(
     syncBulkSpace();
   };
 
-  const perform = async (action: BulkAction): Promise<void> => {
-    if (busy || selection.size === 0) {
+  const perform = (action: BulkAction): void => {
+    if (pending.busy || selection.size === 0) {
       return;
     }
-    busy = true;
     retryAction = null;
     statusText.hidden = true;
     syncBar();
 
-    try {
-      await action.run();
-      showToast(action.success);
-      selection.clear();
-      busy = false;
-      syncBar();
-      // The removed cards, folder counts and summary are stale until the page is re-read.
-      ctx.reload();
-    } catch (error) {
-      retryAction = action;
-      statusText.textContent = errorText(error, "Favorite update failed.");
-    } finally {
-      busy = false;
-      syncBar();
+    void pending.run({
+      run: action.run,
+      signal: ctx.signal,
+      setBusy: () => {
+        syncBar();
+      },
+      success: () => {
+        showToast(action.success);
+        selection.clear();
+        // The removed cards, folder counts and summary are stale until the page is re-read.
+        ctx.reload();
+      },
+      failure: "Favorite update failed.",
+      failed: (message) => {
+        retryAction = action;
+        statusText.textContent = message;
+      },
       // The clicked action was disabled while the request ran; put focus on the recovery path.
-      if (retryAction !== null) {
-        retryButton.focus();
-      }
-    }
+      recover: () => retryButton,
+    });
   };
 
   const openMoveMenu = (): void => {
@@ -321,7 +321,7 @@ export function renderFavorites(
         () => {
           movePopover?.close();
           const gids = selection.ids();
-          void perform({
+          perform({
             run: () => move(gids, folder.slot, ctx.signal),
             success: `Moved ${gids.length} ${plural(gids.length, "favorite", "favorites")} to ${folder.name}`,
           });
@@ -389,7 +389,7 @@ export function renderFavorites(
   removeButton.addEventListener(
     "click",
     () => {
-      if (selection.size === 0 || busy) {
+      if (selection.size === 0) {
         return;
       }
       // Two steps: a bulk delete that removes a whole folder's page needs a deliberate confirm.
@@ -403,7 +403,7 @@ export function renderFavorites(
       }
       disarmDelete();
       const gids = selection.ids();
-      void perform({
+      perform({
         run: () => remove(gids, ctx.signal),
         success: `Deleted ${gids.length} ${plural(gids.length, "favorite", "favorites")}`,
       });
@@ -415,7 +415,7 @@ export function renderFavorites(
     "click",
     () => {
       if (retryAction) {
-        void perform(retryAction);
+        perform(retryAction);
       }
     },
     { signal: ctx.signal },

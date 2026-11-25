@@ -8,7 +8,7 @@
 
 import type { ReaderMode, ReadingDirection } from "./types";
 
-type PageIntent = "prev" | "next" | "toggle";
+export type PageIntent = "prev" | "next" | "toggle";
 
 interface ReaderLayout {
   /** The spread image is part of this layout. */
