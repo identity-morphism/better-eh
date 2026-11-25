@@ -173,7 +173,7 @@ describe("PageLoader.viewerPage", () => {
 
     expect(first.viewerUrl).toBe(VIEWER_URL);
     expect(first.imgSrc).toBe("https://img.example/pages/2.jpg");
-    expect(first.nlToken).toBe("777");
+    expect(first.nlToken).toBe("777-abc");
 
     expect(await h.loader.viewerPage(requested)).toBe(first);
     expect(await h.loader.viewerPage(VIEWER_URL)).toBe(first);
@@ -333,10 +333,21 @@ describe("PageLoader.retryWithNl", () => {
 
     expect(h.calls).toEqual([retryUrl]);
     expect(retried.viewerUrl).toBe(VIEWER_URL);
-    expect(retried.nlToken).toBe("777");
+    expect(retried.nlToken).toBe("777-abc");
 
     expect(await h.loader.viewerPage(VIEWER_URL)).toBe(retried);
     expect(h.calls).toHaveLength(1);
+  });
+
+  test("encodes a token before appending it", async () => {
+    const html = await fixtureHtml("viewer.html");
+    const retryUrl = `${VIEWER_URL}?nl=12%2034%2656`;
+    const h = harness(() => htmlResponse(html, retryUrl));
+
+    const retried = await h.loader.retryWithNl(page(VIEWER_URL, "12 34&56"));
+
+    expect(retried).not.toBeNull();
+    expect(h.calls).toEqual([retryUrl]);
   });
 
   test("passes the retry signal to the transport", async () => {

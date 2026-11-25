@@ -94,8 +94,76 @@ function hideDocument(): void {
   apply();
 }
 
+let stopNativeErrorGuard: (() => void) | null = null;
+
+/**
+ * Keep the site's own image handlers from acting while its document is still being replaced.
+ *
+ * The viewer's page image carries `onerror="this.onerror=null; nl('…')"`, and `nl()` is a full-page
+ * navigation to `?nl=<token>`. A request the old document started can fail after takeover; without
+ * this guard its handler would reload the reader out from under the app. The capture listener stops
+ * those errors at the window before they reach the element; `ensureShell` removes it once the
+ * native nodes are gone and the app's own images (which need their error handlers) exist.
+ */
+function guardAgainstNativeImageErrors(): void {
+  const guard = (event: Event): void => {
+    const target = event.target;
+    // Only the viewer's page image calls `nl()`; other scripts' image errors keep their handlers.
+    if (
+      target instanceof Element &&
+      target.localName === "img" &&
+      (target.getAttribute("onerror") ?? "").includes("nl(")
+    ) {
+      event.stopImmediatePropagation();
+    }
+  };
+  window.addEventListener("error", guard, true);
+  stopNativeErrorGuard = () => {
+    window.removeEventListener("error", guard, true);
+    stopNativeErrorGuard = null;
+  };
+}
+
+/** True when a handler property still holds the site's script, not another userscript. */
+function isNativeHandler(handler: unknown, marker: string): boolean {
+  return typeof handler === "function" && handler.toString().includes(marker);
+}
+
+/**
+ * Detach the site's document-level handlers before its nodes disappear.
+ *
+ * The viewer script sets `window.onresize`, `window.onpopstate` and `document.onkeydown`; all three
+ * then dereference elements this app removes, and its popstate handler would issue a `showpage`
+ * request for the app's own history entries (and navigate on the response). Clearing the properties
+ * leaves the site's script inert while the app's `addEventListener` handlers take over; handlers
+ * installed by other userscripts are left alone.
+ */
+function detachNativePage(): void {
+  if (isNativeHandler(window.onresize, "update_window_extents")) {
+    window.onresize = null;
+  }
+  if (isNativeHandler(window.onpopstate, "apply_json_state")) {
+    window.onpopstate = null;
+  }
+  if (isNativeHandler(document.onkeydown, "holdingOverrideKey")) {
+    document.onkeydown = null;
+  }
+  if (isNativeHandler(document.onkeyup, "holdingOverrideKey")) {
+    document.onkeyup = null;
+  }
+  // The page image still has `onerror="…nl('…')"` and an in-flight request; dropping the source
+  // cancels the duplicate fetch the app is about to make itself.
+  for (const image of document.querySelectorAll<HTMLImageElement>("#i3 img, #img")) {
+    image.onload = null;
+    image.onerror = null;
+    image.removeAttribute("src");
+  }
+}
+
 function revealDocument(): void {
   hiding = false;
+  // Boots that fall back to the site's own page must leave its handlers alone.
+  stopNativeErrorGuard?.();
   const root: HTMLElement | null = document.documentElement;
   // See `hideDocument`: the document may still lack <html> at this point.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -123,6 +191,11 @@ function ensureShell(): void {
       el("meta", { name: "viewport", content: "width=device-width, initial-scale=1" }),
     );
   }
+
+  // The parsed data is in hand and the native DOM is about to go: retire the site's handlers and
+  // its pending images first, so a late load/error cannot act on nodes that no longer exist.
+  stopNativeErrorGuard?.();
+  detachNativePage();
 
   document.body.replaceChildren();
   document.body.className = "eh-body";
@@ -441,6 +514,7 @@ export function boot(): void {
   // Native routes keep the site's own page, ads included; owned routes do not need its loader.
   blockSiteAds();
   hideDocument();
+  guardAgainstNativeImageErrors();
 
   // A cold load of a bare listing cannot be filtered without refetching, so let the browser ask
   // for the remembered URL instead of rendering the unfiltered document and then replacing it.

@@ -257,6 +257,26 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     showToast("Reloading image");
   };
 
+  /**
+   * Refetch the page through the site's `nl` token, the way its own "Reload broken image" works.
+   * When there is no token (or the refetch fails), show the image again instead of leaving the
+   * error panel's Retry button inert; the image's own ladder reports a second failure.
+   */
+  const retryPage = (): void => {
+    void (async () => {
+      hideError();
+      const retried = await loader.retryWithNl(current, { signal: ctx.signal });
+      if (ctx.signal.aborted) {
+        return;
+      }
+      if (retried) {
+        render(retried);
+        return;
+      }
+      showMain(current);
+    })();
+  };
+
   const goEnd = (direction: "first" | "last"): void => {
     const target = direction === "first" ? current.firstHref : current.lastHref;
     if (target) {
@@ -933,24 +953,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     { signal: ctx.signal },
   );
 
-  ui.elErrorRetry.addEventListener(
-    "click",
-    () => {
-      void (async () => {
-        hideError();
-        const retried = await loader.retryWithNl(current, { signal: ctx.signal });
-        if (ctx.signal.aborted) {
-          return;
-        }
-        if (retried) {
-          render(retried);
-        } else {
-          showError();
-        }
-      })();
-    },
-    { signal: ctx.signal },
-  );
+  ui.elErrorRetry.addEventListener("click", retryPage, { signal: ctx.signal });
 
   document.addEventListener(
     "keydown",

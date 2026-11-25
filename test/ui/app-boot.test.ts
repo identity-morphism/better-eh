@@ -32,6 +32,7 @@ const globals = globalThis as unknown as Globals;
 
 let document: Document;
 let view: Window;
+let nativeImage: HTMLImageElement;
 
 /** Constructors linkedom exposes on its window; TypeScript's `Window` omits them. */
 interface LinkedomConstructors {
@@ -179,6 +180,18 @@ beforeAll(async () => {
   Object.assign(view, { scrollTo: () => undefined, scrollY: 0 });
   installNoopObservers();
 
+  // The viewer script leaves these handlers on the document. Their source carries the markers the
+  // app checks, so the takeover must clear exactly these and not another script's properties.
+  document.onkeydown = function holdingOverrideKey(): void {};
+  view.onresize = function update_window_extents(): void {};
+  view.onpopstate = function apply_json_state(): void {};
+  nativeImage = document.createElement("img");
+  nativeImage.id = "img";
+  nativeImage.onerror = () => undefined;
+  nativeImage.onload = () => undefined;
+  nativeImage.setAttribute("src", "https://img.example/native-page.jpg");
+  document.body.append(nativeImage);
+
   for (const key of overridden) {
     original[key] = (globalThis as unknown as Record<string, unknown>)[key];
   }
@@ -238,6 +251,14 @@ describe("boot", () => {
     expect(document.body.classList.contains("is-loading")).toBe(false);
     expect(document.documentElement.style.getPropertyValue("visibility")).toBe("");
     expect(document.title).toContain("E-Hentai");
+
+    // The site's viewer handlers and its pending page image must not outlive the takeover.
+    expect(document.onkeydown).toBeNull();
+    expect(view.onresize).toBeNull();
+    expect(view.onpopstate).toBeNull();
+    expect(nativeImage.onerror).toBeNull();
+    expect(nativeImage.onload).toBeNull();
+    expect(nativeImage.hasAttribute("src")).toBe(false);
   });
 
   test("loads a gallery through the router and shows the loading state until it lands", async () => {

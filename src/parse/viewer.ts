@@ -2,6 +2,19 @@ import type { PageData } from "../types";
 import { anchorHref } from "./helpers";
 import { parseTitle } from "./title";
 
+/**
+ * The viewer's "Reload broken image" anchor calls `nl('39629-498785')`; older markup passed the
+ * token unquoted. The token is not numeric, so matching `nl(\d+)` never finds it.
+ */
+const NL_TOKEN = /\bnl\(\s*(?:'([^']*)'|"([^"]*)"|([^'")\s]+))\s*\)/u;
+
+function parseNlToken(doc: Document | HTMLElement): string | null {
+  const anchor = doc.querySelector("#loadfail, a[onclick*='nl(']");
+  const match = NL_TOKEN.exec(anchor?.getAttribute("onclick") ?? "");
+  const token = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+  return token === "" ? null : token;
+}
+
 export function parseViewer(doc: Document | HTMLElement, viewerUrl: string): PageData {
   const [, pageHash = "", galleryId = "", rawNum = "1"] =
     viewerUrl.match(/\/s\/([^/]+)\/(\d+)-(\d+)/) ?? [];
@@ -12,11 +25,7 @@ export function parseViewer(doc: Document | HTMLElement, viewerUrl: string): Pag
   // Present only while the image server hands out a resized copy.
   const originalHref = anchorHref(doc.querySelector("a[href*='/fullimg/']"), viewerUrl);
 
-  const nlToken =
-    doc
-      .querySelector('a[onclick*="nl("]')
-      ?.getAttribute("onclick")
-      ?.match(/nl\((\d+)\)/)?.[1] ?? null;
+  const nlToken = parseNlToken(doc);
 
   const anchorHrefs = [...doc.querySelectorAll<HTMLAnchorElement>('a[href*="/s/"]')].map((anchor) =>
     anchorHref(anchor, viewerUrl),

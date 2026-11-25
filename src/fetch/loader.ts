@@ -263,13 +263,13 @@ export function createPageLoader(deps: PageLoaderDeps): PageLoader {
     },
 
     async retryWithNl(page, { signal } = {}) {
-      if (!page.nlToken) {
+      if (page.nlToken === null || page.nlToken === "") {
         return null;
       }
       if (signal?.aborted) {
         return null;
       }
-      const retryUrl = `${page.viewerUrl.split("?")[0]}?nl=${page.nlToken}`;
+      const retryUrl = `${page.viewerUrl.split("?")[0]}?nl=${encodeURIComponent(page.nlToken)}`;
       log("nl retry →", retryUrl);
       try {
         const { doc } = await loadDocument(retryUrl, {
