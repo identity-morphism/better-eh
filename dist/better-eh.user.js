@@ -6858,9 +6858,7 @@ ${defaultKeySummary()}`)) {
         submit(text);
       },
       onToggle: (text) => {
-        const next = toggleExpressionInSearch(getSearchDraft().text, text);
-        setSearchDraftText(next);
-        submit(next);
+        setSearchDraftText(toggleExpressionInSearch(getSearchDraft().text, text));
       },
       signal: options.signal ?? new AbortController().signal
     });
@@ -10395,7 +10393,7 @@ ${defaultKeySummary()}`)) {
       for (const tag of tags) {
         const node = el("button", { class: "quick-tag", type: "button", "aria-pressed": "false" }, el("span", { class: "quick-tag-label", text: tag.name }));
         node.addEventListener("click", () => {
-          options.search(toggleExpressionInSearch(options.getText(), tag.query));
+          options.apply(toggleExpressionInSearch(options.getText(), tag.query));
         }, { signal });
         row.append(node);
         entries.push({ tag, node });
@@ -10688,7 +10686,7 @@ ${defaultKeySummary()}`)) {
     });
     quickTags = renderQuickTags({
       getText: () => getSearchDraft().text,
-      search,
+      apply: setSearchDraftText,
       signal: ctx.signal
     });
     const panel = el("section", { class: "search-panel" }, categoryChips(draftQuery, ctx), quickTags.element, advancedPanel(draftQuery, ctx));
