@@ -70,6 +70,9 @@
   `my-tags`, `favorites`, `gallery-actions`, `archive`). The shared recipes — interactive boxes, ghost icon buttons,
   tab/filter active treatment, uppercase eyebrows, scrolling-row fade, settings rows/fields, status
   lines — live in `app.css`; a feature sheet only adds what makes its component different.
-- **`src/style.css`**: viewer-only styles.
+- **`src/style.css`**: viewer-only styles, injected unlayered beside the compiled Tailwind output
+  (see `src/ui/styles.ts`), so the reader outranks the layered app; every selector here must stay
+  viewer-scoped, and any element whose `display` this sheet sets hides itself through `[hidden]`
+  rather than relying on preflight.
 - **`src/settings.ts` / `src/keymap.ts` / `src/log.ts` / `src/menu.ts`**: settings store, key
   bindings, debug logging, and menu commands.

@@ -418,9 +418,16 @@ body.hud-pinned #page-nav button {
 
 /* ----------------------------------------------------------- reader modes */
 
+/* Every element the reader hides with `hidden`. Tailwind's preflight hides them today through a
+   layered `[hidden] { display: none !important }`, but this sheet is injected unlayered and outside
+   the Tailwind pipeline, so no `display` it adds later can be allowed to depend on a generated
+   base layer. */
 #img-wrap[hidden],
 #continuous[hidden],
-#spread-img[hidden] {
+#spread-img[hidden],
+#hud-help[hidden],
+#img-error[hidden],
+.img-error-retry[hidden] {
   display: none !important;
 }
 
