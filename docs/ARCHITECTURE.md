@@ -46,7 +46,9 @@
   payload encoding), `codec-header` (the magic/version guard both binary decoders share), and
   `suggest` (ranking and namespace completion).
   `scripts/update-tag-counts.ts` and `scripts/update-tag-index.ts` regenerate the remote assets;
-  `scripts/update-core-vocabulary.ts` regenerates the embedded core and verifies it with `--check`.
+  `scripts/update-core-vocabulary.ts` regenerates the embedded core and verifies it with `--check`;
+  `scripts/publish-data.ts` lands a scheduled refresh on master through a dispatched `ci.yml` run,
+  the only way a runner-made commit acquires the `check` status master requires.
 - **`src/search-draft.ts`**: the tab-scoped committed query and the free-text draft shared by the
   list, gallery and top bar.
 - **`src/store.ts`**: one persistence seam over userscript value storage and session storage —
