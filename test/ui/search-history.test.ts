@@ -226,7 +226,7 @@ describe("search history panel", () => {
     input().dispatchEvent(new Event("input", { bubbles: true }));
 
     let panel = openHistory();
-    saveCurrent(panel, "LOLI", { mode: 0, pin: true });
+    saveCurrent(panel, "LOLI", { mode: 0 });
 
     panel = historyPanel();
     input().value = "cat";

@@ -2,20 +2,25 @@
  * One editor for saved searches and quick tags.
  *
  * Both are a name plus a query; the mode picks whether a click runs the query or toggles its terms
- * into the current draft, and the pin decides whether it also appears as a quick-tag button. The
- * editor writes the whole list, so adding, renaming and removing happen in one place.
+ * into the current draft, and the pin decides whether it also appears as a quick-tag button. A
+ * quick tag always toggles, so pinning switches a run expression to toggle and switching a pinned
+ * expression to run unpins it. The editor writes the whole list, so adding, renaming and removing
+ * happen in one place. Query fields carry the same tag combobox as the search bar.
  */
 
 import type { ExpressionMode, SavedExpression } from "../data/saved-expressions";
 import { replaceExpressions, savedExpressions } from "../data/saved-expressions";
+import { getSettings } from "../settings";
 import { el, textInput } from "./dom";
 import type { Popover } from "./popover";
 import { openPopover } from "./popover";
+import { attachTagCombobox } from "./tag-combobox";
 
 const MODES: readonly { value: ExpressionMode; label: string }[] = [
   { value: "run", label: "Run search" },
   { value: "toggle", label: "Toggle terms" },
 ];
+const TOGGLE_MODE_INDEX = MODES.findIndex((mode) => mode.value === "toggle");
 
 function modeSelect(value: ExpressionMode, index: number): HTMLSelectElement {
   const select = el(
@@ -47,12 +52,17 @@ export function openExpressionEditor(
   }
   const list = el("div", { class: "expression-list" });
   let panel: Popover | null = null;
+  let rowSignal: AbortController | null = null;
 
   const focusQuery = (index: number): void => {
     list.querySelectorAll<HTMLInputElement>(".expression-query")[index]?.focus();
   };
 
   const renderRows = (focusIndex?: number): void => {
+    // A repaint replaces every query input; retire the comboboxes attached to the old rows.
+    rowSignal?.abort();
+    const rows = new AbortController();
+    rowSignal = rows;
     list.replaceChildren(
       ...draft.map((entry, index) => {
         const name = textInput({
@@ -80,27 +90,43 @@ export function openExpressionEditor(
             draft[index] = { ...current, query: query.value };
           }
         });
+        if (getSettings().tagSuggestions) {
+          attachTagCombobox({ input: query, signal: rows.signal });
+        }
 
         const mode = modeSelect(entry.mode, index);
-        mode.addEventListener("change", () => {
-          const current = draft[index];
-          if (current !== undefined) {
-            draft[index] = {
-              ...current,
-              mode: mode.options[mode.selectedIndex]?.value === "toggle" ? "toggle" : "run",
-            };
-          }
-        });
-
         const pin = el("input", {
           type: "checkbox",
           checked: entry.pinned ? "checked" : null,
           "aria-label": `Show ${entry.name || "expression"} as a quick tag`,
         });
+
+        mode.addEventListener("change", () => {
+          const current = draft[index];
+          if (current === undefined) {
+            return;
+          }
+          const next: ExpressionMode =
+            mode.options[mode.selectedIndex]?.value === "run" ? "run" : "toggle";
+          // A quick tag has no run verb; changing a pinned row to run unpins it.
+          const pinned = next === "toggle" && current.pinned;
+          draft[index] = { ...current, mode: next, pinned };
+          pin.checked = pinned;
+        });
         pin.addEventListener("change", () => {
           const current = draft[index];
-          if (current !== undefined) {
-            draft[index] = { ...current, pinned: pin.checked === true };
+          if (current === undefined) {
+            return;
+          }
+          // Pinning makes the expression a quick tag, and quick tags toggle their terms.
+          const pinned = pin.checked === true;
+          draft[index] = {
+            ...current,
+            pinned,
+            mode: pinned ? "toggle" : current.mode,
+          };
+          if (pinned) {
+            mode.selectedIndex = TOGGLE_MODE_INDEX;
           }
         });
 
@@ -168,7 +194,7 @@ export function openExpressionEditor(
     el("p", { class: "expression-editor-title", text: "Saved searches and quick tags" }),
     el("p", {
       class: "expression-editor-hint",
-      text: "Run replaces the search; Toggle adds or removes the terms. Quick tags also appear under the search field.",
+      text: "Saved searches replace the search. Quick tags toggle their terms and also appear under the search field.",
     }),
     list,
     el(
@@ -202,6 +228,10 @@ export function openExpressionEditor(
     className: "expression-editor-panel",
     signal,
     autoFocus: true,
+    onClose: () => {
+      rowSignal?.abort();
+      rowSignal = null;
+    },
   });
   // The popover's auto-focus lands on the first field; a seeded row starts on its query instead.
   if (seed !== "") {

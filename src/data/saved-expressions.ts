@@ -1,10 +1,10 @@
 /**
  * Named search expressions.
  *
- * A saved search and a quick tag store the same thing: a name and a query. They differ only in the
- * verb — a `run` expression replaces the field and searches, a `toggle` expression adds or removes
- * its terms in the current draft. `pinned` decides whether the expression also renders as a button
- * under the search field, so one store feeds both surfaces.
+ * A saved search and a quick tag store the same thing: a name and a query. A `run` saved search
+ * replaces the field and searches; a `toggle` expression adds or removes its terms, and a quick tag
+ * (a pinned expression) always toggles. `pinned` decides whether the expression also renders as a
+ * button under the search field, so one store feeds both surfaces.
  */
 
 import { isUnknownArray } from "../guards";
@@ -33,6 +33,11 @@ function normalize(text: string): string {
 
 function isMode(value: unknown): value is ExpressionMode {
   return value === "run" || value === "toggle";
+}
+
+/** A quick tag has no run verb: pinning an expression makes it a toggle. */
+function expressionMode(mode: ExpressionMode, pinned: boolean): ExpressionMode {
+  return pinned ? "toggle" : mode;
 }
 
 function isExpression(value: unknown): value is SavedExpression {
@@ -155,21 +160,24 @@ export function savedExpressions(): SavedExpression[] {
   }
   return values
     .filter(isExpression)
-    .map((entry) => ({
-      name: normalize(entry.name),
-      query: normalize(entry.query),
-      mode: entry.mode,
-      pinned: entry.pinned,
-      savedAt: entry.savedAt,
-    }))
+    .map((entry) => {
+      const pinned = entry.pinned;
+      return {
+        name: normalize(entry.name),
+        query: normalize(entry.query),
+        mode: expressionMode(entry.mode, pinned),
+        pinned,
+        savedAt: entry.savedAt,
+      };
+    })
     .filter((entry) => entry.name !== "" && entry.query !== "")
     .sort((a, b) => b.savedAt - a.savedAt)
     .slice(0, EXPRESSION_LIMIT);
 }
 
-/** Expressions the quick-tag row renders. */
+/** Expressions the quick-tag row renders. A quick tag always toggles its terms. */
 export function quickExpressions(): SavedExpression[] {
-  return savedExpressions().filter((entry) => entry.pinned);
+  return savedExpressions().filter((entry) => entry.pinned && entry.mode === "toggle");
 }
 
 /** Remove one expression by name. */
@@ -182,13 +190,16 @@ export function removeExpression(name: string): void {
 /** Replace the whole list, as the editor does after adding, editing and removing rows. */
 export function replaceExpressions(expressions: readonly SavedExpression[]): void {
   const next = expressions
-    .map((entry) => ({
-      name: normalize(entry.name),
-      query: normalize(entry.query),
-      mode: entry.mode,
-      pinned: entry.pinned === true,
-      savedAt: entry.savedAt,
-    }))
+    .map((entry) => {
+      const pinned = entry.pinned === true;
+      return {
+        name: normalize(entry.name),
+        query: normalize(entry.query),
+        mode: expressionMode(entry.mode, pinned),
+        pinned,
+        savedAt: entry.savedAt,
+      };
+    })
     .filter((entry) => entry.name !== "" && entry.query !== "")
     .slice(0, EXPRESSION_LIMIT);
   store.write(next);
