@@ -9,7 +9,11 @@ import {
   setTermSign,
   tagIdentity,
   termAt,
+  termIdentity,
   termLabel,
+  termState,
+  termStateLabel,
+  termTagIdentity,
   toggleExpressionInSearch,
   toggleTagInSearch,
 } from "../../src/tags/model";
@@ -158,9 +162,10 @@ describe("adding gallery tags to a search", () => {
     expect(toggleTagInSearch('a:"Bob_Smith$"', TOKEN)).toBe("");
   });
 
-  test("ignores untagged text and unknown namespaces", () => {
+  test("ignores untagged text but treats an unknown prefix as a tag namespace", () => {
     expect(toggleTagInSearch("cat", "dog")).toBe("cat");
-    expect(toggleTagInSearch("cat", "anime:foo")).toBe("cat");
+    expect(toggleTagInSearch("cat", "uploader:lasthm$")).toBe("cat uploader:lasthm$");
+    expect(toggleTagInSearch("cat uploader:Lasthm", "uploader:lasthm$")).toBe("cat");
   });
 });
 
@@ -197,6 +202,52 @@ describe("tag identity", () => {
     expect(tagIdentity("f", "big breasts")).toBe(tagIdentity("Female", "big breasts"));
     expect(tagIdentity("artist", "foo")).toBe(tagIdentity("A", "foo"));
     expect(tagIdentity("anime", "foo")).toBe(tagIdentity("Anime", "foo"));
+  });
+});
+
+describe("term identity", () => {
+  const same = [
+    ['female:"big breasts$"', 'f:"Big_Breasts"'],
+    ['f:"big breasts"', 'female:"Big  Breasts"'],
+    ["artist:foo$", "a:foo"],
+    ["uploader:lasthm$", "uploader:Lasthm"],
+    ["anime:Pokemon$", "Anime:pokemon"],
+    ['-female:"big breasts"', '~f:"big breasts"'],
+    ["cat", "CAT$"],
+    [" cat ", '"cat"'],
+  ] as const;
+  const different = [
+    ['female:"big breasts"', 'female:"big brother"'],
+    ['female:"big breasts"', 'male:"big breasts"'],
+    ["uploader:lasthm", "lasthm"],
+    ["anime:foo", "foo"],
+    ["cat", "dog"],
+    ["f:cat", "g:cat"],
+  ] as const;
+
+  for (const [left, right] of same) {
+    test(`${left} and ${right} name the same term`, () => {
+      expect(termIdentity(onlyTerm(left))).toBe(termIdentity(onlyTerm(right)));
+    });
+  }
+
+  for (const [left, right] of different) {
+    test(`${left} and ${right} name different terms`, () => {
+      expect(termIdentity(onlyTerm(left))).not.toBe(termIdentity(onlyTerm(right)));
+    });
+  }
+
+  test("reports tag identity only for namespaced terms", () => {
+    expect(termTagIdentity(onlyTerm("uploader:lasthm$"))).toBe("uploader\u0000lasthm");
+    expect(termTagIdentity(onlyTerm('female:"big breasts"'))).toBe("female\u0000big breasts");
+    expect(termTagIdentity(onlyTerm("cat"))).toBeNull();
+  });
+
+  test("presents the three signs from one table", () => {
+    expect(termState(onlyTerm("cat"))).toBe("in the search");
+    expect(termState(onlyTerm("-cat"))).toBe("excluded from the search");
+    expect(termState(onlyTerm("~cat"))).toBe("optional (OR) in the search");
+    expect(termStateLabel(onlyTerm("-cat"))).toBe("Excluded from the search");
   });
 });
 

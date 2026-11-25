@@ -82,17 +82,20 @@ export function dequantiseCount(quantized: number, max: number): number {
  * Keys are normalized by {@link tagKeyId}, so callers may pass raw or folded spellings. Duplicate
  * hashes keep the larger count; with a 40-bit id this is a safety net rather than an expected
  * path.
+ *
+ * `max` overrides the denominator written to the header. The generated core uses the full
+ * snapshot's maximum so its dequantized counts rank on the same scale as the full index.
  */
-export function encodeTagCountsBytes(counts: ReadonlyMap<string, number>): Uint8Array {
+export function encodeTagCountsBytes(counts: ReadonlyMap<string, number>, max = 0): Uint8Array {
   const byId = new Map<number, number>();
-  let max = 0;
+  let largest = 0;
 
   for (const [key, count] of counts) {
     if (count <= 0) {
       continue;
     }
-    if (count > max) {
-      max = count;
+    if (count > largest) {
+      largest = count;
     }
     const id = tagKeyId(key);
     const previous = byId.get(id) ?? 0;
@@ -107,12 +110,16 @@ export function encodeTagCountsBytes(counts: ReadonlyMap<string, number>): Uint8
   if (byId.size > 0xffff) {
     throw new Error("Too many tag counts for the uint16 header");
   }
-  if (max > 0xffffffff) {
+  const denominator = max > 0 ? max : largest;
+  if (denominator < largest) {
+    throw new Error("Tag count exceeds the snapshot maximum");
+  }
+  if (denominator > 0xffffffff) {
     throw new Error("Tag count exceeds the uint32 header");
   }
 
   const items = [...byId.entries()]
-    .map(([id, count]) => [id, quantiseCount(count, max)] as const)
+    .map(([id, count]) => [id, quantiseCount(count, denominator)] as const)
     .sort((a, b) => a[0] - b[0]);
 
   const bytes = new Uint8Array(HEADER_BYTES + items.length * ENTRY_BYTES);
@@ -121,7 +128,7 @@ export function encodeTagCountsBytes(counts: ReadonlyMap<string, number>): Uint8
   }
   bytes[4] = VERSION;
   const view = new DataView(bytes.buffer);
-  view.setUint32(5, max, true);
+  view.setUint32(5, denominator, true);
   view.setUint16(9, items.length, true);
 
   let offset = HEADER_BYTES;

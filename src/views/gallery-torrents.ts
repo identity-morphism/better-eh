@@ -2,9 +2,9 @@ import type { TorrentInfo } from "../data/gallery-torrents";
 import { loadTorrentInfo } from "../data/gallery-torrents";
 import type { GalleryTorrent, GalleryTorrentsPage } from "../parse/gallery-torrents";
 import { buttonEl, el } from "../ui/dom";
-import { errorText } from "../ui/error-text";
 import { factRow } from "../ui/fact-row";
 import { listHeader } from "../ui/list-header";
+import { createPendingAction } from "../ui/pending-action";
 import { nativeEmptyPanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
 import { siteNav } from "../ui/topbar";
@@ -95,6 +95,7 @@ function torrentCard(
     text: "Details",
   });
 
+  const pending = createPendingAction();
   let requested = false;
   let open = false;
 
@@ -115,34 +116,26 @@ function torrentCard(
 
       requested = true;
       show(true);
-      button.disabled = true;
       const panel = loadingPanel();
       detailsSlot.replaceChildren(panel);
-
-      void loadInfo(page.url, torrent.gtid, ctx.signal).then(
-        (info) => {
-          if (ctx.signal.aborted) {
-            return;
-          }
+      void pending.run({
+        run: () => loadInfo(page.url, torrent.gtid, ctx.signal),
+        signal: ctx.signal,
+        setBusy: (busy) => {
+          button.disabled = busy;
+        },
+        success: (info) => {
           panel.removeAttribute("aria-busy");
           panel.replaceChildren(...infoNodes(info));
-          button.disabled = false;
         },
-        (error: unknown) => {
-          if (ctx.signal.aborted) {
-            return;
-          }
+        failure: "Torrent details could not be loaded.",
+        failed: (message) => {
           panel.removeAttribute("aria-busy");
           panel.replaceChildren(
-            el("p", {
-              class: "gallery-torrent-error",
-              role: "alert",
-              text: errorText(error, "Torrent details could not be loaded."),
-            }),
+            el("p", { class: "gallery-torrent-error", role: "alert", text: message }),
           );
-          button.disabled = false;
         },
-      );
+      });
     },
     { signal: ctx.signal },
   );

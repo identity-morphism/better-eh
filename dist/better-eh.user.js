@@ -19,6 +19,911 @@
 // ==/UserScript==
 
 (() => {
+  // src/fetch/errors.ts
+  function isAbortError(error) {
+    return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
+  }
+
+  class HttpError extends Error {
+    status;
+    url;
+    constructor(status, url) {
+      super(`HTTP ${status}`);
+      this.name = "HttpError";
+      this.status = status;
+      this.url = url;
+    }
+  }
+
+  class LoginRequiredError extends Error {
+    constructor() {
+      super("Login required");
+      this.name = "LoginRequiredError";
+    }
+  }
+
+  class ParseMismatchError extends Error {
+    route;
+    constructor(route, detail) {
+      super(`${route}: ${detail}`);
+      this.name = "ParseMismatchError";
+      this.route = route;
+    }
+  }
+
+  class RateLimitedError extends Error {
+    text;
+    constructor(text) {
+      super("Rate limited");
+      this.name = "RateLimitedError";
+      this.text = text;
+    }
+  }
+
+  class RequestPurgedError extends Error {
+    constructor() {
+      super("Request purged");
+      this.name = "RequestPurgedError";
+    }
+  }
+
+  // src/emitter.ts
+  function createEmitter() {
+    const listeners = new Set;
+    return {
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      emit(value) {
+        for (const listener of listeners) {
+          listener(value);
+        }
+      }
+    };
+  }
+
+  // src/guards.ts
+  function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+  function isUnknownArray(value) {
+    return Array.isArray(value);
+  }
+
+  // src/keymap-schema.ts
+  var KEY_ACTIONS = [
+    { action: "next", label: "Next page", defaults: ["D", "ARROWRIGHT"] },
+    { action: "prev", label: "Previous page", defaults: ["A", "ARROWLEFT"] },
+    { action: "fit", label: "Toggle fit / natural width", defaults: ["F"] },
+    { action: "gallery", label: "Back to gallery", defaults: ["Q"] },
+    { action: "up", label: "Scroll up", defaults: ["W", "ARROWUP"] },
+    { action: "down", label: "Scroll down", defaults: ["S", "ARROWDOWN"] }
+  ];
+  var MAX_KEYS_PER_ACTION = 6;
+  var MAX_KEY_LENGTH = 20;
+  var MODIFIER_KEYS = new Set([
+    "Alt",
+    "AltGraph",
+    "CapsLock",
+    "Control",
+    "Fn",
+    "FnLock",
+    "Hyper",
+    "Meta",
+    "NumLock",
+    "OS",
+    "ScrollLock",
+    "Shift",
+    "Super",
+    "Symbol",
+    "SymbolLock"
+  ]);
+  function isKeyMapPatch(value) {
+    if (!isRecord(value)) {
+      return false;
+    }
+    return Object.entries(value).every(([action, keys]) => KEY_ACTIONS.some((field) => field.action === action) && Array.isArray(keys) && keys.every((entry) => typeof entry === "string"));
+  }
+  function copyKeymap(keymap) {
+    const copy = {};
+    for (const { action } of KEY_ACTIONS) {
+      copy[action] = [...keymap[action]];
+    }
+    return copy;
+  }
+  function freezeKeymap(keymap) {
+    for (const keys of Object.values(keymap)) {
+      Object.freeze(keys);
+    }
+    return Object.freeze(keymap);
+  }
+  function defaultKeymap() {
+    const keymap = {};
+    for (const { action, defaults } of KEY_ACTIONS) {
+      keymap[action] = [...defaults];
+    }
+    return freezeKeymap(keymap);
+  }
+  var DEFAULT_KEYMAP = defaultKeymap();
+
+  // src/settings-schema.ts
+  var SETTINGS_SCHEMA = {
+    fitHeight: {
+      control: "boolean",
+      key: "fitHeight",
+      default: true,
+      label: "Fit image to the screen height",
+      hint: "The viewer's default; F toggles it per page."
+    },
+    debug: {
+      control: "boolean",
+      key: "debug",
+      default: false,
+      label: "Debug logging",
+      hint: "Log requests and reader state to the console."
+    },
+    scrollStep: {
+      control: "number",
+      key: "scrollStep",
+      default: 220,
+      min: 20,
+      max: 5000,
+      label: "Scroll step",
+      hint: "Pixels moved by the natural-width scroll keys."
+    },
+    prefetchCount: {
+      control: "number",
+      key: "prefetchCount",
+      default: 2,
+      min: 0,
+      max: 10,
+      label: "Prefetch depth",
+      hint: "Pages warmed in each direction; 0 disables it. Needs two or more network slots."
+    },
+    maxNlRetry: {
+      control: "number",
+      key: "maxNlRetry",
+      default: 4,
+      min: 0,
+      max: 10,
+      label: "Image retries",
+      hint: "Attempts per image before the fallback view is shown."
+    },
+    imgCacheLimit: {
+      control: "number",
+      key: "imgCacheLimit",
+      default: 20,
+      min: 1,
+      max: 200,
+      label: "Image cache",
+      hint: "Decoded images kept in memory; keep at least twice the prefetch depth."
+    },
+    listThumbSize: {
+      control: "number",
+      key: "listThumbSize",
+      default: 220,
+      min: 120,
+      max: 480,
+      label: "List thumbnail size",
+      hint: "Target width of a feed card in pixels."
+    },
+    galleryThumbSize: {
+      control: "number",
+      key: "galleryThumbSize",
+      default: 200,
+      min: 80,
+      max: 400,
+      label: "Gallery thumbnail size",
+      hint: "Target width of a gallery thumbnail in pixels."
+    },
+    listInfiniteScroll: {
+      control: "boolean",
+      key: "listInfiniteScroll",
+      default: false,
+      label: "Infinite scroll on feeds",
+      hint: "Append the next listing page while scrolling."
+    },
+    galleryInfiniteScroll: {
+      control: "boolean",
+      key: "galleryInfiniteScroll",
+      default: false,
+      label: "Infinite scroll in galleries",
+      hint: "Append thumbnails while scrolling."
+    },
+    gap: {
+      control: "number",
+      key: "gap",
+      default: 12,
+      min: 0,
+      max: 64,
+      label: "Grid gap",
+      hint: "Space between cards and thumbnails."
+    },
+    netConcurrency: {
+      control: "number",
+      key: "netConcurrency",
+      default: 2,
+      min: 1,
+      max: 8,
+      label: "Network concurrency",
+      hint: "Requests allowed on the wire at once; prefetch only uses a spare slot."
+    },
+    netIntervalMs: {
+      control: "number",
+      key: "netIntervalMs",
+      default: 450,
+      min: 0,
+      max: 1e4,
+      label: "Request interval",
+      hint: "Minimum milliseconds between request starts."
+    },
+    netTimeoutMs: {
+      control: "number",
+      key: "netTimeoutMs",
+      default: 15000,
+      min: 1000,
+      max: 120000,
+      label: "Request timeout",
+      hint: "Milliseconds before a request is aborted."
+    },
+    tagSuggestions: {
+      control: "boolean",
+      key: "tagSuggestions",
+      default: true,
+      label: "Tag suggestions",
+      hint: "Show the tag combobox while typing in the search bar."
+    },
+    readerMode: {
+      control: "select",
+      key: "readerMode",
+      default: "single",
+      label: "Reader layout",
+      hint: "Single page, facing pair, or a vertical stack.",
+      options: [
+        { value: "single", label: "Single page" },
+        { value: "spread", label: "Spread (two pages)" },
+        { value: "continuous", label: "Continuous scroll" }
+      ]
+    },
+    readingDirection: {
+      control: "select",
+      key: "readingDirection",
+      default: "ltr",
+      label: "Page direction",
+      hint: "Right-to-left mirrors spreads, click zones, and swipes.",
+      options: [
+        { value: "ltr", label: "Left to right" },
+        { value: "rtl", label: "Right to left" }
+      ]
+    }
+  };
+  var SCALAR_KEYS = Object.freeze(Object.keys(SETTINGS_SCHEMA));
+  function fieldsOf(control) {
+    return SCALAR_KEYS.map((key) => SETTINGS_SCHEMA[key]).filter((field) => field.control === control);
+  }
+  var BOOLEAN_FIELDS = fieldsOf("boolean");
+  var NUMBER_FIELDS = fieldsOf("number");
+  var SELECT_FIELDS = fieldsOf("select");
+  function defaultScalars() {
+    const defaults = {};
+    for (const key of SCALAR_KEYS) {
+      defaults[key] = SETTINGS_SCHEMA[key].default;
+    }
+    return defaults;
+  }
+  function clampNumber(key, value) {
+    const field = SETTINGS_SCHEMA[key];
+    return Math.min(field.max, Math.max(field.min, Math.round(value)));
+  }
+  function optionList(options) {
+    const values = options.map((option) => option.value);
+    if (values.length <= 2) {
+      return values.join(" or ");
+    }
+    return `${values.slice(0, -1).join(", ")}, or ${values[values.length - 1]}`;
+  }
+  function validateScalar(key, value) {
+    const field = SETTINGS_SCHEMA[key];
+    if (field.control === "boolean") {
+      return typeof value === "boolean" ? { ok: true, value } : { ok: false, error: `"${key}" must be true or false.` };
+    }
+    if (field.control === "number") {
+      return typeof value === "number" && Number.isFinite(value) ? { ok: true, value: clampNumber(field.key, value) } : { ok: false, error: `"${key}" must be a number.` };
+    }
+    const options = field.options;
+    return options.some((option) => option.value === value) ? { ok: true, value } : { ok: false, error: `"${key}" must be ${optionList(options)}.` };
+  }
+  function applyScalar(target, key, value) {
+    const result = validateScalar(key, value);
+    if (!result.ok) {
+      return false;
+    }
+    target[key] = result.value;
+    return true;
+  }
+
+  // src/store.ts
+  function isEnvelope(value) {
+    if (!isRecord(value)) {
+      return false;
+    }
+    return typeof value.version === "number" && "values" in value;
+  }
+  function createStore(options, adapter) {
+    const { key, version, empty, guard } = options;
+    return {
+      read() {
+        try {
+          const stored = adapter.read(key);
+          if (isEnvelope(stored)) {
+            return stored.version === version && guard(stored.values) ? stored.values : empty();
+          }
+          return guard(stored) ? stored : empty();
+        } catch {
+          return empty();
+        }
+      },
+      write(value) {
+        try {
+          adapter.write(key, { version, values: value });
+        } catch {}
+      }
+    };
+  }
+  function gmStorage() {
+    const globals = globalThis;
+    return {
+      read(key) {
+        try {
+          return globals.GM_getValue?.(key, undefined);
+        } catch {
+          return;
+        }
+      },
+      write(key, value) {
+        try {
+          globals.GM_setValue?.(key, value);
+        } catch {}
+      },
+      remove(key) {
+        try {
+          if (globals.GM_deleteValue) {
+            globals.GM_deleteValue(key);
+            return;
+          }
+          globals.GM_setValue?.(key, null);
+        } catch {}
+      }
+    };
+  }
+  function decodeWebStorage(raw) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+  function sessionStorageAdapter() {
+    const storage = () => {
+      try {
+        return typeof globalThis.sessionStorage === "undefined" ? undefined : globalThis.sessionStorage;
+      } catch {
+        return;
+      }
+    };
+    return {
+      read(key) {
+        try {
+          const raw = storage()?.getItem(key) ?? null;
+          return raw === null ? undefined : decodeWebStorage(raw);
+        } catch {
+          return;
+        }
+      },
+      write(key, value) {
+        try {
+          storage()?.setItem(key, JSON.stringify(value));
+        } catch {}
+      },
+      remove(key) {
+        try {
+          storage()?.removeItem(key);
+        } catch {}
+      }
+    };
+  }
+
+  // src/settings.ts
+  var STORAGE_KEY = "eh:settings:v2";
+  var VERSION = 2;
+  var settingsChanged = createEmitter();
+  var DEFAULT_SETTINGS = Object.freeze({
+    ...defaultScalars(),
+    keymap: defaultKeymap()
+  });
+  var gm = gmStorage();
+  function readStoredSetting(key) {
+    return gm.read(key);
+  }
+  function isStoredValues(value) {
+    return isRecord(value);
+  }
+  function settingsOptions() {
+    return {
+      key: STORAGE_KEY,
+      version: VERSION,
+      empty: () => ({}),
+      guard: isStoredValues
+    };
+  }
+  function applyStoredScalars(target, values) {
+    for (const key of SCALAR_KEYS) {
+      applyScalar(target, key, values[key]);
+    }
+  }
+  function loadSettings(read = readStoredSetting) {
+    const values = createStore(settingsOptions(), {
+      read,
+      write: () => {
+        return;
+      },
+      remove: () => {
+        return;
+      }
+    }).read();
+    const merged = { ...DEFAULT_SETTINGS };
+    applyStoredScalars(merged, values);
+    const storedKeymap = isKeyMapPatch(values.keymap) ? values.keymap : DEFAULT_SETTINGS.keymap;
+    return Object.freeze({
+      ...merged,
+      keymap: freezeKeymap({ ...DEFAULT_SETTINGS.keymap, ...storedKeymap })
+    });
+  }
+  var store = createStore(settingsOptions(), gm);
+  var current = loadSettings();
+  function getSettings() {
+    return current;
+  }
+  function updateSettings(patch) {
+    const next = { ...current };
+    for (const key of SCALAR_KEYS) {
+      applyScalar(next, key, patch[key]);
+    }
+    if (patch.keymap !== undefined) {
+      next.keymap = freezeKeymap(copyKeymap(patch.keymap));
+    }
+    current = Object.freeze(next);
+    store.write(current);
+    settingsChanged.emit(current);
+  }
+  function updateSetting(key, value) {
+    updateSettings({ [key]: value });
+  }
+  function onSettingsChange(listener) {
+    return settingsChanged.subscribe(listener);
+  }
+
+  // src/log.ts
+  var LOG_TAG = "[Better EH]";
+  function log(...args) {
+    if (getSettings().debug) {
+      console.log(LOG_TAG, ...args);
+    }
+  }
+  function warn(...args) {
+    if (getSettings().debug) {
+      console.warn(LOG_TAG, ...args);
+    }
+  }
+
+  // src/ui/dom.ts
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (value === null || value === undefined || value === false) {
+        continue;
+      }
+      if (key === "class") {
+        node.className = String(value);
+      } else if (key === "text") {
+        node.textContent = String(value);
+      } else if (key === "style") {
+        node.style.cssText = String(value);
+      } else if (key.startsWith("on") && typeof value === "function") {
+        node.addEventListener(key.slice(2).toLowerCase(), value);
+      } else {
+        node.setAttribute(key, String(value));
+      }
+    }
+    appendChildren(node, children);
+    return node;
+  }
+  function buttonEl(props = {}, ...children) {
+    return el("button", { type: "button", ...props }, ...children);
+  }
+  function appendChildren(parent, children) {
+    for (const child of children) {
+      if (child === null || child === undefined || child === false) {
+        continue;
+      }
+      parent.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+  }
+  function textInput(props = {}) {
+    return el("input", {
+      type: "text",
+      autocomplete: "off",
+      autocapitalize: "none",
+      autocorrect: "off",
+      spellcheck: "false",
+      ...props
+    });
+  }
+  function searchInput(props = {}) {
+    return textInput({ type: "search", enterkeyhint: "search", ...props });
+  }
+  function tagInput(className) {
+    return textInput({
+      class: className,
+      name: "new_tags",
+      placeholder: "Add tags, comma separated",
+      "aria-label": "New tags",
+      maxlength: "200"
+    });
+  }
+  var ICON_PATHS = {
+    back: "M15 18l-6-6 6-6",
+    search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm10 2l-4.35-4.35",
+    star: "M12 2.5l2.9 6.1 6.6.9-4.8 4.7 1.2 6.6-5.9-3.2-5.9 3.2 1.2-6.6L2.5 9.5l6.6-.9L12 2.5z",
+    external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+    warning: "M12 3L2 21h20L12 3zm0 6v6m0 3v.5",
+    close: "M6 6l12 12M18 6L6 18",
+    filter: "M3 5h18l-7 8v6l-4 2v-8L3 5z",
+    arrowRight: "M5 12h14m-6-6 6 6-6 6",
+    arrowLeft: "M19 12H5m6-6-6 6 6 6",
+    chevronLeft: "M15 6l-6 6 6 6",
+    chevronRight: "M9 6l6 6-6 6",
+    first: "M18 6l-6 6 6 6M11 6l-6 6 6 6",
+    last: "M6 6l6 6-6 6M13 6l6 6-6 6",
+    download: "M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M5 19h14",
+    history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"
+  };
+  function icon(name, filled = false) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "18");
+    svg.setAttribute("height", "18");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", ICON_PATHS[name]);
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", filled ? "0" : "2");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("fill", filled ? "currentColor" : "none");
+    svg.append(path);
+    return svg;
+  }
+  function isEditableTarget(target) {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    return target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+  }
+
+  // src/ui/live-region.ts
+  function announceInto(node, text, write) {
+    if (text !== "" && node.textContent === text) {
+      write("");
+      window.setTimeout(() => write(text), 16);
+      return;
+    }
+    write(text);
+  }
+
+  // src/ui/toast.ts
+  var timers = new Map;
+  function durationFor(text) {
+    return Math.min(8000, Math.max(2000, text.length * 70));
+  }
+  function present(node, text, visibleClass) {
+    clearTimeout(timers.get(node));
+    node.classList.remove(visibleClass);
+    const reveal = (value) => {
+      node.textContent = value;
+      if (value === "") {
+        return;
+      }
+      node.classList.add(visibleClass);
+      timers.set(node, window.setTimeout(() => {
+        node.classList.remove(visibleClass);
+        node.textContent = "";
+      }, durationFor(value)));
+    };
+    announceInto(node, text, reveal);
+  }
+  function ensureToast() {
+    const existing = document.getElementById("eh-toast");
+    if (existing) {
+      return existing;
+    }
+    const toast = el("div", {
+      id: "eh-toast",
+      class: "eh-toast",
+      role: "status",
+      "aria-live": "polite",
+      "aria-atomic": "true"
+    });
+    (document.getElementById("eh-root") ?? document.body).append(toast);
+    return toast;
+  }
+  function showToast(text) {
+    const trimmed = text.trim();
+    if (trimmed === "") {
+      return;
+    }
+    const hudToast = document.getElementById("hud-toast");
+    present(hudToast ?? ensureToast(), trimmed, "show");
+  }
+
+  // src/menu.ts
+  function enabledToast(label) {
+    return (enabled) => `${label} ${enabled ? "enabled" : "disabled"}`;
+  }
+  var TOGGLE_COMMANDS = [
+    {
+      key: "fitHeight",
+      command: "Toggle fit-height / natural-width",
+      toast: (fitHeight) => `Default mode: ${fitHeight ? "fit-height" : "natural-width"}`
+    },
+    { key: "debug", command: "Toggle debug mode", toast: enabledToast("Debug mode") },
+    {
+      key: "listInfiniteScroll",
+      command: "Toggle infinite scroll (feed)",
+      toast: enabledToast("Feed infinite scroll")
+    },
+    {
+      key: "galleryInfiniteScroll",
+      command: "Toggle infinite scroll (gallery)",
+      toast: enabledToast("Gallery infinite scroll")
+    },
+    {
+      key: "tagSuggestions",
+      command: "Toggle tag suggestions",
+      toast: enabledToast("Tag suggestions")
+    }
+  ];
+  function defaultKeySummary() {
+    return KEY_ACTIONS.map(({ action, label }) => `${label}: ${DEFAULT_KEYMAP[action].join("/")}`).join(", ");
+  }
+  function registerMenuCommands() {
+    for (const { key, command, toast } of TOGGLE_COMMANDS) {
+      GM_registerMenuCommand(command, () => {
+        const next = !getSettings()[key];
+        updateSetting(key, next);
+        showToast(toast(next));
+      });
+    }
+    GM_registerMenuCommand("Reset keymap to defaults", () => {
+      if (confirm(`Reset all keys to defaults?
+
+${defaultKeySummary()}`)) {
+        updateSetting("keymap", DEFAULT_KEYMAP);
+        showToast("Keymap reset to defaults");
+      }
+    });
+  }
+
+  // src/strings.ts
+  function collapseWhitespace(value) {
+    return value.replace(/\s+/gu, " ").trim();
+  }
+
+  // src/net/priority.ts
+  var VALUES = {
+    critical: 10,
+    navigation: 8,
+    facing: 7,
+    append: 6,
+    background: 4,
+    prefetch: 2
+  };
+  function priorityOf(requestClass) {
+    return VALUES[requestClass];
+  }
+
+  // src/net/queue.ts
+  class RequestQueue {
+    pending = [];
+    active = 0;
+    lastStart = 0;
+    timer;
+    seq = 0;
+    get activeCount() {
+      return this.active;
+    }
+    fetch(url, options = {}) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const controller = new AbortController;
+      const userSignal = options.signal;
+      const task = {
+        url,
+        init: options.init ?? {},
+        priority: options.priority ?? priorityOf("background"),
+        tag: options.tag ?? "default",
+        seq: this.seq++,
+        controller,
+        resolve,
+        reject,
+        detach: null
+      };
+      if (userSignal) {
+        if (userSignal.aborted) {
+          reject(userSignal.reason);
+          return promise;
+        }
+        const onAbort = () => {
+          const index = this.pending.indexOf(task);
+          if (index === -1) {
+            controller.abort(userSignal.reason);
+            return;
+          }
+          this.pending.splice(index, 1);
+          this.finish(task);
+          reject(userSignal.reason);
+        };
+        userSignal.addEventListener("abort", onAbort, { once: true });
+        task.detach = () => {
+          userSignal.removeEventListener("abort", onAbort);
+        };
+      }
+      this.pending.push(task);
+      this.pending.sort((a, b) => b.priority - a.priority || a.seq - b.seq);
+      this.pump();
+      return promise;
+    }
+    purge(predicate) {
+      for (let index = this.pending.length - 1;index >= 0; index--) {
+        const task = this.pending[index];
+        if (!task || !predicate(task)) {
+          continue;
+        }
+        this.pending.splice(index, 1);
+        this.finish(task);
+        task.reject(new RequestPurgedError);
+      }
+    }
+    pump() {
+      if (this.timer !== undefined) {
+        clearTimeout(this.timer);
+        this.timer = undefined;
+      }
+      const concurrency = Math.max(1, getSettings().netConcurrency);
+      while (this.active < concurrency) {
+        const task = this.pending.shift();
+        if (!task) {
+          return;
+        }
+        const now = Date.now();
+        const wait = this.lastStart + getSettings().netIntervalMs - now;
+        if (wait > 0) {
+          this.pending.unshift(task);
+          this.timer = setTimeout(() => {
+            this.pump();
+          }, wait);
+          return;
+        }
+        this.active++;
+        this.lastStart = now;
+        this.run(task);
+      }
+    }
+    async run(task) {
+      const timeout = setTimeout(() => {
+        task.controller.abort(new DOMException("Request timed out", "TimeoutError"));
+      }, Math.max(1000, getSettings().netTimeoutMs));
+      try {
+        const response = await fetch(task.url, {
+          ...task.init,
+          signal: task.controller.signal
+        });
+        task.resolve(response);
+      } catch (error) {
+        task.reject(error);
+      } finally {
+        clearTimeout(timeout);
+        this.active--;
+        this.finish(task);
+        this.pump();
+      }
+    }
+    finish(task) {
+      task.detach?.();
+      task.detach = null;
+    }
+  }
+  var net = new RequestQueue;
+
+  // src/net/http.ts
+  async function post(url, body, contentType, options) {
+    const response = await net.fetch(url, {
+      priority: priorityOf("critical"),
+      tag: options.tag,
+      signal: options.signal,
+      init: {
+        method: "POST",
+        body,
+        credentials: "same-origin",
+        headers: { "Content-Type": contentType }
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`${options.failure} (${response.status}).`);
+    }
+    if (isLoginWall(await response.clone().text())) {
+      throw new LoginRequiredError;
+    }
+    return response;
+  }
+  function isLoginWall(body) {
+    return /<input[^>]+type=["']?password/i.test(body);
+  }
+  function postForm(url, body, options) {
+    return post(url, body, "application/x-www-form-urlencoded", options);
+  }
+  async function postJson(url, body, options) {
+    const response = await post(url, JSON.stringify(body), "application/json", options);
+    return await response.json();
+  }
+  var LIMIT_PATTERNS = [
+    /image viewing limit/i,
+    /not have sufficient gp/i,
+    /opening pages too fast/i,
+    /temporarily banned/i,
+    /too many requests/i
+  ];
+  function isRateLimitText(text) {
+    return LIMIT_PATTERNS.some((pattern) => pattern.test(text));
+  }
+  function isHtmlResponse(response, text) {
+    const type = response.headers.get("content-type") ?? "";
+    return type.includes("html") || /^\s*<(!doctype|html|head|body)/i.test(text);
+  }
+  var PAGE_CONTENT_SELECTOR = "#gn, #gdt, #gdd, #i1, #i2, #i3, #profile_form, #usertags_outer, #torrentinfo, .itg";
+  function hasPageContent(doc) {
+    return doc.querySelector(PAGE_CONTENT_SELECTOR) !== null;
+  }
+  function isLoginPage(doc) {
+    if (doc.querySelector("#sadpanda") !== null) {
+      return true;
+    }
+    return !hasPageContent(doc) && /sad panda/i.test(doc.title);
+  }
+  var SITE_SUFFIX = /\s*[-–—|]\s*(?:e-hentai|exhentai)(?:\.org)?(?:\s+galleries)?\s*$/i;
+  var NOT_FOUND_HEADINGS = {
+    "not found": true,
+    "not available": true,
+    "gallery not available": true
+  };
+  function normalizeHeading(text) {
+    return collapseWhitespace(text.replace(SITE_SUFFIX, "")).toLowerCase();
+  }
+  var NOT_FOUND_TEXT = /^(?:gallery not found|gallery not available|page not found|not found)\b/i;
+  function isNotFoundPage(doc) {
+    if (hasPageContent(doc)) {
+      return false;
+    }
+    const title = normalizeHeading(doc.title);
+    const heading = normalizeHeading(doc.querySelector("h1")?.textContent ?? "");
+    const body = doc.body.textContent.trim();
+    const bare = body.length > 0 && body.length < 800 && NOT_FOUND_TEXT.test(body);
+    return [title, heading].some((text) => /^404\b/.test(text) || NOT_FOUND_HEADINGS[text] === true) || bare;
+  }
+
   // src/data/list-date.ts
   var ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
   var POSTED_DATE = /^\s*(\d{4})-(\d{2})-(\d{2})(?=\s|$)/;
@@ -100,36 +1005,38 @@
     return target.href;
   }
 
-  // src/guards.ts
-  function isRecord(value) {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-  }
-  function isUnknownArray(value) {
-    return Array.isArray(value);
-  }
-
-  // src/strings.ts
-  function collapseWhitespace(value) {
-    return value.replace(/\s+/gu, " ").trim();
-  }
-
   // src/tags/model.ts
   var TAG_SIGNS = Object.freeze(["", "-", "~"]);
   var SIGN_PRESENTATION = Object.freeze({
-    "": { glyph: "+", state: "included", chipClass: "term-chip", action: "Include in search" },
+    "": {
+      glyph: "+",
+      state: "included",
+      chipClass: "term-chip",
+      action: "Include in search",
+      searchState: "in the search"
+    },
     "-": {
       glyph: "−",
       state: "excluded",
       chipClass: "term-chip is-excluded",
-      action: "Exclude from search"
+      action: "Exclude from search",
+      searchState: "excluded from the search"
     },
     "~": {
       glyph: "~",
       state: "optional",
       chipClass: "term-chip is-or",
-      action: "Make optional (OR)"
+      action: "Make optional (OR)",
+      searchState: "optional (OR) in the search"
     }
   });
+  function termState(term) {
+    return SIGN_PRESENTATION[term.sign].searchState;
+  }
+  function termStateLabel(term) {
+    const state = termState(term);
+    return `${state.charAt(0).toUpperCase()}${state.slice(1)}`;
+  }
   var TAG_NAMESPACES = Object.freeze([
     { id: "female", label: "Female", alias: "f", weight: 9 },
     { id: "male", label: "Male", alias: "m", weight: 8.5 },
@@ -164,6 +1071,19 @@
   function tagIdentity(ns, key) {
     const id = typeof ns === "string" ? tagNamespace(ns)?.id ?? ns.trim().toLowerCase() : ns.id;
     return `${id}\x00${normaliseTagKey(key)}`;
+  }
+  function termTagIdentity(term) {
+    if (term.value.trim() === "") {
+      return null;
+    }
+    if (term.ns !== null) {
+      return tagIdentity(term.ns, term.value);
+    }
+    return term.nsRaw === null ? null : tagIdentity(term.nsRaw, term.value);
+  }
+  function termIdentity(term) {
+    const tag = termTagIdentity(term);
+    return tag ?? `v\x00${fold(term.value)}`;
   }
   function blankTerm(position) {
     return {
@@ -268,9 +1188,6 @@
     }
     return blankTerm(position);
   }
-  function isTagTerm(term) {
-    return term.ns !== null && term.value.trim() !== "";
-  }
   function replaceTerm(text, term, replacement, keepOpen = false) {
     const empty = term.start === term.end;
     let insert = replacement;
@@ -333,16 +1250,13 @@
     if (incoming === undefined) {
       return text;
     }
-    const namespace = incoming.ns;
-    if (namespace === null || incoming.value === "") {
+    const namespace = incoming.ns?.id ?? incoming.nsRaw;
+    const wanted = termTagIdentity(incoming);
+    if (namespace === null || wanted === null) {
       return text;
     }
-    const wanted = tagIdentity(namespace, incoming.value);
     for (const term of parseSearchTerms(text)) {
-      if (term.ns === null) {
-        continue;
-      }
-      if (tagIdentity(term.ns, term.value) !== wanted) {
+      if (termTagIdentity(term) !== wanted) {
         continue;
       }
       if (term.sign === sign) {
@@ -350,7 +1264,7 @@
       }
       return setTermSign(text, term, sign);
     }
-    const formatted = formatTagToken(namespace.id, incoming.value, sign);
+    const formatted = formatTagToken(namespace, incoming.value, sign);
     const trimmed = text.trim();
     return trimmed === "" ? formatted : `${trimmed} ${formatted}`;
   }
@@ -363,9 +1277,6 @@
     }
     return term.value || term.raw.slice(term.sign.length);
   }
-  function expressionKey(term) {
-    return term.ns === null ? `v\x00${fold(term.value)}` : `t\x00${tagIdentity(term.ns, term.value)}`;
-  }
   function expressionTerms(expression) {
     return parseSearchTerms(expression).filter((term) => term.value !== "");
   }
@@ -374,8 +1285,8 @@
     if (wanted.length === 0) {
       return false;
     }
-    const present = new Set(parseSearchTerms(text).map(expressionKey));
-    return wanted.every((term) => present.has(expressionKey(term)));
+    const present = new Set(parseSearchTerms(text).map(termIdentity));
+    return wanted.every((term) => present.has(termIdentity(term)));
   }
   function toggleExpressionInSearch(text, expression) {
     const terms = expressionTerms(expression);
@@ -385,16 +1296,16 @@
     if (containsExpression(text, expression)) {
       let next = text;
       for (const term of terms) {
-        const key = expressionKey(term);
-        const located = parseSearchTerms(next).find((candidate) => expressionKey(candidate) === key);
+        const key = termIdentity(term);
+        const located = parseSearchTerms(next).find((candidate) => termIdentity(candidate) === key);
         if (located !== undefined) {
           next = removeTerm(next, located);
         }
       }
       return next;
     }
-    const present = new Set(parseSearchTerms(text).map(expressionKey));
-    const missing = terms.filter((term) => !present.has(expressionKey(term)));
+    const present = new Set(parseSearchTerms(text).map(termIdentity));
+    const missing = terms.filter((term) => !present.has(termIdentity(term)));
     const suffix = missing.map((term) => term.raw).join(" ");
     const trimmed = text.trim();
     return trimmed === "" ? suffix : `${trimmed} ${suffix}`;
@@ -662,101 +1573,10 @@
     return `${url.pathname}${url.search}${url.hash}`;
   }
 
-  // src/store.ts
-  function isEnvelope(value) {
-    if (!isRecord(value)) {
-      return false;
-    }
-    return typeof value.version === "number" && "values" in value;
-  }
-  function createStore(options, adapter) {
-    const { key, version, empty, guard } = options;
-    return {
-      read() {
-        try {
-          const stored = adapter.read(key);
-          if (isEnvelope(stored)) {
-            return stored.version === version && guard(stored.values) ? stored.values : empty();
-          }
-          return guard(stored) ? stored : empty();
-        } catch {
-          return empty();
-        }
-      },
-      write(value) {
-        try {
-          adapter.write(key, { version, values: value });
-        } catch {}
-      }
-    };
-  }
-  function gmStorage() {
-    const globals = globalThis;
-    return {
-      read(key) {
-        try {
-          return globals.GM_getValue?.(key, undefined);
-        } catch {
-          return;
-        }
-      },
-      write(key, value) {
-        try {
-          globals.GM_setValue?.(key, value);
-        } catch {}
-      },
-      remove(key) {
-        try {
-          if (globals.GM_deleteValue) {
-            globals.GM_deleteValue(key);
-            return;
-          }
-          globals.GM_setValue?.(key, null);
-        } catch {}
-      }
-    };
-  }
-  function decodeWebStorage(raw) {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return raw;
-    }
-  }
-  function sessionStorageAdapter() {
-    const storage = () => {
-      try {
-        return typeof globalThis.sessionStorage === "undefined" ? undefined : globalThis.sessionStorage;
-      } catch {
-        return;
-      }
-    };
-    return {
-      read(key) {
-        try {
-          const raw = storage()?.getItem(key) ?? null;
-          return raw === null ? undefined : decodeWebStorage(raw);
-        } catch {
-          return;
-        }
-      },
-      write(key, value) {
-        try {
-          storage()?.setItem(key, JSON.stringify(value));
-        } catch {}
-      },
-      remove(key) {
-        try {
-          storage()?.removeItem(key);
-        } catch {}
-      }
-    };
-  }
-
   // src/data/list-filters.ts
   var KEY = "eh:list-filters:v1";
   var PANEL_KEY = "eh:list-filters-open:v1";
-  var VERSION = 1;
+  var VERSION2 = 1;
   var FILTER_PARAMS = [
     "f_cats",
     "f_srdd",
@@ -773,10 +1593,10 @@
   function isStoredFilters(value) {
     return isRecord(value);
   }
-  var filters = createStore({ key: KEY, version: VERSION, empty: () => ({}), guard: isStoredFilters }, gmStorage());
+  var filters = createStore({ key: KEY, version: VERSION2, empty: () => ({}), guard: isStoredFilters }, gmStorage());
   var panel = createStore({
     key: PANEL_KEY,
-    version: VERSION,
+    version: VERSION2,
     empty: () => false,
     guard: (value) => typeof value === "boolean"
   }, gmStorage());
@@ -798,7 +1618,7 @@
     return params.toString() !== "";
   }
   function applyPersistedListFilters(route) {
-    if (route.kind !== "list" || route.scope !== "search" && route.scope !== "uploader") {
+    if (route.scope !== "search" && route.scope !== "uploader") {
       return route;
     }
     const url = new URL(route.url);
@@ -819,807 +1639,6 @@
       url: url.href,
       query: { ...parseSearchQuery(url), text: route.query.text }
     };
-  }
-
-  // src/fetch/errors.ts
-  function isAbortError(error) {
-    return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
-  }
-
-  class HttpError extends Error {
-    status;
-    url;
-    constructor(status, url) {
-      super(`HTTP ${status}`);
-      this.name = "HttpError";
-      this.status = status;
-      this.url = url;
-    }
-  }
-
-  class LoginRequiredError extends Error {
-    constructor() {
-      super("Login required");
-      this.name = "LoginRequiredError";
-    }
-  }
-
-  class ParseMismatchError extends Error {
-    route;
-    constructor(route, detail) {
-      super(`${route}: ${detail}`);
-      this.name = "ParseMismatchError";
-      this.route = route;
-    }
-  }
-
-  class RateLimitedError extends Error {
-    text;
-    constructor(text) {
-      super("Rate limited");
-      this.name = "RateLimitedError";
-      this.text = text;
-    }
-  }
-
-  class RequestPurgedError extends Error {
-    constructor() {
-      super("Request purged");
-      this.name = "RequestPurgedError";
-    }
-  }
-
-  // src/emitter.ts
-  function createEmitter() {
-    const listeners = new Set;
-    return {
-      subscribe(listener) {
-        listeners.add(listener);
-        return () => {
-          listeners.delete(listener);
-        };
-      },
-      emit(value) {
-        for (const listener of listeners) {
-          listener(value);
-        }
-      }
-    };
-  }
-
-  // src/keymap-schema.ts
-  var KEY_ACTIONS = [
-    { action: "next", label: "Next page", defaults: ["D", "ARROWRIGHT"] },
-    { action: "prev", label: "Previous page", defaults: ["A", "ARROWLEFT"] },
-    { action: "fit", label: "Toggle fit / natural width", defaults: ["F"] },
-    { action: "gallery", label: "Back to gallery", defaults: ["Q"] },
-    { action: "up", label: "Scroll up", defaults: ["W", "ARROWUP"] },
-    { action: "down", label: "Scroll down", defaults: ["S", "ARROWDOWN"] }
-  ];
-  var MAX_KEYS_PER_ACTION = 6;
-  var MAX_KEY_LENGTH = 20;
-  var MODIFIER_KEYS = new Set([
-    "Alt",
-    "AltGraph",
-    "CapsLock",
-    "Control",
-    "Fn",
-    "FnLock",
-    "Hyper",
-    "Meta",
-    "NumLock",
-    "OS",
-    "ScrollLock",
-    "Shift",
-    "Super",
-    "Symbol",
-    "SymbolLock"
-  ]);
-  function isKeyMapPatch(value) {
-    if (!isRecord(value)) {
-      return false;
-    }
-    return Object.entries(value).every(([action, keys]) => KEY_ACTIONS.some((field) => field.action === action) && Array.isArray(keys) && keys.every((entry) => typeof entry === "string"));
-  }
-  function copyKeymap(keymap) {
-    const copy = {};
-    for (const { action } of KEY_ACTIONS) {
-      copy[action] = [...keymap[action]];
-    }
-    return copy;
-  }
-  function freezeKeymap(keymap) {
-    for (const keys of Object.values(keymap)) {
-      Object.freeze(keys);
-    }
-    return Object.freeze(keymap);
-  }
-  function defaultKeymap() {
-    const keymap = {};
-    for (const { action, defaults } of KEY_ACTIONS) {
-      keymap[action] = [...defaults];
-    }
-    return freezeKeymap(keymap);
-  }
-  var DEFAULT_KEYMAP = defaultKeymap();
-
-  // src/settings-schema.ts
-  var SETTINGS_SCHEMA = {
-    fitHeight: {
-      control: "boolean",
-      key: "fitHeight",
-      default: true,
-      label: "Fit image to the screen height",
-      hint: "The viewer's default; F toggles it per page."
-    },
-    debug: {
-      control: "boolean",
-      key: "debug",
-      default: false,
-      label: "Debug logging",
-      hint: "Log requests and reader state to the console."
-    },
-    scrollStep: {
-      control: "number",
-      key: "scrollStep",
-      default: 220,
-      min: 20,
-      max: 5000,
-      label: "Scroll step",
-      hint: "Pixels moved by the natural-width scroll keys."
-    },
-    prefetchCount: {
-      control: "number",
-      key: "prefetchCount",
-      default: 2,
-      min: 0,
-      max: 10,
-      label: "Prefetch depth",
-      hint: "Pages warmed in each direction; 0 disables it. Needs two or more network slots."
-    },
-    maxNlRetry: {
-      control: "number",
-      key: "maxNlRetry",
-      default: 4,
-      min: 0,
-      max: 10,
-      label: "Image retries",
-      hint: "Attempts per image before the fallback view is shown."
-    },
-    imgCacheLimit: {
-      control: "number",
-      key: "imgCacheLimit",
-      default: 20,
-      min: 1,
-      max: 200,
-      label: "Image cache",
-      hint: "Decoded images kept in memory; keep at least twice the prefetch depth."
-    },
-    listThumbSize: {
-      control: "number",
-      key: "listThumbSize",
-      default: 220,
-      min: 120,
-      max: 480,
-      label: "List thumbnail size",
-      hint: "Target width of a feed card in pixels."
-    },
-    galleryThumbSize: {
-      control: "number",
-      key: "galleryThumbSize",
-      default: 200,
-      min: 80,
-      max: 400,
-      label: "Gallery thumbnail size",
-      hint: "Target width of a gallery thumbnail in pixels."
-    },
-    listInfiniteScroll: {
-      control: "boolean",
-      key: "listInfiniteScroll",
-      default: false,
-      label: "Infinite scroll on feeds",
-      hint: "Append the next listing page while scrolling."
-    },
-    galleryInfiniteScroll: {
-      control: "boolean",
-      key: "galleryInfiniteScroll",
-      default: false,
-      label: "Infinite scroll in galleries",
-      hint: "Append thumbnails while scrolling."
-    },
-    gap: {
-      control: "number",
-      key: "gap",
-      default: 12,
-      min: 0,
-      max: 64,
-      label: "Grid gap",
-      hint: "Space between cards and thumbnails."
-    },
-    netConcurrency: {
-      control: "number",
-      key: "netConcurrency",
-      default: 2,
-      min: 1,
-      max: 8,
-      label: "Network concurrency",
-      hint: "Requests allowed on the wire at once; prefetch only uses a spare slot."
-    },
-    netIntervalMs: {
-      control: "number",
-      key: "netIntervalMs",
-      default: 450,
-      min: 0,
-      max: 1e4,
-      label: "Request interval",
-      hint: "Minimum milliseconds between request starts."
-    },
-    netTimeoutMs: {
-      control: "number",
-      key: "netTimeoutMs",
-      default: 15000,
-      min: 1000,
-      max: 120000,
-      label: "Request timeout",
-      hint: "Milliseconds before a request is aborted."
-    },
-    tagSuggestions: {
-      control: "boolean",
-      key: "tagSuggestions",
-      default: true,
-      label: "Tag suggestions",
-      hint: "Show the tag combobox while typing in the search bar."
-    },
-    readerMode: {
-      control: "select",
-      key: "readerMode",
-      default: "single",
-      label: "Reader layout",
-      hint: "Single page, facing pair, or a vertical stack.",
-      options: [
-        { value: "single", label: "Single page" },
-        { value: "spread", label: "Spread (two pages)" },
-        { value: "continuous", label: "Continuous scroll" }
-      ]
-    },
-    readingDirection: {
-      control: "select",
-      key: "readingDirection",
-      default: "ltr",
-      label: "Page direction",
-      hint: "Right-to-left mirrors spreads, click zones, and swipes.",
-      options: [
-        { value: "ltr", label: "Left to right" },
-        { value: "rtl", label: "Right to left" }
-      ]
-    }
-  };
-  var SCALAR_KEYS = Object.freeze(Object.keys(SETTINGS_SCHEMA));
-  function fieldsOf(control) {
-    return SCALAR_KEYS.map((key) => SETTINGS_SCHEMA[key]).filter((field) => field.control === control);
-  }
-  var BOOLEAN_FIELDS = fieldsOf("boolean");
-  var NUMBER_FIELDS = fieldsOf("number");
-  var SELECT_FIELDS = fieldsOf("select");
-  function defaultScalars() {
-    const defaults = {};
-    for (const key of SCALAR_KEYS) {
-      defaults[key] = SETTINGS_SCHEMA[key].default;
-    }
-    return defaults;
-  }
-  function clampNumber(key, value) {
-    const field = SETTINGS_SCHEMA[key];
-    return Math.min(field.max, Math.max(field.min, Math.round(value)));
-  }
-  function optionList(options) {
-    const values = options.map((option) => option.value);
-    if (values.length <= 2) {
-      return values.join(" or ");
-    }
-    return `${values.slice(0, -1).join(", ")}, or ${values[values.length - 1]}`;
-  }
-  function validateScalar(key, value) {
-    const field = SETTINGS_SCHEMA[key];
-    if (field.control === "boolean") {
-      return typeof value === "boolean" ? { ok: true, value } : { ok: false, error: `"${key}" must be true or false.` };
-    }
-    if (field.control === "number") {
-      return typeof value === "number" && Number.isFinite(value) ? { ok: true, value: clampNumber(field.key, value) } : { ok: false, error: `"${key}" must be a number.` };
-    }
-    const options = field.options;
-    return options.some((option) => option.value === value) ? { ok: true, value } : { ok: false, error: `"${key}" must be ${optionList(options)}.` };
-  }
-  function applyScalar(target, key, value) {
-    const result = validateScalar(key, value);
-    if (!result.ok) {
-      return false;
-    }
-    target[key] = result.value;
-    return true;
-  }
-
-  // src/settings.ts
-  var STORAGE_KEY = "eh:settings:v2";
-  var VERSION2 = 2;
-  var settingsChanged = createEmitter();
-  var DEFAULT_SETTINGS = Object.freeze({
-    ...defaultScalars(),
-    keymap: defaultKeymap()
-  });
-  var gm = gmStorage();
-  function readStoredSetting(key) {
-    return gm.read(key);
-  }
-  function isStoredValues(value) {
-    return isRecord(value);
-  }
-  function settingsOptions() {
-    return {
-      key: STORAGE_KEY,
-      version: VERSION2,
-      empty: () => ({}),
-      guard: isStoredValues
-    };
-  }
-  function applyStoredScalars(target, values) {
-    for (const key of SCALAR_KEYS) {
-      applyScalar(target, key, values[key]);
-    }
-  }
-  function loadSettings(read = readStoredSetting) {
-    const values = createStore(settingsOptions(), {
-      read,
-      write: () => {
-        return;
-      },
-      remove: () => {
-        return;
-      }
-    }).read();
-    const merged = { ...DEFAULT_SETTINGS };
-    applyStoredScalars(merged, values);
-    const storedKeymap = isKeyMapPatch(values.keymap) ? values.keymap : DEFAULT_SETTINGS.keymap;
-    return Object.freeze({
-      ...merged,
-      keymap: freezeKeymap({ ...DEFAULT_SETTINGS.keymap, ...storedKeymap })
-    });
-  }
-  var store = createStore(settingsOptions(), gm);
-  var current = loadSettings();
-  function getSettings() {
-    return current;
-  }
-  function updateSettings(patch) {
-    const next = { ...current };
-    for (const key of SCALAR_KEYS) {
-      applyScalar(next, key, patch[key]);
-    }
-    if (patch.keymap !== undefined) {
-      next.keymap = freezeKeymap(copyKeymap(patch.keymap));
-    }
-    current = Object.freeze(next);
-    store.write(current);
-    settingsChanged.emit(current);
-  }
-  function updateSetting(key, value) {
-    updateSettings({ [key]: value });
-  }
-  function onSettingsChange(listener) {
-    return settingsChanged.subscribe(listener);
-  }
-
-  // src/log.ts
-  var LOG_TAG = "[Better EH]";
-  function log(...args) {
-    if (getSettings().debug) {
-      console.log(LOG_TAG, ...args);
-    }
-  }
-  function warn(...args) {
-    if (getSettings().debug) {
-      console.warn(LOG_TAG, ...args);
-    }
-  }
-
-  // src/ui/dom.ts
-  function el(tag, props = {}, ...children) {
-    const node = document.createElement(tag);
-    for (const [key, value] of Object.entries(props)) {
-      if (value === null || value === undefined || value === false) {
-        continue;
-      }
-      if (key === "class") {
-        node.className = String(value);
-      } else if (key === "text") {
-        node.textContent = String(value);
-      } else if (key === "style") {
-        node.style.cssText = String(value);
-      } else if (key.startsWith("on") && typeof value === "function") {
-        node.addEventListener(key.slice(2).toLowerCase(), value);
-      } else {
-        node.setAttribute(key, String(value));
-      }
-    }
-    appendChildren(node, children);
-    return node;
-  }
-  function buttonEl(props = {}, ...children) {
-    return el("button", { type: "button", ...props }, ...children);
-  }
-  function appendChildren(parent, children) {
-    for (const child of children) {
-      if (child === null || child === undefined || child === false) {
-        continue;
-      }
-      parent.append(child instanceof Node ? child : document.createTextNode(String(child)));
-    }
-  }
-  function textInput(props = {}) {
-    return el("input", {
-      type: "text",
-      autocomplete: "off",
-      autocapitalize: "none",
-      autocorrect: "off",
-      spellcheck: "false",
-      ...props
-    });
-  }
-  function searchInput(props = {}) {
-    return textInput({ type: "search", enterkeyhint: "search", ...props });
-  }
-  function tagInput(className) {
-    return textInput({
-      class: className,
-      name: "new_tags",
-      placeholder: "Add tags, comma separated",
-      "aria-label": "New tags",
-      maxlength: "200"
-    });
-  }
-  var ICON_PATHS = {
-    back: "M15 18l-6-6 6-6",
-    search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm10 2l-4.35-4.35",
-    star: "M12 2.5l2.9 6.1 6.6.9-4.8 4.7 1.2 6.6-5.9-3.2-5.9 3.2 1.2-6.6L2.5 9.5l6.6-.9L12 2.5z",
-    external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
-    warning: "M12 3L2 21h20L12 3zm0 6v6m0 3v.5",
-    close: "M6 6l12 12M18 6L6 18",
-    filter: "M3 5h18l-7 8v6l-4 2v-8L3 5z",
-    arrowRight: "M5 12h14m-6-6 6 6-6 6",
-    arrowLeft: "M19 12H5m6-6-6 6 6 6",
-    chevronLeft: "M15 6l-6 6 6 6",
-    chevronRight: "M9 6l6 6-6 6",
-    first: "M18 6l-6 6 6 6M11 6l-6 6 6 6",
-    last: "M6 6l6 6-6 6M13 6l6 6-6 6",
-    download: "M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M5 19h14",
-    history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"
-  };
-  function icon(name, filled = false) {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("width", "18");
-    svg.setAttribute("height", "18");
-    svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("focusable", "false");
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", ICON_PATHS[name]);
-    path.setAttribute("stroke", "currentColor");
-    path.setAttribute("stroke-width", filled ? "0" : "2");
-    path.setAttribute("stroke-linecap", "round");
-    path.setAttribute("stroke-linejoin", "round");
-    path.setAttribute("fill", filled ? "currentColor" : "none");
-    svg.append(path);
-    return svg;
-  }
-  function isEditableTarget(target) {
-    if (!(target instanceof HTMLElement)) {
-      return false;
-    }
-    return target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
-  }
-
-  // src/ui/live-region.ts
-  function announceInto(node, text, write) {
-    if (text !== "" && node.textContent === text) {
-      write("");
-      window.setTimeout(() => write(text), 16);
-      return;
-    }
-    write(text);
-  }
-
-  // src/ui/toast.ts
-  var timers = new Map;
-  function durationFor(text) {
-    return Math.min(8000, Math.max(2000, text.length * 70));
-  }
-  function present(node, text, visibleClass) {
-    clearTimeout(timers.get(node));
-    node.classList.remove(visibleClass);
-    const reveal = (value) => {
-      node.textContent = value;
-      if (value === "") {
-        return;
-      }
-      node.classList.add(visibleClass);
-      timers.set(node, window.setTimeout(() => {
-        node.classList.remove(visibleClass);
-        node.textContent = "";
-      }, durationFor(value)));
-    };
-    announceInto(node, text, reveal);
-  }
-  function ensureToast() {
-    const existing = document.getElementById("eh-toast");
-    if (existing) {
-      return existing;
-    }
-    const toast = el("div", {
-      id: "eh-toast",
-      class: "eh-toast",
-      role: "status",
-      "aria-live": "polite",
-      "aria-atomic": "true"
-    });
-    (document.getElementById("eh-root") ?? document.body).append(toast);
-    return toast;
-  }
-  function showToast(text) {
-    const trimmed = text.trim();
-    if (trimmed === "") {
-      return;
-    }
-    const hudToast = document.getElementById("hud-toast");
-    present(hudToast ?? ensureToast(), trimmed, "show");
-  }
-
-  // src/menu.ts
-  function enabledToast(label) {
-    return (enabled) => `${label} ${enabled ? "enabled" : "disabled"}`;
-  }
-  var TOGGLE_COMMANDS = [
-    {
-      key: "fitHeight",
-      command: "Toggle fit-height / natural-width",
-      toast: (fitHeight) => `Default mode: ${fitHeight ? "fit-height" : "natural-width"}`
-    },
-    { key: "debug", command: "Toggle debug mode", toast: enabledToast("Debug mode") },
-    {
-      key: "listInfiniteScroll",
-      command: "Toggle infinite scroll (feed)",
-      toast: enabledToast("Feed infinite scroll")
-    },
-    {
-      key: "galleryInfiniteScroll",
-      command: "Toggle infinite scroll (gallery)",
-      toast: enabledToast("Gallery infinite scroll")
-    },
-    {
-      key: "tagSuggestions",
-      command: "Toggle tag suggestions",
-      toast: enabledToast("Tag suggestions")
-    }
-  ];
-  function defaultKeySummary() {
-    return KEY_ACTIONS.map(({ action, label }) => `${label}: ${DEFAULT_KEYMAP[action].join("/")}`).join(", ");
-  }
-  function registerMenuCommands() {
-    for (const { key, command, toast } of TOGGLE_COMMANDS) {
-      GM_registerMenuCommand(command, () => {
-        const next = !getSettings()[key];
-        updateSetting(key, next);
-        showToast(toast(next));
-      });
-    }
-    GM_registerMenuCommand("Reset keymap to defaults", () => {
-      if (confirm(`Reset all keys to defaults?
-
-${defaultKeySummary()}`)) {
-        updateSetting("keymap", DEFAULT_KEYMAP);
-        showToast("Keymap reset to defaults");
-      }
-    });
-  }
-
-  // src/net/priority.ts
-  var VALUES = {
-    critical: 10,
-    navigation: 8,
-    facing: 7,
-    append: 6,
-    background: 4,
-    prefetch: 2
-  };
-  function priorityOf(requestClass) {
-    return VALUES[requestClass];
-  }
-
-  // src/net/queue.ts
-  class RequestQueue {
-    pending = [];
-    active = 0;
-    lastStart = 0;
-    timer;
-    seq = 0;
-    get activeCount() {
-      return this.active;
-    }
-    fetch(url, options = {}) {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      const controller = new AbortController;
-      const userSignal = options.signal;
-      const task = {
-        url,
-        init: options.init ?? {},
-        priority: options.priority ?? priorityOf("background"),
-        tag: options.tag ?? "default",
-        seq: this.seq++,
-        controller,
-        resolve,
-        reject,
-        detach: null
-      };
-      if (userSignal) {
-        if (userSignal.aborted) {
-          reject(userSignal.reason);
-          return promise;
-        }
-        const onAbort = () => {
-          const index = this.pending.indexOf(task);
-          if (index === -1) {
-            controller.abort(userSignal.reason);
-            return;
-          }
-          this.pending.splice(index, 1);
-          this.finish(task);
-          reject(userSignal.reason);
-        };
-        userSignal.addEventListener("abort", onAbort, { once: true });
-        task.detach = () => {
-          userSignal.removeEventListener("abort", onAbort);
-        };
-      }
-      this.pending.push(task);
-      this.pending.sort((a, b) => b.priority - a.priority || a.seq - b.seq);
-      this.pump();
-      return promise;
-    }
-    purge(predicate) {
-      for (let index = this.pending.length - 1;index >= 0; index--) {
-        const task = this.pending[index];
-        if (!task || !predicate(task)) {
-          continue;
-        }
-        this.pending.splice(index, 1);
-        this.finish(task);
-        task.reject(new RequestPurgedError);
-      }
-    }
-    pump() {
-      if (this.timer !== undefined) {
-        clearTimeout(this.timer);
-        this.timer = undefined;
-      }
-      const concurrency = Math.max(1, getSettings().netConcurrency);
-      while (this.active < concurrency) {
-        const task = this.pending.shift();
-        if (!task) {
-          return;
-        }
-        const now = Date.now();
-        const wait = this.lastStart + getSettings().netIntervalMs - now;
-        if (wait > 0) {
-          this.pending.unshift(task);
-          this.timer = setTimeout(() => {
-            this.pump();
-          }, wait);
-          return;
-        }
-        this.active++;
-        this.lastStart = now;
-        this.run(task);
-      }
-    }
-    async run(task) {
-      const timeout = setTimeout(() => {
-        task.controller.abort(new DOMException("Request timed out", "TimeoutError"));
-      }, Math.max(1000, getSettings().netTimeoutMs));
-      try {
-        const response = await fetch(task.url, {
-          ...task.init,
-          signal: task.controller.signal
-        });
-        task.resolve(response);
-      } catch (error) {
-        task.reject(error);
-      } finally {
-        clearTimeout(timeout);
-        this.active--;
-        this.finish(task);
-        this.pump();
-      }
-    }
-    finish(task) {
-      task.detach?.();
-      task.detach = null;
-    }
-  }
-  var net = new RequestQueue;
-
-  // src/net/http.ts
-  async function post(url, body, contentType, options) {
-    const response = await net.fetch(url, {
-      priority: priorityOf("critical"),
-      tag: options.tag,
-      signal: options.signal,
-      init: {
-        method: "POST",
-        body,
-        credentials: "same-origin",
-        headers: { "Content-Type": contentType }
-      }
-    });
-    if (!response.ok) {
-      throw new Error(`${options.failure} (${response.status}).`);
-    }
-    if (isLoginWall(await response.clone().text())) {
-      throw new LoginRequiredError;
-    }
-    return response;
-  }
-  function isLoginWall(body) {
-    return /<input[^>]+type=["']?password/i.test(body);
-  }
-  function postForm(url, body, options) {
-    return post(url, body, "application/x-www-form-urlencoded", options);
-  }
-  async function postJson(url, body, options) {
-    const response = await post(url, JSON.stringify(body), "application/json", options);
-    return await response.json();
-  }
-  var LIMIT_PATTERNS = [
-    /image viewing limit/i,
-    /not have sufficient gp/i,
-    /opening pages too fast/i,
-    /temporarily banned/i,
-    /too many requests/i
-  ];
-  function isRateLimitText(text) {
-    return LIMIT_PATTERNS.some((pattern) => pattern.test(text));
-  }
-  function isHtmlResponse(response, text) {
-    const type = response.headers.get("content-type") ?? "";
-    return type.includes("html") || /^\s*<(!doctype|html|head|body)/i.test(text);
-  }
-  var PAGE_CONTENT_SELECTOR = "#gn, #gdt, #gdd, #i1, #i2, #i3, #profile_form, #usertags_outer, #torrentinfo, .itg";
-  function hasPageContent(doc) {
-    return doc.querySelector(PAGE_CONTENT_SELECTOR) !== null;
-  }
-  function isLoginPage(doc) {
-    if (doc.querySelector("#sadpanda") !== null) {
-      return true;
-    }
-    return !hasPageContent(doc) && /sad panda/i.test(doc.title);
-  }
-  var SITE_SUFFIX = /\s*[-–—|]\s*(?:e-hentai|exhentai)(?:\.org)?(?:\s+galleries)?\s*$/i;
-  var NOT_FOUND_HEADINGS = {
-    "not found": true,
-    "not available": true,
-    "gallery not available": true
-  };
-  function normalizeHeading(text) {
-    return collapseWhitespace(text.replace(SITE_SUFFIX, "")).toLowerCase();
-  }
-  var NOT_FOUND_TEXT = /^(?:gallery not found|gallery not available|page not found|not found)\b/i;
-  function isNotFoundPage(doc) {
-    if (hasPageContent(doc)) {
-      return false;
-    }
-    const title = normalizeHeading(doc.title);
-    const heading = normalizeHeading(doc.querySelector("h1")?.textContent ?? "");
-    const body = doc.body.textContent.trim();
-    const bare = body.length > 0 && body.length < 800 && NOT_FOUND_TEXT.test(body);
-    return [title, heading].some((text) => /^404\b/.test(text) || NOT_FOUND_HEADINGS[text] === true) || bare;
   }
 
   // src/parse/helpers.ts
@@ -3905,11 +3924,6 @@ ${defaultKeySummary()}`)) {
     return href;
   }
 
-  // src/ui/error-text.ts
-  function errorText(error, fallback = "Something went wrong.") {
-    return error instanceof Error ? error.message : fallback;
-  }
-
   // src/ui/fact-row.ts
   function factRow(label, value, className) {
     return el("div", { class: className === undefined ? "fact-row" : `fact-row ${className}` }, el("span", { class: "fact-label", text: label }), el("span", { class: "fact-value" }, value));
@@ -3918,6 +3932,53 @@ ${defaultKeySummary()}`)) {
   // src/ui/list-header.ts
   function listHeader({ title, summary }) {
     return el("div", { class: "list-header" }, el("div", { class: "list-heading" }, el("h1", { text: title })), el("div", { class: "list-summary" }, ...summary));
+  }
+
+  // src/ui/error-text.ts
+  function errorText(error, fallback = "Something went wrong.") {
+    return error instanceof Error ? error.message : fallback;
+  }
+
+  // src/ui/pending-action.ts
+  function createPendingAction() {
+    let running = false;
+    return {
+      get busy() {
+        return running;
+      },
+      async run(hooks) {
+        if (running) {
+          return false;
+        }
+        running = true;
+        hooks.setBusy?.(true);
+        let recover = false;
+        try {
+          let result;
+          try {
+            result = await hooks.run();
+          } catch (error) {
+            if (hooks.signal.aborted) {
+              return false;
+            }
+            hooks.failed?.(errorText(error, hooks.failure ?? "The action failed."));
+            recover = true;
+            return false;
+          }
+          if (hooks.signal.aborted) {
+            return false;
+          }
+          hooks.success?.(result);
+          return true;
+        } finally {
+          running = false;
+          hooks.setBusy?.(false);
+          if (recover) {
+            hooks.recover?.()?.focus();
+          }
+        }
+      }
+    };
   }
 
   // src/data/search-history.ts
@@ -4643,6 +4704,7 @@ ${defaultKeySummary()}`)) {
 
   // src/tags/core-vocabulary.ts
   var CORE_VOCABULARY_BASE64 = "RUhUSQEMAAZmZW1hbGXIAAAAAAZhaGVnYW8BBm1wdXRlZQEDbmFsBAwgaW50ZXJjb3Vyc2UBBHByb24ABGJhbGQBAmJ3AQNkc20B" + "CmVhdXR5IG1hcmsCCHN0aWFsaXR5AQppZyBhcmVvbGFlBQJzcwQFYmFsbHMFBnJlYXN0cwQHbmlwcGxlcwQFcGVuaXMCBGtpbmkC" + "BnNleHVhbAEIbGFja21haWwCB2luZGZvbGQCA29vZAQEbWVycwMEd2pvYgcFIGZhY2UBEG9keSBtb2RpZmljYXRpb24FB3dyaXRp" + "bmcEBHN1aXQCBW5kYWdlAQ9yZWFzdCBleHBhbnNpb24HB2ZlZWRpbmcCA2lkZQEGdWtrYWtlAghubnkgZ2lybAILc2luZXNzIHN1" + "aXQAB2NhdGdpcmwBDGhhc3RpdHkgYmVsdAIGZWF0aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0" + "aW9uAghzcGxheWluZwIFd2dpcmwBDHJvc3NkcmVzc2luZwMKdGNoIHRhdHRvbwEJdW1mbGF0aW9uAglubmlsaW5ndXMADGRhcmsg" + "bmlwcGxlcwUEc2tpbgIGdWdodGVyAQllZXB0aHJvYXQCCWZsb3JhdGlvbgIIbW9uIGdpcmwBE2lja2dpcmwgb24gZGlja2dpcmwM" + "BmZlbWFsZQECb2cDBSBnaXJsAhB1YmxlIHBlbmV0cmF0aW9uAQRydWdzAANlbGYBDHhoaWJpdGlvbmlzbQIOcG9zZWQgY2xvdGhp" + "bmcBEHllLWNvdmVyaW5nIGJhbmcDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2VtYWxlcyBvbmx5AwNkb20BBmlsbWlu" + "ZwIHbmdlcmluZwIWcnN0IHBlcnNvbiBwZXJzcGVjdGl2ZQIGc2huZXRzAwR0aW5nAQZvb3Rqb2ICBnggZ2lybAEHcmVja2xlcwEE" + "dXJyeQIGdGFuYXJpAANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQdpYW50ZXNzAQZsYXNzZXMCBG92ZXMBBW9i" + "bGluAgRra3VuAQRyb3VwAQN1cm8BBHlhcnUACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZ2ggaGVl" + "bHMBBG9ybnMDAnNlBQUgZ2lybAIGdHBhbnRzAQt1Z2UgYnJlYXN0cwUFcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGlt" + "cHJlZ25hdGlvbgEFbmNlc3QCB2ZsYXRpb24CDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxhY3Rh" + "dGlvbgIKcmdlIHRhdHRvbwIDdGV4AQRlYXNoAgVvdGFyZAEHaW5nZXJpZQEGb2xpY29uAAxtYWdpY2FsIGdpcmwCAmlkAgRrZXVw" + "Ag5sZSBvbiBkaWNrZ2lybAIJc2tlZCBmYWNlAwl0dXJiYXRpb24BA2lsZgMEa2luZwIIbmQgYnJlYWsFB2NvbnRyb2wBC29uc3Rl" + "ciBnaXJsAgR0aGVyAQV1c2NsZQAJbmFrYWRhc2hpAQdldG9yYXJlAQppcHBsZSBmdWNrBwhwaWVyY2luZwcLc3RpbXVsYXRpb24B" + "AnVuAgNyc2UACm9wcGFpIGxvbGkBAnJjAA1wYWludGVkIG5haWxzAwR6dXJpAgdudHlob3NlAgVzdGllcwEQZW5pcyBlbmxhcmdl" + "bWVudAEHaWVyY2luZwIHeGllIGN1dAEHb255dGFpbAEHcmVnbmFudAIKb3N0aXR1dGlvbgAEcmFwZQEFaW1qb2IBBG9ib3QBBHlv" + "bmEABHNjYXQCDWhvb2wgc3dpbXN1aXQGC2JveSB1bmlmb3JtBgxnaXJsIHVuaWZvcm0BB2V4IHRveXMBBmhlbWFsZQIFaWJhcmkB" + "BWlzdGVyAQRsYXZlAgZlZXBpbmcBDG1hbGwgYnJlYXN0cwYFcGVuaXMCA2VsbAEEbnVmZgEMb2xlIGRpY2tnaXJsBQZmZW1hbGUB" + "B3BhbmtpbmcBCHF1aXJ0aW5nAQh0b2NraW5ncwMQbWFjaCBkZWZvcm1hdGlvbgIGcmFwLW9uAQd3ZWF0aW5nAgZpbXN1aXQABHRh" + "aWwCB2xsIGdpcmwCBm5saW5lcwEGZWFjaGVyAgdudGFjbGVzAQ9oaWdoIGhpZ2ggYm9vdHMBBW9tYm95AgVydHVyZQENcmFuc2Zv" + "cm1hdGlvbgEId2ludGFpbHMADnVudXN1YWwgcHVwaWxzARByZXRocmEgaW5zZXJ0aW9uAgdpbmF0aW9uAA12YWdpbmFsIGJpcnRo" + "AQ1lcnkgbG9uZyBoYWlyAQNvcmUBBXR1YmVyAAV3aW5ncwIDdGNoAAV4LXJheQAEeXVyaQRtYWxlyAAAAAAGYWhlZ2FvAQZtcHV0" + "ZWUBA25hbAQMIGludGVyY291cnNlAQRwcm9uAQtzcGh5eGlhdGlvbgAEYmFsZAECYm0BA2RzbQEKZWF1dHkgbWFyawIIc3RpYWxp" + "dHkBCmlnIGFyZW9sYWUFAnNzBAViYWxscwUGcmVhc3RzBARsaXBzBAduaXBwbGVzBAVwZW5pcwIEa2luaQIGc2V4dWFsAQhsYWNr" + "bWFpbAIHaW5kZm9sZAIDb29kBARtZXJzAwR3am9iBwUgZmFjZQEQb2R5IG1vZGlmaWNhdGlvbgUHd3JpdGluZwQEc3VpdAIFbmRh" + "Z2UBD3JlYXN0IGV4cGFuc2lvbgcHZmVlZGluZwIDaWRlAQZ1a2tha2UCC3NpbmVzcyBzdWl0AAZjYXRib3kBDGhhc3RpdHkgYmVs" + "dAIGZWF0aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0aW9uAghzcGxheWluZwEMcm9zc2RyZXNz" + "aW5nAwp0Y2ggdGF0dG9vAQl1bWZsYXRpb24CCW5uaWxpbmd1cwAMZGFyayBuaXBwbGVzBQRza2luAQllZXB0aHJvYXQCA21vbgEP" + "aWNrZ2lybCBvbiBtYWxlAgJsZgECb2cDBCBib3kCEHVibGUgcGVuZXRyYXRpb24BBHJ1Z3MDAm5rAANlbGYBDHhoaWJpdGlvbmlz" + "bQIOcG9zZWQgY2xvdGhpbmcBEHllLWNvdmVyaW5nIGJhbmcDBG1hc2sDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2Vt" + "aW5pemF0aW9uAQZpbG1pbmcCFnJzdCBwZXJzb24gcGVyc3BlY3RpdmUCBnNobmV0cwMEdGluZwEJb2N1cyBhbmFsAgpvdCBsaWNr" + "aW5nBANqb2ICBXggYm95AQdyZWNrbGVzAQR1cnJ5AANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQZsYXNzZXMC" + "BG92ZXMBBW9ibGluAgRra3VuAQRyb3VwAQN1cm8ACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZGRl" + "biBzZXgCCGdoIGhlZWxzAQRvcm5zAwJzZQIGdHBhbnRzAQl1Z2UgcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGltcHJl" + "Z25hdGlvbgEFbmNlc3QCB2ZsYXRpb24CBHNla2kCDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxh" + "Y3RhdGlvbgIOcmdlIGluc2VydGlvbnMGBnRhdHRvbwIDdGV4AQRlYXNoAgZnIGxvY2sCBW90YXJkAQdpbmdlcmllAgh6YXJkIGd1" + "eQEKb25nIHRvbmd1ZQAMbWFnaWNhbCBnaXJsAgJpZAIEa2V1cAIIbGVzIG9ubHkCCXNrZWQgZmFjZQMJdHVyYmF0aW9uAQNpa28C" + "BWxraW5nAghuZCBicmVhawUHY29udHJvbAEGb25zdGVyAQV1c2NsZQAJbmFrYWRhc2hpAQdldG9yYXJlAQppcHBsZSBmdWNrBwhw" + "aWVyY2luZwcLc3RpbXVsYXRpb24BAnVuAgNyc2UAB29sZCBtYW4BAnJjAA1wYWludGVkIG5haWxzAwR6dXJpAgdudHlob3NlAgVz" + "dGllcwEQZW5pcyBlbmxhcmdlbWVudAIFdHBsYXkBB2llcmNpbmcCB3hpZSBjdXQBB29ueXRhaWwBB3JlZ25hbnQCCm9zdGl0dXRp" + "b24ABHJhcGUBBWltam9iAQRvYm90AQR5b25hAARzY2F0Ag1ob29sIHN3aW1zdWl0Bgtib3kgdW5pZm9ybQYMZ2lybCB1bmlmb3Jt" + "AQdleCB0b3lzAQZoaWJhcmkCBm90YWNvbgEEbGF2ZQIGZWVwaW5nAQptYWxsIHBlbmlzAgNlbGwBBG51ZmYBCG9sZSBtYWxlAQdw" + "YW5raW5nAQh0b2NraW5ncwMQbWFjaCBkZWZvcm1hdGlvbgIGcmFwLW9uAQd3ZWF0aW5nAgZpbXN1aXQABHRhaWwCBmxsIG1hbgIG" + "bmxpbmVzAQZlYWNoZXICB250YWNsZXMBD2hpZ2ggaGlnaCBib290cwEEaWFyYQEGb21naXJsAgVydHVyZQENcmFuc2Zvcm1hdGlv" + "bgEId2ludGFpbHMADnVudXN1YWwgcHVwaWxzARByZXRocmEgaW5zZXJ0aW9uAgdpbmF0aW9uAA12YWdpbmFsIGJpcnRoAQ1lcnkg" + "bG9uZyBoYWlyAQhpcmdpbml0eQEDb3JlAgd5ZXVyaXNtAQV0dWJlcgAFd2luZ3MCA3RjaAEHb2xmIGJveQAFeC1yYXkABHlhb2kF" + "bWl4ZWQXAAAAABBhbmltYWwgb24gYW5pbWFsAAlib2R5IHN3YXAADWZmbSB0aHJlZXNvbWUBB3JvdHRhZ2UACWdhbmcgcmFwZQEE" + "cm91cAAGaW5jZXN0AgRzZWtpAA1rb2RvbW8gZG91c2hpAApsb3cgaW5jZXN0AA1tbWYgdGhyZWVzb21lAgt0IHRocmVlc29tZQEM" + "dGYgdGhyZWVzb21lARF1bHRpbW91dGggYmxvd2pvYgUKcGxlIGFzc2pvYgkHZm9vdGpvYgkHaGFuZGpvYgkIcGFpcmluZ3MABm51" + "ZGlzbQAIb3lha29kb24ACXNoaW1haWRvbgANdHRtIHRocmVlc29tZQEEd2lucwVvdGhlcjwAAAAAAjNkAgkgaW1hZ2VzZXQADGFp" + "IGdlbmVyYXRlZAEPbHJlYWR5IHVwbG9hZGVkAQduYWdseXBoAgZpbWF0ZWQCB3Rob2xvZ3kBBnJ0Ym9vawAHY2FwdGlvbgEEb21p" + "YwMIcGlsYXRpb24ACmRha2ltYWt1cmEBBmVmYWNlZAAOZXh0cmFuZW91cyBhZHMABmZpZ3VyZQEQb3JiaWRkZW4gY29udGVudAEO" + "dWxsIGNlbnNvcnNoaXAGBG9sb3IACWdvdWRvdXNoaQAIaGFyZGNvcmUBBW93IHRvAAppbmNvbXBsZXRlAAtrb2RvbW8gb25seQAN" + "bWlzc2luZyBjb3ZlcgEQb3NhaWMgY2Vuc29yc2hpcAEQdWx0aS13b3JrIHNlcmllcwUOcGFuZWwgc2VxdWVuY2UADm5vIHBlbmV0" + "cmF0aW9uAg9uLWggZ2FtZSBtYW51YWwGCGltYWdlc2V0BARudWRlAgN2ZWwBCnVkaXR5IG9ubHkAFW9iamVjdCBpbnNlcnRpb24g" + "b25seQELdXQgb2Ygb3JkZXIACnBhcGVyY2hpbGQBCGl4ZWwgYXJ0AAhyZWFscG9ybgIEZHJhdwIGcGxhY2VkAQxvdWdoIGdyYW1t" + "YXIGC3RyYW5zbGF0aW9uAAZzYW1wbGUBB2Nhbm1hcmsCCXJlZW5zaG90cwELa2V0Y2ggbGluZXMBCW91c2h1dWhlbgELdGVyZW9z" + "Y29waWMCB29yeSBhcmMACXRhbmtvdWJvbgEIaGVtZWxlc3MBCGltZSBzdG9wAAp1bmNlbnNvcmVkAAt2YXJpYW50IHNldAALd2F0" + "ZXJtYXJrZWQBBmVidG9vbgIIc3Rlcm4gY2cICGltYWdlc2V0CAVub24taAAHeXVra3VyaQhsb2NhdGlvbggAAAAADGJhdGhpbmcg" + "cm9vbQEEZWFjaAAJY2xhc3Nyb29tAAlpbmZpcm1hcnkABW9uc2VuAAVzYXVuYQEFZW50b3UBDHdpbW1pbmcgcG9vbAZwYXJvZHnI" + "AAAAAA5hZHZlbnR1cmUgdGltZQEHbXBoaWJpYQEObmltYWwgY3Jvc3NpbmcBCHJrbmlnaHRzCQkgZW5kZmllbGQBC3RlbGllciBy" + "eXphARh2YXRhciB0aGUgbGFzdCBhaXJiZW5kZXICBmVuZ2VycwEIenVyIGxhbmUADmJha2Vtb25vZ2F0YXJpAghuZyBkcmVhbQIE" + "dG1hbgIHeW9uZXR0YQEFZW4gMTABCGxhY2sgY2F0AgRlYWNoAgp1ZSBhcmNoaXZlAQ5vY2NoaSB0aGUgcm9jawIEcnV0bwARY2Fy" + "ZGNhcHRvciBzYWt1cmEBC2hhaW5zYXcgbWFuAQlvZGUgZ2Vhc3MBCHliZXJwdW5rAAhkYW5kYWRhbgMIZ2Fucm9ucGECCnJrc3Rh" + "bGtlcnMDEmxpbmcgaW4gdGhlIGZyYW54eAIJdGUgYSBsaXZlAQxlYWQgb3IgYWxpdmUCB2x0YXJ1bmUCDXRlY3RpdmUgY29uYW4B" + "BmlnaW1vbgEKcmFnb24gYmFsbAsGIHN1cGVyDAF6BwVxdWVzdAE2dW5nZW9uIG5pIGRlYWkgbyBtb3RvbWVydSBubyB3YSBtYWNo" + "aWdhdHRlaXJ1IGRhcm91IGthAAplbGRlbiByaW5nAQ5xdWVzdHJpYSBnaXJscwAKZmFpcnkgdGFpbAIFbGxvdXQCDnRlIGdyYW5k" + "IG9yZGVyBRlrYWxlaWQgbGluZXIgcHJpc21hIGlsbHlhBQpzdGF5IG5pZ2h0AQxpbmFsIGZhbnRhc3kNBCB2aWkOA3hpdgIJcmUg" + "ZW1ibGVtCwYgZmF0ZXMMDHRocmVlIGhvdXNlcwIUdmUgbmlnaHRzIGF0IGZyZWRkeXMBBXJvemVuARJ1bGxtZXRhbCBhbGNoZW1p" + "c3QADmdlbnNoaW4gaW1wYWN0AQ5pcmxzIGZyb250bGluZQYKdW5kIHBhbnplcgEMb2JsaW4gc2xheWVyAhhjaHV1bW9uIHdhIHVz" + "YWdpIGRlc3Uga2ECFmRkZXNzIG9mIHZpY3Rvcnkgbmlra2UCEnRvdWJ1biBubyBoYW5heW9tZQEPcmFuYmx1ZSBmYW50YXN5Awp2" + "aXR5IGZhbGxzAQp1aWx0eSBnZWFyAgRuZGFtBgUgc2VlZAAEaGFsbwIKcnJ5IHBvdHRlcgIKemJpbiBob3RlbAEIZWxsdGFrZXIE" + "CHV2YSBib3NzAQ1pZ2hzY2hvb2wgZHhkCwtvZiB0aGUgZGVhZAIDbGRhAQdvbG9saXZlAgtua2FpIGdha3VlbgcJc3RhciByYWls" + "ARZ5cGVyZGltZW5zaW9uIG5lcHR1bmlhABdpamlyYW5haWRlIG5hZ2F0b3JvLXNhbgEPbmZpbml0ZSBzdHJhdG9zAgZ1eWFzaGEA" + "Dmp1anV0c3Uga2Fpc2VuAgxzdGljZSBsZWFndWUABGstb24BGWFndXlhLXNhbWEgd2Ega29rdXJhc2V0YWkCEW5vam8gb2thcmlz" + "aGltYXN1Aw50YWkgY29sbGVjdGlvbgENZW1vbm8gZnJpZW5kcwELaWxsIGxhIGtpbGwCCm0gcG9zc2libGUDDWV0c3Ugbm8geWFp" + "YmECDm5nIG9mIGZpZ2h0ZXJzAR9vYmF5YXNoaS1zYW4tY2hpIG5vIG1haWQgZHJhZ29uAgZpa2F0c3UCGW1pLXNhbiB3YSBrb215" + "dXNob3UgZGVzdS4CIm5vIHN1YmFyYXNoaWkgc2VrYWkgbmkgc3l1a3VmdWt1IG8AC2xhc3Qgb3JpZ2luARBlYWd1ZSBvZiBsZWdl" + "bmRzAQhvdmUgbGl2ZQkhIG5pamlnYXNha2kgaGlnaCBzY2hvb2wgaWRvbCBjbHViCghzdW5zaGluZQENeWNvcmlzIHJlY29pbAAb" + "bWFob3Ugc2hvdWpvIGx5cmljYWwgbmFub2hhAglzcyBlZmZlY3QBBmV0cm9pZAEGb25zdGVyBwcgaHVudGVyAQ11c2hva3UgdGVu" + "c2VpAQ95IGhlcm8gYWNhZGVtaWEDH2xpdHRsZSBwb255IGZyaWVuZHNoaXAgaXMgbWFnaWMABm5hcnV0bwEWZW9uIGdlbmVzaXMg" + "ZXZhbmdlbGlvbgEMaWVyIGF1dG9tYXRhAgdqaXNhbmppAAlvbmUgcGllY2UFCHVuY2ggbWFuAStyZSBubyBpbW91dG8gZ2Ega29u" + "bmEgbmkga2F3YWlpIHdha2UgZ2EgbmFpAgZpZ2luYWwBCXNoaSBubyBrbwEHdmVybG9yZAQFd2F0Y2gAInBhbnR5IGFuZCBzdG9j" + "a2luZyB3aXRoIGdhcnRlcmJlbHQBBmVyc29uYQcCIDMIATQIATUBBm9rZW1vbgEKcmV0dHkgY3VyZQIOaW5jZXNzIGNvbm5lY3QB" + "GHVlbGxhIG1hZ2kgbWFkb2thIG1hZ2ljYQAMcXVlZW5zIGJsYWRlAAhyYW5tYSAxMgEkZSB6ZXJvIGthcmEgaGFqaW1lcnUgaXNl" + "a2FpIHNlaWthdHN1AgtzaWRlbnQgZXZpbAIFd3JpdGUBA3dieQALc2FpbG9yIG1vb24BCWNvb2J5LWRvbwEXZW5raSB6ZXNzaG91" + "IHN5bXBob2dlYXIDCnJhbiBrYWd1cmEBBmhhbnRhZQIQaW5nZWtpIG5vIGt5b2ppbgIPb2t1Z2VraSBubyBzb21hARFvbmljIHRo" + "ZSBoZWRnZWhvZwMbbyBiaXNxdWUgZG9sbCB3YSBrb2kgbyBzdXJ1Agl1bGNhbGlidXIDDnNvdSBubyBmcmllcmVuAQlwaWRlci1t" + "YW4CBmxhdG9vbgIKeSB4IGZhbWlseQELc3NzLmdyaWRtYW4BB3RhciBmb3gFFnZzLiB0aGUgZm9yY2VzIG9mIGV2aWwFBHdhcnMC" + "DWV2ZW4gdW5pdmVyc2UCDHJlZXQgZmlnaHRlcgMLaWtlIHdpdGNoZXMBE3VwZXIgbWFyaW8gYnJvdGhlcnMFA21hbgEPd29yZCBh" + "cnQgb25saW5lAA50YWltYW5pbiBhc2FnaQkIeXVraWthemUCGXRlIG5vIHl1dXNoYSBubyBuYXJpYWdhcmkBCmVlbiB0aXRhbnME" + "GGFnZSBtdXRhbnQgbmluamEgdHVydGxlcwIEa2tlbgIYbmdlbiB0b3BwYSBndXJyZW4gbGFnYW5uAxtzZWkgc2hpdGFyYSBzbGlt" + "ZSBkYXR0YSBrZW4BEGhlIGVsZGVyIHNjcm9sbHMEEWZhaXJseSBvZGRwYXJlbnRzBAppZG9sbWFzdGVyBQpuY3JlZGlibGVzBA9s" + "ZWdlbmQgb2Yga29ycmEOBXplbGRhBQlvdWQgaG91c2UEHW1lbGFuY2hvbHkgb2YgaGFydWhpIHN1enVtaXlhBAlvd2wgaG91c2UE" + "CHNpbXBzb25zBAd3aXRjaGVyAQlvIGxvdmUtcnUCC2FydSBwcm9qZWN0AjVraWRva2kgYm9zb3R0byBydXNzaWEtZ28gZGUgZGVy" + "ZXJ1IHRvbmFyaSBubyBhbHlhLXNhbgIJbWIgcmFpZGVyAgx1aG91IHByb2plY3QBCHN1a2loaW1lAAh1bHRyYW1hbgEWbWEgbXVz" + "dW1lIHByZXR0eSBkZXJieQEIbmRlcnRhbGUBFXpha2ktY2hhbiB3YSBhc29iaXRhaQAIdm9jYWxvaWQACXdhcmhhbW1lcgELb25k" + "ZXIgd29tYW4CD3JsZCBvZiB3YXJjcmFmdAEOdXRoZXJpbmcgd2F2ZXMABXgtbWVuARVlbm9ibGFkZSBjaHJvbmljbGVzIDIAMHlh" + "aGFyaSBvcmUgbm8gc2Vpc2h1biBsb3ZlIGNvbWUgd2EgbWFjaGlnYXR0ZWlydQEub3Vrb3NvIGppdHN1cnlva3Ugc2hpam91IHNo" + "dWdpIG5vIGt5b3VzaGl0c3UgZQEHdS1naS1vaAARemVubGVzcyB6b25lIHplcm8BB29vdG9waWEJY2hhcmFjdGVyyAAAAAACMmIA" + "CGFkYSB3b25nARJlcml0aCBnYWluc2Jvcm91Z2gCBHRoZXIBA2hyaQEHa28gYW1hdQEFbGJlZG8CDmljZSBtYXJnYXRyb2lkAQdt" + "eSByb3NlAQluZHJvaWQgMTgCA2dlbAEIcHBsZWphY2sBA3F1YQEJcmxlY2NoaW5vAg90b3JpYSBwZW5kcmFnb24BBnN0b2xmbwIR" + "dWthIGxhbmdsZXkgc29yeXUDC25hIGljaGlub3NlBgV5dXVraQEEdGFnbwENeWEgc2hhbWVpbWFydQMLa2Ega2FtaXNhdG8ADGJh" + "cmJhcmEgcGVnZwIEdG1hbgIHeW9uZXR0YQEEZWxsZQEKb2EgaGFuY29jawEIcmVtZXJ0b24BC3VsbWEgYnJpZWZzAAtjYW1teSB3" + "aGl0ZQEGaGkgY2hpAw5zYXRvIG5pc2hpa2lnaQIFdW4tbGkBBHJvd24BBnludGhpYQAEZC52YQERYXJrIG1hZ2ljaWFuIGdpcmwE" + "BG5lc3MAA2VsZgIHbGVuIGpvZQEFbWlsaWEBC3J6YSBzY2FybGV0AQx1bGEgbGF3cmVuY2UABGZlcm4BBmlyZWZseQEObGFuZHJl" + "IHNjYXJsZXQCCHV0dGVyc2h5AQdvY2Fsb3JzAQZyaWVyZW4ABWdhbnl1AgdyZGV2b2lyAgd3ciBndXJhAQR1ZGFvAQl3ZW4gc3Rh" + "Y3kFCHRlbm55c29uAAxoYXJsZXkgcXVpbm4BBGlsZGECC25hIHNvcmFzYWtpBAh0YSBoeXVnYQIKdG9yaSBnb3RvdQEQb3NoaW1h" + "Y2hpIHN1aXNlaQIMdXNob3UgbWFyaW5lAQV1IHRhbwAXaWxseWFzdmllbCB2b24gZWluemJlcm4BC25vIHlhbWFuYWthAQ16dWt1" + "IG1pZG9yaXlhAAhqYW5lIGRvZQELZWFubmUgYWx0ZXIHBGRhcmMBD2lnb2t1IG5vIGZ1YnVraQIMbGwgdmFsZW50aW5lAgJueAEJ" + "dWR5IGhvcHBzAgZyaSBoYW4ABWthZmthAgJnYQIMcmluIGtha3VkYXRlAgRzdW1pAQVlcWluZwELaW0gcG9zc2libGUCC3Nha2kg" + "cnl1dWdlARFva29taSBzYW5nb25vbWl5YQAKbGFyYSBjcm9mdAEDaW5rAQRvb25hAQ51Y3kgaGVhcnRmaWxpYQIEbWluZQALbWFi" + "ZWwgcGluZXMCCmkgc2hpcmFudWkCDGtpIG5pc2hpa2lubwQCbWECB3JjaCA3dGgDC2luIGtpdGFnYXdhBAtzYSBraXJpc2FtZQIB" + "eQEGZWd1bWluAgNyY3kDBG1haWQBCmlrYSBtaXNvbm8DCm90byBtaXNha2EDCXUgaGF0c3VuZQUGbmFrYW5vAhBsZXMgdGFpbHMg" + "cHJvd2VyAhBuYW1vdG8gbm8gcmFpa291AgNzdHkCDXRzdXJpIGthbnJvamkBDW9tbyB5YW95b3JvenUCC25hIG1lZ2lzdHVzAg9y" + "cmlnYW4gYWVuc2xhbmQABm5haGlkYQICbWkCDHJ1dG8gdXp1bWFraQEJaWNrIHdpbGRlAwdvIHJvYmluBQZ5YXphd2EECWxlIGRl" + "bWFyYQIDbG91AglubyBuYWthbm8ADm9jaGFrbyB1cmFyYWthAQxyaWhpbWUgaW5vdWUAE3BhdGNob3VsaSBrbm93bGVkZ2UBCWlu" + "a2llIHBpZQEEb3dlcgUFIGdpcmwBEHJpbmNlc3MgY2VsZXN0aWEJBGx1bmEJBXBlYWNoCQV6ZWxkYQIGb2R1Y2VyAQN5cmEADXJh" + "aWRlbiBzaG9ndW4DCW5ib3cgZGFzaAIPbmdpa3UgbWF0c3Vtb3RvAgRyaXR5AgN2ZW4BCmVpIGF5YW5hbWkDCm11IGhha3VyZWkC" + "AW0DDGlsaWEgc2NhcmxldAIFbmFtb24CAnplAQtpYXMgZ3JlbW9yeQIIbiB0b3Nha2ECDG8gdHN1a2F0c3VraQEEb2JpbgICc2EC" + "C3VnZSB0aGUgYmF0AQ11bWkgdXNhZ2l5YW1hAAVzYWJlcgIMaWxvciBqdXBpdGVyBwRtYXJzCAZlcmN1cnkIA29vbgcFdmVudXMC" + "C2t1cmEgaGFydW5vBAl5YSBpemF5b2kCCG11cyBhcmFuAgtuYWUga29jaGl5YQEHY2F0aGFjaAEUZW5yaXRzdSBubyB0YXRzdW1h" + "a2kDA3NlaQEFaGVuaGUCBmllbGRlcgMGbWFrYXplAwluamkgaWthcmkECm9idSBrb2Nob3UDD3Jva28gc3VuYW9va2FtaQEKaWx2" + "ZXIgd29sZgERb25pYyB0aGUgaGVkZ2Vob2cBBnBhcmtsZQIIaWRlci1tYW4BB3RhcmZpcmUCDWV2ZW4gdW5pdmVyc2UBDnVndWhh" + "IGtpcmlnYXlhAgdwZXJnaXJsBQNtYW4ABnRhaWhvdQEGZWl0b2t1AQxpZmEgbG9ja2hhcnQBCW9raSBhc3VtYQEFcmFjZXIBBnN1" + "bmFkZQEPd2lsaWdodCBzcGFya2xlAAd2YW1waXJlAQxlbG1hIGRpbmtsZXkBBGlkZWwABHdoaXABCWlkb3dtYWtlcgIDdGNoAQtv" + "bmRlciB3b21hbgAIeWFlIG1pa28CBG1hdG8BBGVsYW4BCW9yIGZvcmdlcgMNdWljaGkgc2hpaG9pbgILdW11IGtvbnBha3UBDHVr" + "YXJpIHlha3VtbwICcmkCCnVrYSBoYXlhc2UABnpvbWJpZQZhcnRpc3TIAAAAAAMwLWcBBGJha2UBBGswajAAHzEgZG90IG1pZ2kg" + "bmkgenVyYXNoaXRlIGt1ZGFzYWkCCGVxdWFscyAyAQQtZ291AQcwLXNoaW9uAgsweWVuIGxvY2tlcgIFOCBnb3UCA2VraQICbW8C" + "A25pbgEDMTAzAQEzAgEuAQI0NAEGOHNhaS00AQJ1cAABMgEJIGVxdWFscyA4AQItZwEBMAECMjIBATMBATQBAjU0AQM4NmMBA2Js" + "cwEPYyBlcXVhbHMgZ2Fsb3JlAQNnb3UBBmwgY29sYQEDbm8uAQF0AAgzMDAwIGtydwEDMTA0AQMyMmcBBDMyOTcBAjQ2AQc1IG1h" + "Y2hpAQk2MG1iIHlhbm8BATgCAmtiAQFlAQRodXJvAQF1AQJ4MwAJNCBjb3Vsb21iAQExAQI0NQEENWFjcAEJN2FnZHJhZ29uAARh" + "ZnJvBARidWxsAQZoZW1hcnUBB2l1ZSBva2EBBGthZ2kDBXRzdWtpAQJscAEFbmRhdmECBWtvbWFuAQZzYW5hZ2kBBHlhbmUAAmJi" + "AQJlYQEEbGluZAIKdWUgc3RyaWtlcgEFb25uaWUCBHNzaGkBB3V0Y2hhLXUABWNsYW1wAgplIG1hc2FoaXJvAQhyYXp5IGRhZAIF" + "aW1zb24CAm9jAQ51dGVzZXh5cm9idXR0cwIDdmllAAZkYWdhc2kCB2lnYWlqaW4CAnRlAQRpa2swAANlbGYBC3JlY3Qgc2F3YXJ1" + "AA1mYW4gbm8gaGl0b3JpAQhlbGxhdHJpeAEJcmVkIHBlcnJ5AQl1ZXRha2lzaGkCBm1paGlrbwIGbmRvc2hpAw5zZXh5ZHJhZ29u" + "YmFsbAIDcnJ5AAlnYXJhYmF0b3oBBmluaGFoYQEFb2JsaW4CCHRvaCBqdWFuAQNyYW4BBXdlZ3dlAARoYWxvAgJyYQEFaW1lbm8D" + "CnVyYSBraXNla2kCBHNhc2kCBHRvbWkBBW9ub2thAgZyb3N1a2UAAmllAQZuYXp1bWECBGNhc2UDCm9nbml0eW1vdXMBBnNoaWtl" + "aQEMdGFiYSBoaXJvc2hpAANqYWICCHkgbmF5bG9yAAZrYWRhdGgCA25vbgIMcm1hIHRhdHN1cm91AghzZSBkYWlraQMDdW1pAQVp" + "cmFyYQIMc2FyYWdpIGd1bm1hAQZvbi1raXQCA3JyYQEHdW5hYm90bwMFb2ljaGkCCXJvaW51IGp1dQQJc3UgZ2F0YXJpAAZsYW1i" + "ZGEBC2VzbGllIGJyb3duAQVpbGl0aAIDbmRhAQdvbGljZXB0AQR1bmNoAANtYWkCAm5hAwlrYWkga2Fpa2ECA3JpbwIEdGVtaQIB" + "eQEJZGEgc3Rhcm91AQJlaQIEbWU1MAIIb3d3aXRobWUBCGljaGlraW5nAgJrbwIFbW9uZWwCAnl1Agl6dXJ5dSBrZWkBBm9ndWRh" + "bgIEbWlqaQEEdXRzdQANbmFrYWppbWEgeXVrYQIGcnVob2RvAQllcm9tYXNoaW4BDmd0dmlzdWFsc3R1ZGlvAQJ1bgAFb2Jvcm8B" + "DGh0b21vIHRha3VqaQADcGFuAQdpZyBraW5nAQlvcml1cmV0YW4ABnJhYmJpdAIJdGF0YXRhdDc0AgN2ZW4BDG9tdWxvIG1hbmNp" + "bgEFdXpoYWkADXNhaGFyYSB3YXRhcnUCBWlnYWRvAgJraQMDdXJhAgtuYnVuIGt5b2RlbgEJaGlndXJlIHVpAwZtYWthemUDBG5k" + "b2wDAm9uAw13YXN1IG5vIG9raW5hAgp1dGVuIGRvdWppAQhpYyBwaHVjawEDb3JhAQZwYXJyb3cADHRha2FzdWdpIGtvdQQDdHN1" + "Aw1lZGEgaGlyb21pdHN1AgZtYWdvcm8BCGVyYXN1IG1jAQdoZSBraXRlAglpY2N3aXRoYXEBCG9tIHNtaXRoAQxzdWtpbm8ganlv" + "Z2kBEHdpc3RlZHNjYXJsZXR0NjABBnlwZS45MAAFdmlja3kCBWt0cmlhAAl4aWVycmEwOTkADHlhaGlybyBwb2NoaQICaXICBm1h" + "bW90bwQCdG8BCnVpZ2EgbmFvaGECC2tpbm8gbWluYXRvAgt6dWtpIG4gZGFzaAAGem91cmlrCWNvc3BsYXllcrMAAAAAFGEgYmFv" + "IHllc2hpIHR1IG5pYW5nAQZiYW42MDUBC2kgbGVpIGppYW5nAghuIG5ndXllbgEMa2FuZSBhcmFyYWdpAgplbWkxMDF4b3hvAQds" + "aWNla3lvAwluYSBiZWNrZXIBB25pbm55YW4BCW9pIG1vbW9rbwEIcXVhIGFyZWEBEHJhc2hpIGhlYXJ0Z3JhbW0CCHR5IGh1YW5n" + "AQV0c3VraQEJeHVuIGthb3JpAQR6YW1pAAxiYWlsaSBzaGlybHkCBm5iYW5rbwMDZ25pAg1vZXIgbXlzdGVyaWFsAwl6b3Vtb3pp" + "YWEBBmxhY3FrbAEEeW9ydQAKY2FvbWVpeXV5aQIHcnJ5IGtleQIKdGljb3JucGxheQMGdGFzaGFhAQpoZXJyeSBuZWtvAgZ1bm1v" + "bW8BC2llbiBjb3NwbGF5ABlkYSBkYSBqdWFuIGp1YW4geGlhbyBqdWFuAQllbW9uIG1pa2EAC2VseSBjb3NwbGF5AQRuYWtvAQly" + "enVvIG5pc2EBBnRzdSBrbwEGdmVuaW5rAA1mYW5ncWlhbyB5ZXBvAQ9lbmcgamlhbmcgamlhbmcBB3Jhbnhjb3MAE2c0NCB3YSBr" + "aXp1dHN1a2FuYWkBEXJlZW4gY2hhY2hhIGppYW5nAQh1YXhpY2hhbgITb3FpIG1peGlhbnhpYW4gbWlhbwAFaGFjaGkCCG5hIGJ1" + "bm55AwVlIGFtZQESZWxseSB2b24gdmFsZW50aW5lAQppZG9yaSByb3NlAQhvc2hpbGlseQEKdWEgcWkgaGFuYQMJbGluZyBoYW5h" + "AAtqZWFuIHdhbndhbgEQaWFvcm91amkgd2Fsa3VyZQIDdXFpBAV1amVhbgMDeWFuAQp1bmtlbnN0ZWluABFrYWd1cmF6YWthIG1h" + "ZnV5dQIJbGlua2EgZm94AgtuZWtvLWthbWlhbwIIdGllY2FrZXkCCHlhIGh1YW5nBQZuaWxzb24BCGlraSByb3NlAgdtbWllIG1p" + "AgpyaWtvIGNlbGlhAgR0YXJvAQZva3VodWkECHJhIGNoaXlvAQZ1dWtvIHcAEWxhcmlzc2Egcm9jaGVmb3J0AQdlbmZyaWVkAQpp" + "bnppIGppYW5nAQZtdXNpY2wBCW9zdHdpbmQxMAIPdmVseXNwYWNla2l0dGVuAQ11ZXIgZGEgbW93YW5nAg1vIHhpYW9saSBtaWFv" + "AgRzdDc3AAVtYWNoaQIGa2FjaGFuAghyaWEgZGVzdQIJc2FrbyB5dW1lAwloaXJvIHl1a2kBCGVubWVudGFuAglyY3VyeWxhbXAC" + "CnNzaWUgaHVhbmcBDmlhbmJpbmcgeGlhbmVyAglrb2ppYW5nd3cECW1pIGhva2luYQINbmF6dWtpIGhpa2FydQINeWFtb3RvIHNh" + "a3VyYQMDb2tpAgl6aGltYW9xaXUBBm9tb2NhdAAGbmEtc2FuAgRnaXNhAgRpdGFvAgVuZ29uZwILdGggc29rb2xvdmEBCmVrb2tv" + "eW9zaGkCBG5la28BCWlhbm5pYW4gZAIEeWV5ZQEIb3JhIGZhd24BBHlha28AC29raXRhIHJpbmthAQRtaW1pAQluaSBoaXRvbWkD" + "D2tzaXlhIHNvZmluaWt1bQEJdG9oYXJhIGFuAAhwZW5rYXJ1aQEEaWdtYQIFcGluYWkBDm90YXRvIGdvZHppbGxhAQl1cmlucHVw" + "cHkADHFpc2lrdWFpIHdpaQIIdWhlIGtlamkACHJha3VyYWt1AgJuMwEFZWZlZW4CAm5nAQxpbmdvIG1pdHN1a2kCBm8tY2hhbgMC" + "a28CBXNzb2Z0AQlvbmdyb25nemkBCnlua2VyYmVsbGUAC3NhZGFrbyBtb21vAgJrdQQGcmEgbm9hAgZuZHUtNjkCCm90b21lIGxv" + "dmUCBHlha28BDWVubHVvIGNhaXR1YW4BCWhhcmtwYXJ0eQINaWthIHhpYW9sdSBsdQMJbWl6dSBuYWdpCAR5dW5vBAZvdHN1a2kD" + "CnJhZ2EgeWFua28DC3p1a3UgaG9uYW1pAg11YW5nIG11IGZ1IHN1AQhpYW8gZGluZwEDb2xhAAh0YW5ndGFuZwINbyBsaWFuZyBh" + "emhhaQEHaW55IGFzYQIKdGkgY29zcGxheQEEb2thcgIKbW95byBqaWFuZwEHc3Vib21pbgMHa2kgZGVzdQMJbm55YW5jaGFuAQ55" + "b3VkdWtpIG1hcnlvdQAHdW1la28gagEGcG1pbmFhAQlydW1pYnVubnkBA3l1eQANdmFsZXJ5IGhpbWVyYQEJZWN0b3JmaXNoAQdp" + "bm5lZ2FsAgxydHVhbCBnZWlzaGEAB3hhbnNvb24BCWlhIHhpYSB6aQIGZGFpZGFpAgZuZyBsYW4BCnVlIHFpLXNhbWEADnlhbWF6" + "YWtpIHJlaW5hAwVpc3VuZwIEbmd5aQIHb3lhb3F3cQEIaW5nIGxpbGkBCXVraSBhc3RyYQIFcmljaGEEBWtvZHhkAgZ1Zm9yaWEA" + "C3podWltaW5neW91BWdyb3VwyAAAAAAQLi4uIG1vdSBpaSBkZXN1LgEBNwEDbWl6AAcwLXBhcnRzAQMwMDABCTEyMzQ1Njc4OQEB" + "MgEGMy0zMjk3AQE0AgRjdXJhAgl0aCBoZWF2ZW4CAXUBBTcyNWNvAQY4NDZuZXQCBGJhc2UBAjk2AAExAQ4wLWppa2FuIHN1aW1p" + "bgMKbWFuIGJhcmlraQIGLjEwbWh6AggwMDAwMDAwMAQCYXADBGFjcmUDB3llbm1vZmECCzIgZ291c2hpdHN1AgQ2Z291AwFtAgRt" + "aWxlAg9wYXNlYyBubyBrYW5hdGECBndhZGF4eAIJeWVuIGpvbmRvAQIxMAMHLWdyb292ZQMBdQIIMSB0b3ViYW4CAjIyAwFrAQcy" + "LWppZ2VuAgNjdXQCCGthZmZlaW5zAQEzAgJjbQEMNDBrbSBzbGFzaCBoAgQ4YnBtAgZsb2xpdGEBBzUyaGVydHoBBTYgc2FpAgcw" + "MDAgYWxsAgVrZW5tZQEKNzU2IHN0dWRpbwICODcCAmluAgF3AQ44MG1pbGxpIGNhbm5vbgMBcgIBMwIHNSBzb3VrbwIKNyBzZWli" + "dXRzdQIGbWFzdGVyAQc5bGxkZGtrAQNiaXQBBGdheWEBA29yOAAHMiBjYXJhdAEIMCBwbHVzIDECETAwa2NhbCBzaGFrZSBjbHVi" + "AgEzAgs5IGdvdXNoaXRzdQIGbGlxdWlkAgJudAICcjACBnR3ZW50eQEFMy40ZG8CCDExNzlyb2NrAQY0IHBhZ2UCBjEgaW5jLgEK" + "NTBwb25vcm9qaQEBNwICM2sBAzk2MQICOTABAWIBBWN2LnNzAQpkIGNyZWF0aXZlAgUtbm90ZQEBaAEIamltdXN1YmkBAW0BAm5k" + "AwUgbGlmZQEHcC1jb2xvcgEGc3Ryb2tlAQl0YWlscXVlZW4BAnZzAQV6aWdlbgAMMyBjb2xvcnMgY2F0CgVvcm9uYQIFb24gMTAB" + "CC0yIGdhZ2VuAgdtZWdhLm5lAQguNXRvdXNpbgEhMCBrb3VoYW4ga2FyYSBoYWppbWVydSBlcm8gZG91amluAgMwY20CCzEgZ291" + "c2hpdHN1AgttaW4tNTAwMHllbgEIMTA0dHlvbWUBBTIwYnBtAgMxZ28BAjMzAQw2MCBkZWdyZWVzIGMCAWsBATgCBC41IGMCBXNo" + "aWtpAQQ5ZG1wAgV4cmVhbQEGZCBsaXZlAgF0AQNlZ2cBA2pvdQEEbGJveAAINC41c3BhY2UBCTAwMTAgMS1nbwICNDACBmRlbmll" + "cgEKMzRub3Rmb3VuZAEINjQ5IGNsdWIBAjcxAgJzcAEJYy1mYW50YXN5AQNkaXABAWgCBGFuZHMBDGsgc2Vpc2FrdXNobwEJb3I1" + "IHdvcmtzAQZzZWFzb24CC3QgaW5qZWN0aW9uAAQ1IDA2AgdzbGFzaCA0AQswIHNlaWtpIHNleAAHYWhlbWFydQEOa2F0c3VraSBz" + "b3VrZW4BEmxpY2Ugbm8gdGFrYXJhYmFrbwACYmIBCGxhY2sgZG9nBQZud2hpdGUDAnplAgVvc3NvbQAIY2F0dGxleWEBCGhyaXN0" + "bWFzAQVpcGhlcgEFbGVzdGEBBnJpbXNvbgIDb3duAQZ5Y2xvbmUCBW50aGlhAA1kaWdpdGFsIGxvdmVyAQZtbS5jb20AA2VsZgAK" + "ZmF0YWxwdWxzZQEGaXJlZmx5AAVnaG9zdAEGbGFzc2VzAAVoYXJlbQMEbmVzcwEIZW50YWlrZXkBBWliaWtpAAxsYXBpcyBsYXp1" + "bGkBBWlsaXRoAQxvbGl0YWNoYW5uZWwABG1hbmECAXkBAmVpAgx0cm9iYXkgY29taXgBBGlzdHkBBm9ub2V5ZQAKbmFydWhvLWRv" + "dQEPb3JhbmVrby1uby10YW1hAQJ1bgIEdGFrdQAFb2Jvcm8BB3lha29kb24ACHBhbGNvbWl4AgdudHlob3NlAQVvaXNvbgAGcmFi" + "Yml0AQZlYmVjY2EAB3NhaWdhZG8BB2hhZ2Jhc2UCBmltYXBhbgEKaWxlbnQgaGlsbAEEbGF2ZQEFdGVsbGECA29ybQEGdXp1cmFu" + "BAJ5YQAEdGFpbAEFb21ib3kABXZlbm9tAAh5YW1hbW90bwhsYW5ndWFnZVcAAAAACWFmcmlrYWFucwEHbGJhbmlhbgEFcmFiaWMD" + "BG1haWMCBm1lbmlhbgAHYmVuZ2FsaQEGb3NuaWFuAQh1bGdhcmlhbgIFcm1lc2UAB2NhdGFsYW4BBmVidWFubwEGaGluZXNlAQNy" + "ZWUDA29sZQIGb2F0aWFuAQR6ZWNoAAZkYW5pc2gBBHV0Y2gAB2VuZ2xpc2gBCHNwZXJhbnRvAgZ0b25pYW4AB2Zpbm5pc2gBBXJl" + "bmNoAAhnZW9yZ2lhbgIEcm1hbgEEcmVlawEHdWphcmF0aQAGaGVicmV3AQRpbmRpAQRtb25nAQh1bmdhcmlhbgAJaWNlbGFuZGlj" + "AQluZG9uZXNpYW4BBHJpc2gBBnRhbGlhbgAIamFwYW5lc2UCBnZhbmVzZQAHa2FubmFkYQIEemFraAEEaG1lcgEFb3JlYW4BBnVy" + "ZGlzaAAGbGFkaW5vAgFvAgN0aW4DBHZpYW4AB21hcmF0aGkBCG9uZ29saWFuAAduZGViZWxlAQVlcGFsaQEIb3J3ZWdpYW4ABW9y" + "b21vAApwYXBpYW1lbnRvAgRzaHRvAQZlcnNpYW4BBW9saXNoAghydHVndWVzZQEGdW5qYWJpAAdyZXdyaXRlAQdvbWFuaWFuAQZ1" + "c3NpYW4ABXNhbmdvAwVza3JpdAEGZXJiaWFuAQRob25hAQVsb3ZhawQFZW5pYW4BBW9tYWxpAQZwYW5pc2gBBndhaGlsaQIFZWRp" + "c2gAB3RhZ2Fsb2cCA21pbAEFZWx1Z3UCCnh0IGNsZWFuZWQEDmxlc3MgbmFycmF0aXZlAQNoYWkBBmliZXRhbgIGZ3JpbnlhAQly" + "YW5zbGF0ZWQBBnVya2lzaAAJdWtyYWluaWFuAQNyZHUACnZpZXRuYW1lc2UABXdlbHNoAAd5aWRkaXNoAAR6dWx1B3JlY2xhc3ML" + "AAAAAAhhcnRpc3RjZwEIc2lhbnBvcm4AB2Nvc3BsYXkACWRvdWppbnNoaQAGZ2FtZWNnAAhpbWFnZXNldAAFbWFuZ2EBA2lzYwAF" + "bm9uLWgAB3ByaXZhdGUAB3dlc3Rlcm4=";
+  var CORE_COUNTS_BASE64 = "QkVUQwEgWxQApgOskPVgAJq8EOO4AIFpJfVnAaw8IEa3Ao7Dx2q5AqVplUUnA8VCnj5TA8qCBrtrA9Iw9PHFA5YmwkL+A5Gy7gIm" + "BJZ2UhnEBLZHs9Z0BbT4VDHuBYH2IkqBBqs/E9RrB6iXA4uBB5KHszqiB+WglCnQB6JU+GUKCIdDD4EqCLn1MXdvCH0deaL/CIzt" + "kRGoC7kWOtDlC4EUeHINDEOg3ID1DLol4cQzDakJdUxKDbt1mQV3DZKQ1BmQDbhNaQbbDaCqzg0YDn+l0cfPDoyTPxDnDpQeGkwj" + "D56HY6g5D9Bg3PpXD9EqRl9yD7zC9lS2D6HavucLELOAVFNaEJrotINhEINSRoqQEJ8bH8/GEChL3wIDEZ+vu1wPEY0Xq5IlEY5A" + "hLOXEYIinhxqElOaNgKJEn95vZyNEqVcmKjXEjseitQGEzFOGvAXE6Ed0e6wE31VKWzuE4N0SAo8FLjeUh5CFJo+Co6vFLeMEE7Q" + "FJ016c86Fb6UmJRDFZvqrhSsFYGSnrdCFpivY7NPFqTNobpuFs2fU9VxFn2L//WhFsNi5kewFr66LoAAF5sUEFIlF4LmuuYrF4Um" + "0vvAF+ExLfDhF5Kk0A8/GLHq1pRZGLlpjU9fGJ6JfWbnGKOhdefwGMGw7Eb0GNIfy2T6GMaY/FvKGd5+Coz2GaIf8xutGpUnE4Wy" + "GpY1qS3cGu+9mZ4gG9MCvvBBG7QyFhVoG4Bs8IbgG5mzT02jHKKfE75MHZOS1nOkHVzsAFPjHdcscO8OHpj+AoYnHn2apnhKHpf5" + "rR9XHthc2I9zHoSJRbyOHr71WXG9Hpdr984YH5j3o/NQH/f+utZ0H39Hk0ibH7R7tz0MILRliTEXILeGAqRYIIC8eFJdIK8GIglf" + "IIgHC+ieIKaz5w2oIMXMyGwoIei90YA/IX/EYDxqIcP2WkVxIaXRbVqTIZjYnNk3Io828vCLIsuq1prbIplrF2mOI33jj1yrI66D" + "312uI72BhQO2I7vuGtfjI8390ej1I7ST1y8SJK+ohMseJIcQnMxGJMQa1uJRJA2APNVVJIRa1qxQJZs7D/GkJZgIpCJjJn9hvSQU" + "J77K3gUwJ5cg9PpPJ6KSJu3HJ321+U89KKw3g4luKJQx/WGzKLDRvZu2KI8deandKKj3oxruKJQP0+UQKaJnq8BQKTf8OKS7KeFj" + "b6TdKYbJDReCKoLFIQK0Kg134/vCKo0cOB/PKpluMgfdKtERRSUNK5RxNdgcK6RShiZ2K59xvfKmK7AAzAaPLM0tKaSzLJin+8W9" + "LLS1Yb5zLaQLB9miLYHSDj8OLot0CDGxLpr0uBfQLp2SvqDbLp25ZflML4r+2gK2L7kjf2ZsMBRyHiTAMNOvS3vFMJmMaGPPMH5j" + "R5FPMa4EeHRlMc7OuqGAMbnrn6a6MZpzB0jzMaBegtQMMpjrbxtwMp+WaleMMo/QpHm1MqP0UJpbM84tCSvLM6VyzvbnM5iGWrP4" + "M5sJhXZBNIWJtTR/NKAkkJzqNKQS5gMXNczBNcQnNc4cgCtXNbsQHGJeNVvjx93eNcChlZ8ONpue+kp5N8wCflHQN7Vfy1PXN4I+" + "klPcN7UWSnbeN8GcQEYdOM8Pc2w4OH8T56ZZOKukMOmVOKnZXTGyOImARJz2OJhLf0piOY9j1z+pOZ2+AmnaObfJTUnnOZONITMd" + "OskBBcsjOn3x7fs7OppsaPaBOo8KvpOrO42u0tnvO+CD92L8O4LcoLYSPH5MeEftPJglSRyKPqErJ/eRPtKZhasrP5M+AkM3P4+K" + "ZppGP6hxNS5WP4a/M4C4P59R5aVEQMl8UIMxQahHQ4gyQaxFSWr+QbhxlU83QqNn++44QoMpRbZeQpKGKoBdQw14JMrlQ52QfNKF" + "RIUMEGk2RaPTH1ynRb81Mdz6ReB7D6IARp/VoRpERp9xtZXDRpJL34pyR7wTh2rKR4F5NSCOSH2tuaenSIPL/yW9SJwvozD5SJrD" + "h203SY8ixkB2SX3CpgKZSX3jB4/0SaEdIYx3SpxVgTqzSpfOEqclS48/K+Z5S6NWigV/S6DDR7mOS6ARFRGUS5PksK2iS6XQDFQb" + "TA13E9cqTKmy5tlmTLDCdo9xTOtsmNGYTIIUUPKaTH4IXORfTY+pxWt5TX6CjtV/TbdrDxyPTa83M0KuTZDyJga+TXmRbdYwTqC1" + "uT5bTr96jm3XTpt24rbqTpJksIcNT35w7O5VT4NpVYp8T9eVscCqT5CYVInAT5hRJY/2T6RJbWMLULIVuQaUUILKFpeVUItc6I67" + "UIon03S+UIRdKUTGUJbPI5vSUIB7JzjoUKVC/hkSUYvQlIZtUYFno0WcUX3caK8jUqdHazA0Ut8hVbN3UqOnW/yBUqQSPlWRUqCn" + "S48UU416FnCfU5gWkvYjVNWOctpsVLwdgWB6VMwBjd7WVY/x7TX+VapqRt8mVpd2KuviVu+Dt+v8VsHdWfk3V6zPa8RcV7qV+U2C" + "V5fafmGOV45UMPjgV4evG8M6WMf3C+ZQWILKJkmIWNOzB6ioWKycYKQaWbU8MMJiWanFSfqOWakcOJ6/WdAUIElDW3+mOgULXHkA" + "jMZHXJmatlpiXKFp9eiXXJcDP06dXNjEMCDuXMrI/HEjXSA7XwA0XYpDV9tGXa80gGKlXcqXy4LBXekb3zQWXoFGaiofXsMoPCk7" + "XryfW/OJXrqSTjoGX6NGumaZX6FVgVGjX7OwjB65X+2aZt/vX7XJFVHyX64eWg4uYJQgfPSJYM3sOIY9Yb0pNUyDYbrNCdWmYZZB" + "NZvCYZhOas/hYTpcmLsIYsEIrP4ZYn6YpNm0YrnghDH5Yp6RlfArY6GWagxnY7uq9q2/Y83A9BQCZLL59bIvZKH8OO7cZNmdCdGO" + "ZXEXa3DyZbyFWU5MZiPAfKfUZs0YZGEQZ5fAnMUlZ80ajuAbaNE5jdiQab51IQ6haaF9YbavaZeHC5DcaZVe4gXeaZ5KfjZAat9w" + "HLx1aucduRcNa6AE4Jlfa5g0SMsgbPC2Us6tbH/1Md+VbZdJxb2pbZEgzGn4bbCeQrEebqq/gxkjbn5FYVgwblHBBdB9boRglASB" + "bqkuGjqLbs6kIAyMbp+BnYwFbzLoxJAGb5jIvN81b8ThPY+hb8QYRG1jcJEjFyuhcNMyhrZMca8W6gZXcbSQRFKccZlKXg4Dcpgs" + "wAK/cn/9AS/Icn+ivpPhcrJ+uuTzcujp5dL4csXQxEV9c9LBZTHAc9DSLlZbdJV0kHuadH4gxAv7dLzm+jOddYByvkwPdrG7x8ox" + "dptgVFlbdqmtQZSIdtPOStWLds44pMb9drLz51pbd5qfExGod33XI7uqd4GEoPr/d6NeUqwDeJTE0ANAeKnglJJKeJARvQineILz" + "x48VebfM6CkXebNtMb0Jes1aflhLeqicSOBtepfADFiPeoDrD+cLe7OMQFQ4e93XSyIFfNQ+gpQxfLLk+OYyfL1maiQ0fJv9eY61" + "fK+tYRrCfLINMdJxfYCskOyOfTOUKCexffCBtVrQfZs4fBnRfZ3eekfSfZVwNI/efYWP+0AAfqJfM96NfuBVYUGqfn+2emz7fhm2" + "6nEFf30Osrlaf5piRk9wf62sQCKTf5oFwXTQf+zmAgMQgIAckCQVgNeni3ghgLClaYYhgLcdYUCcgLQeepurgKg4/CO7gIqOer8J" + "gZbK5qQpgbPLF3VGgZelSS7TgYRzxxRRgpJ+4mxngrj9Gd7igpekKMqhg6i8GFVphOD5NSt9hLL9seaDhJ7ZlYbdhL0WyvAFhZnE" + "yP43hX8tOQNahZe2EoRjhX/TV9aihZ9FkRUXhpv24rY2hrEQRELmhoDEsDB/h4Femg2Uh5C3o9ZNiIXAVCZqiJ380DOniLCPCyUx" + "iZcpDa1biYkUwBR+ib3cCDp/iZ+2YprwidOmeiwQirsKpuRLirN+6qFtin7Xu+gPjJr5zRnHjN+Cnr/sjLLtgYKOjeF9Ue2YjX0H" + "ewOvjaCYJFQujrRIDEQ5joLGcgIfj8Wd2UQ1j8pzdxJoj8MSDhs8kJIM8MXnkOM3W4xZkZhPixDjkpGyrgoSk32Pi6hRk6u59c5w" + "k8RWWp9zk8b0oJaYk6EHW4fWk58IvEzik6YytlRqlJiSxtWNlJXuYluhlJ4C3ozflLmMIPn2lK4nGwz6lPWs0CNUlZ7tyTCElc72" + "Et7AlX8/C47BlcVzF3j6laOMcBgMlpxdkciAlqBZvf2uluX6dhW9lrKjp4LjlrX736+Ml57MuBOOl6TABFPwl5bATEhsmJluGpeM" + "mIC0WMi8mJMsAEDcmLO5RVjhmNsrL4IJmTaeytA5mbD6hkKnmcY6fn7Hmdjs6AMKmsvTRxINmq2Ho0lKmrOvW3ttmp5jl2L7mtZI" + "PEMCm3+loUwzm8ZsQPA8m9ghHa5Jm6uyplGJm7TlYRbAm67pDcsEnJ2Lv4aHne/x/aeenaxG+s6nndRYhKAUnrC9ASUinpk9KfKI" + "nolT52jCnrv9MYr4nqGi5sZEn5LUqK6ln60+CpSpn4skyG4UoDAppfYdoLWxBSygoB1oBLOkoBTl2Ym1oKzXO73PoOkbJ8IroX1L" + "5x42oaF+khpSoZgBZcV3oZuLL0aGoZntSeicoZ6Znae6odL3cyFHorQpPQZwoo/ItH15o7OeyleAo7pUQMuho5lEUH21o8ikIE+A" + "pLe5LYcDpYN9wWUZpZcVSf5BpdhYpJptpbGTB7SApZqPi5KapZA12f06poMFQcPDphR/y2zKpu+AbHPTpnAH04kBp3210aEcp7R5" + "9Vc/p6SD77hap5dhhd9gp5sm2ipjp36mosrup7KAXL8rqJ5YvPwuqI3W6nU+qK8JjWE/qIL4XAvIqMprB/4AqaXWcosrqehtgf3s" + "qYOCjiMdqqGijmxWqoi3k/R4qoUjb7doq4bR1YGQq6OXw9m0q579ubkXrMkjfxorrP//E4tZrCiNiUuNrKQpfbyXrNmrj8XArLMr" + "BzI8rZel4bTVrZ+gXEu0rrlhbeXErqsaFsD6rrUGolBJr5FuUnRar6imIi15r7vLt8+zr8llqd/br5ugHEoQsKtzZzRNsJfHu/9z" + "sJaa5vO6sJu00F2+sJGjH3vMsOfypmHhsJiRJZtksYWg9Mp1sYOApEC0saEALJ7ssX68yEf6sVVpFQsds8+o1GGYs8AlGQCzs5jE" + "oLKzs5gDf4N3tIBiJmqLtMbFWSm7tLM+WgjBtH5n60EataLrT3uOtZqBxZ+qtY8ADGXwtazWahEitpl8iB9utpAYrNrLtqfLJ2Ae" + "t5lM8B2ut6GyBlu0t6GuSufht7Jvu/5BuIYrV3gduaU1EZA3ude7n46eumDzr7rdurqRjbepu7LLX7zcu4EtqdU0vLT0QJ2AvL4w" + "ZOyOvL56Dr/yvKTesjNEvZJtEYJZvaiOctV3vbGgTD2YvYsHSz+ZvaXDP/jyvQ08iCYpvr7cuFWGvokwvD2/vp5DT6nwvoLYPPQu" + "v6ycsM65v9cKlq/nv4ANAe8TwNb+GrtHwI9IdDx6wE1OSmSrwLeZZQQfwZQ+an1DwrqwFIWDwrbkgBWMwqpyDmvVwp9M8NLXwqbq" + "XgDywiacKFOUw4suImoIxM+o/I5OxIKp7SY6xVrMyCdcxtVVcRT2xqdfO4QKx6IrFyo/x9ym+upix5hj30Kmx5wy5iX/x5YYzB3U" + "yJB2eq7dyJtyNvW+yaEbdznDyYU/Ay7LyaeKzqXXyrOMALfayrasMF/6yqEnE/v6yp9h5Zxhy4ZCBh6My3+2mn01zJxhDc0HzY4d" + "edckzZr9gW89zYQ/+8WZzbV3w7SfzbdsUF/PzZqnO+HmzcQj3zAUzrajr5oZzpi5RZYvzsOaXrByzp72SmKtzo5tsSPjzod7D34P" + "z7CwVMgZz6kDH/Yez30/41p8z8Xjn72+z8kXG5IF0JZ/YzpH0JFvUz5R0LuZDVmS0A1ciPma0LMmMvnN0Jh+ekF/0a5BJRD50Zqs" + "0OPY0oFWysTe0sDNkaJh067cWEaM053/m/oJ1N61eWwM1JnTN68q1I0uutNb1L61Wdxy1H0750Ye1abHC6961YNqJo+c1cfdkY/g" + "1aYzN34R1pRAtIqb1pu6huGi1pkyRhbo1sRD34se15//O4LL1+U1kSAE2MltOY1/2MyvEyCO2JU7N4on2Z057fqT2aX+CoOX2YMk" + "ACa42dVewjsF2uHJzSgs2pMv4zCx2pUyHlEf28EYrPpQ24EtMdZU2w1E4EGi27UNeR7C27zN4fNz3Kb7H3uH3Kvzv9DK3LML37vz" + "3Iqeuq313IzDvxMY3eX/u3qu3dTZzQe53YJbzxbj3bdOwsft3X1R5WsY3qIc4JAp3rx8AM5+3oAYfN/V3vb3u3Pj3mWyTgZX392L" + "X7ps36u3QxgP4JmXO1QY4Kk1MVw44KBplTuN4KLvq/cJ4YFhNVUd4Zty/utV4bmHI1fD4YCzr2H34rtR7aoQ47EqphZH45jPE8yA" + "46JoPLaL45uvU32c4zaqltiQ5ND0COWd5KV47HMG5cAKBtJw5ZHgpIqD5Y8Pcymm5ZsGgu3q5aPtCb1o5rSKtvqi5oTkSDQr5586" + "zvIr549EUP0353vyVtM458g7F9SR56CH+2ka6KP5jUZy6LHP05bG6JSazvrY6JqWSmLp6H8G6t/s6Jv3c0QK6dKvM4r16ZDswOX3" + "6Z/FwSn76bj4lMQY6n7WSmMt6pKHg/Dg6tBt6dD/6siGcnUd69zydgZA66btedGB7L88wPe+7KrqTnDB7K1M0F8P7ckMmPNr7ZtZ" + "pfK37Yf6nobS7aZzB63u7bae0jIY7p4HC1q+7q3Xm5fv7pj5ZRwT751Df+5A77QDr/3h7394FDbi78JZZSLv75frN6AH8L/4XNBH" + "8J6cgLJS8Lt0GOtr8LvCPvHv8IOLT2468aPYfGtE8Z45VbNI8aqkqKNk8a43g6WT8bNVycey8Zt9AdPF8Y4z12CW8qmTxzNJ88HB" + "/QmB84oSduj384VKLrwm9NyBZakv9Ib3AyBC9MgV6Vym9Lc8SMiy9K1HS7sk9bcaRiNP9ZqMeKLs9cnIDEv89bhPo0c99n1RPWxe" + "9pxwZHKY9q/qnha/9ps9YdEA98j8YM8K991BnRFD96G1MbNv95zOqjmf97rfg+vy95lLbyhS+H+coGJn+JyXM5jO+JJJFRvj+MQQ" + "/FBP+dvK5kuF+Z843Nqa+aaoVIa2+c0/+26/+X6EABUE+p/PY8k/+qM1+UNT+sjCtkmH+o5ZJS3K+tmfC8/M+seDD2nu+pSxJZjS" + "+69MwF4C/JyPC7cf/H1T32Eq/Mb7N9Q6/Jr02HL9/JmvE1EO/WCQlDY8/YzqPkpf/ShmYqOw/YNK5gS//ZvVoaTO/ZdUOCkX/pkX" + "A+gd/kFtwdw7/t8FIRNp/s3eOnO//oALr+jH/rNT70fa/pi2qqbl/ts/w+0B/7PX+3ks/4fgjI89/5yqdruz/8M=";
 
   // src/tags/codec-header.ts
   function hasCodecHeader(bytes, magic, version, headerBytes) {
@@ -4744,15 +4806,72 @@ ${defaultKeySummary()}`)) {
     return offset === bytes.length ? groups : null;
   }
 
+  // src/tags/tag-counts-codec.ts
+  var MAGIC2 = [66, 69, 84, 67];
+  var VERSION5 = 1;
+  var HEADER_BYTES2 = 11;
+  var ENTRY_BYTES = 6;
+  var QUANT_MAX = 255;
+  function hash32(key, seed) {
+    let hash = seed >>> 0;
+    for (let index = 0;index < key.length; index++) {
+      hash ^= key.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+  function tagKeyId(key) {
+    const normalized = normaliseTagKey(key);
+    const high = hash32(normalized, 2166136261);
+    const low = hash32(normalized, 2654435769) & 255;
+    return high * 256 + low;
+  }
+  function dequantiseCount(quantized, max) {
+    if (quantized <= 0 || max <= 0) {
+      return 0;
+    }
+    return Math.round(Math.expm1(quantized / QUANT_MAX * Math.log1p(max)));
+  }
+  function decodeTagCountsFromBytes(bytes) {
+    if (!hasCodecHeader(bytes, MAGIC2, VERSION5, HEADER_BYTES2)) {
+      return null;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const max = view.getUint32(5, true);
+    const entryCount = view.getUint16(9, true);
+    if (max <= 0 || bytes.length !== HEADER_BYTES2 + entryCount * ENTRY_BYTES) {
+      return null;
+    }
+    const counts = new Map;
+    for (let index = 0;index < entryCount; index++) {
+      const offset = HEADER_BYTES2 + index * ENTRY_BYTES;
+      const id = (bytes[offset] ?? 0) + (bytes[offset + 1] ?? 0) * 256 + (bytes[offset + 2] ?? 0) * 65536 + (bytes[offset + 3] ?? 0) * 16777216 + (bytes[offset + 4] ?? 0) * 4294967296;
+      const quantized = bytes[offset + 5] ?? 0;
+      counts.set(id, dequantiseCount(quantized, max));
+    }
+    return { counts, max };
+  }
+  function decodeTagCounts(base64) {
+    const bytes = bytesFromBase64(base64);
+    return bytes ? decodeTagCountsFromBytes(bytes) : null;
+  }
+
   // src/tags/core.ts
-  var groups;
-  function coreVocabularyGroups() {
-    if (groups !== undefined) {
-      return groups;
+  var data;
+  function coreTagData() {
+    if (data !== undefined) {
+      return data;
     }
     const bytes = bytesFromBase64(CORE_VOCABULARY_BASE64);
-    groups = bytes === null ? null : decodeTagVocabulary(bytes);
-    return groups;
+    const groups = bytes === null ? null : decodeTagVocabulary(bytes);
+    if (groups === null) {
+      data = null;
+      return null;
+    }
+    const countBytes = bytesFromBase64(CORE_COUNTS_BASE64);
+    const counts = countBytes === null ? null : decodeTagCountsFromBytes(countBytes);
+    data = { groups, counts };
+    return data;
   }
 
   // src/tags/mirror.ts
@@ -4937,56 +5056,6 @@ ${defaultKeySummary()}`)) {
     };
   }
 
-  // src/tags/tag-counts-codec.ts
-  var MAGIC2 = [66, 69, 84, 67];
-  var VERSION5 = 1;
-  var HEADER_BYTES2 = 11;
-  var ENTRY_BYTES = 6;
-  var QUANT_MAX = 255;
-  function hash32(key, seed) {
-    let hash = seed >>> 0;
-    for (let index = 0;index < key.length; index++) {
-      hash ^= key.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    return hash >>> 0;
-  }
-  function tagKeyId(key) {
-    const normalized = normaliseTagKey(key);
-    const high = hash32(normalized, 2166136261);
-    const low = hash32(normalized, 2654435769) & 255;
-    return high * 256 + low;
-  }
-  function dequantiseCount(quantized, max) {
-    if (quantized <= 0 || max <= 0) {
-      return 0;
-    }
-    return Math.round(Math.expm1(quantized / QUANT_MAX * Math.log1p(max)));
-  }
-  function decodeTagCountsFromBytes(bytes) {
-    if (!hasCodecHeader(bytes, MAGIC2, VERSION5, HEADER_BYTES2)) {
-      return null;
-    }
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const max = view.getUint32(5, true);
-    const entryCount = view.getUint16(9, true);
-    if (max <= 0 || bytes.length !== HEADER_BYTES2 + entryCount * ENTRY_BYTES) {
-      return null;
-    }
-    const counts = new Map;
-    for (let index = 0;index < entryCount; index++) {
-      const offset = HEADER_BYTES2 + index * ENTRY_BYTES;
-      const id = (bytes[offset] ?? 0) + (bytes[offset + 1] ?? 0) * 256 + (bytes[offset + 2] ?? 0) * 65536 + (bytes[offset + 3] ?? 0) * 16777216 + (bytes[offset + 4] ?? 0) * 4294967296;
-      const quantized = bytes[offset + 5] ?? 0;
-      counts.set(id, dequantiseCount(quantized, max));
-    }
-    return { counts, max };
-  }
-  function decodeTagCounts(base64) {
-    const bytes = bytesFromBase64(base64);
-    return bytes ? decodeTagCountsFromBytes(bytes) : null;
-  }
-
   // src/tags/counts.ts
   var CACHE_KEY = "eh:tag-counts:v3";
   var CACHE_VERSION = 3;
@@ -5065,14 +5134,10 @@ ${defaultKeySummary()}`)) {
   function tagId(ns, key) {
     return `${ns}\x00${key}`;
   }
-  function maxTagCount(counts) {
-    let max = 0;
-    if (counts) {
-      for (const count of counts.values()) {
-        if (count > max) {
-          max = count;
-        }
-      }
+  function attachCounts(entries, counts) {
+    const max = counts?.max ?? 0;
+    for (const entry of entries) {
+      entry.count = max > 0 ? counts?.counts.get(tagKeyId(entry.folded)) ?? 0 : 0;
     }
     return max;
   }
@@ -5080,7 +5145,6 @@ ${defaultKeySummary()}`)) {
     const entries = [];
     const byNamespace = new Map;
     const lookup = new Map;
-    const maxCount = maxTagCount(counts);
     for (const namespace of TAG_NAMESPACES) {
       const keys = groups.get(namespace.id);
       if (!keys || keys.length === 0) {
@@ -5089,8 +5153,7 @@ ${defaultKeySummary()}`)) {
       const scoped = [];
       for (const key of keys) {
         const folded = fold(key);
-        const count = counts?.get(tagKeyId(folded)) ?? 0;
-        const entry = { ns: namespace, key, folded, count };
+        const entry = { ns: namespace, key, folded, count: 0 };
         entries.push(entry);
         scoped.push(entry);
         lookup.set(tagId(namespace.id, key), entry);
@@ -5098,6 +5161,7 @@ ${defaultKeySummary()}`)) {
       scoped.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
       byNamespace.set(namespace.id, scoped);
     }
+    const maxCount = attachCounts(entries, counts);
     return { entries, updated, lookup, byNamespace, maxCount };
   }
   function buildTagIndexFromGroups(groups, updated = Date.now(), counts) {
@@ -5125,41 +5189,26 @@ ${defaultKeySummary()}`)) {
     return index.entries.length === 0 ? null : index;
   }
   function withTagCounts(current, counts) {
-    if (!counts) {
+    if (!counts || counts.max <= 0) {
       return current;
     }
-    const maxCount = maxTagCount(counts);
-    if (maxCount === 0) {
-      return current;
-    }
-    const entries = current.entries.map((entry) => ({
-      ...entry,
-      count: counts.get(tagKeyId(entry.folded)) ?? 0
-    }));
-    const lookup = new Map;
-    const byNamespace = new Map;
-    for (const entry of entries) {
-      lookup.set(tagId(entry.ns.id, entry.key), entry);
-      const scoped = byNamespace.get(entry.ns.id);
-      if (scoped) {
-        scoped.push(entry);
-      } else {
-        byNamespace.set(entry.ns.id, [entry]);
-      }
-    }
-    return { entries, updated: current.updated, lookup, byNamespace, maxCount };
+    const maxCount = attachCounts(current.entries, counts);
+    return { ...current, maxCount };
   }
   function readIndexCache() {
     const stored = indexStore.read();
     const counts = getTagCounts();
-    const index = decodeIndex(stored.payload, stored.updated, counts?.counts);
+    const index = decodeIndex(stored.payload, stored.updated, counts ?? undefined);
     return index ? { value: { index, counts }, updated: stored.updated } : null;
   }
   var core;
+  var coreCounts = null;
   function coreIndex() {
     if (core === undefined) {
-      const groups = coreVocabularyGroups();
-      core = groups === null ? null : buildTagIndexFromGroups(groups, 0);
+      const generated = coreTagData();
+      const counts = getTagCounts() ?? generated?.counts ?? null;
+      core = generated === null ? null : buildTagIndexFromGroups(generated.groups, 0, counts ?? undefined);
+      coreCounts = counts;
     }
     return core;
   }
@@ -5174,7 +5223,7 @@ ${defaultKeySummary()}`)) {
     try {
       const vocabulary = await fetchVocabulary();
       const counts = getTagCounts();
-      const index = buildTagIndexFromGroups(vocabulary, Date.now(), counts?.counts);
+      const index = buildTagIndexFromGroups(vocabulary, Date.now(), counts ?? undefined);
       log(`Tag index downloaded: ${index.entries.length} tags`);
       return { index, counts };
     } catch (error) {
@@ -5193,19 +5242,33 @@ ${defaultKeySummary()}`)) {
     },
     onError: "throw"
   });
+  var coreChanges = createEmitter();
   function onTagIndexChange(listener) {
-    return indexSnapshot.onChange(listener);
+    const offSnapshot = indexSnapshot.onChange(listener);
+    const offCore = coreChanges.subscribe(listener);
+    return () => {
+      offSnapshot();
+      offCore();
+    };
   }
   function applyTagCounts(counts) {
     const current = indexSnapshot.get();
-    if (!current || current.counts === counts) {
-      return;
+    if (current !== null && current.counts !== counts) {
+      const next = withTagCounts(current.index, counts);
+      if (next !== current.index) {
+        indexSnapshot.publish({ index: next, counts });
+      }
     }
-    const next = withTagCounts(current.index, counts.counts);
-    if (next === current.index) {
-      return;
+    if (core !== undefined && core !== null && coreCounts !== counts) {
+      const next = withTagCounts(core, counts);
+      if (next !== core) {
+        core = next;
+        coreCounts = counts;
+        if (current === null) {
+          coreChanges.emit();
+        }
+      }
     }
-    indexSnapshot.publish({ index: next, counts });
   }
   onTagCountsChange(applyTagCounts);
   function getTagIndex() {
@@ -5427,13 +5490,13 @@ ${defaultKeySummary()}`)) {
   function appliedTerms(terms, phrase) {
     const applied = new Map;
     for (const term of terms) {
-      if (!isTagTerm(term) || term.ns === null) {
+      const id = termTagIdentity(term);
+      if (id === null) {
         continue;
       }
       if (term.start >= phrase.start && term.end <= phrase.end) {
         continue;
       }
-      const id = tagIdentity(term.ns, term.value);
       if (!applied.has(id)) {
         applied.set(id, term);
       }
@@ -6784,7 +6847,7 @@ ${defaultKeySummary()}`)) {
         return "The site does not offer this download for the gallery.";
     }
   }
-  function optionCard(option, ctx, controls, startDownload, openDownload) {
+  function optionCard(option, ctx, controls, pending, handoff, startDownload, openDownload) {
     const note = unavailableNote(option);
     const status = el("p", { class: "archive-option-status", role: "status", "aria-live": "polite" });
     const button = buttonEl({
@@ -6797,29 +6860,29 @@ ${defaultKeySummary()}`)) {
       if (!option.available) {
         return;
       }
-      for (const control of controls) {
-        control.button.disabled = true;
-      }
-      button.setAttribute("aria-busy", "true");
-      status.removeAttribute("role");
-      status.textContent = "Preparing the archive…";
-      startDownload(option, ctx.signal).then((href) => {
-        if (ctx.signal.aborted) {
-          return;
+      pending.run({
+        run: () => startDownload(option, ctx.signal),
+        signal: ctx.signal,
+        setBusy: (busy) => {
+          button.toggleAttribute("aria-busy", busy);
+          for (const control of controls) {
+            control.button.disabled = busy || handoff.locked || !control.available;
+          }
+          if (busy) {
+            status.removeAttribute("role");
+            status.textContent = "Preparing the archive…";
+          }
+        },
+        success: (href) => {
+          handoff.locked = true;
+          status.textContent = "Archive ready. Starting the download…";
+          openDownload(href);
+        },
+        failure: "The archive could not be prepared.",
+        failed: (message) => {
+          status.setAttribute("role", "alert");
+          status.textContent = message;
         }
-        button.removeAttribute("aria-busy");
-        status.textContent = "Archive ready. Starting the download…";
-        openDownload(href);
-      }, (error) => {
-        if (ctx.signal.aborted) {
-          return;
-        }
-        button.removeAttribute("aria-busy");
-        for (const control of controls) {
-          control.button.disabled = !control.available;
-        }
-        status.setAttribute("role", "alert");
-        status.textContent = errorText(error, "The archive could not be prepared.");
       });
     }, { signal: ctx.signal });
     const cost = costText(option.cost);
@@ -6858,8 +6921,10 @@ ${defaultKeySummary()}`)) {
       window.location.href = href;
     });
     const controls = [];
+    const pending = createPendingAction();
+    const handoff = { locked: false };
     const options = [data.original, data.resample].filter((option) => option !== null);
-    const grid = el("div", { class: "archive-options" }, ...options.map((option) => optionCard(option, ctx, controls, startDownload, openDownload)));
+    const grid = el("div", { class: "archive-options" }, ...options.map((option) => optionCard(option, ctx, controls, pending, handoff, startDownload, openDownload)));
     const empty = options.length === 0 ? el("div", { class: "empty-state" }, el("p", { class: "state-title", text: "No archive options" }), el("p", {
       class: "state-text",
       text: "The site did not offer an archive for this gallery."
@@ -7830,7 +7895,7 @@ ${defaultKeySummary()}`)) {
     const remove = deps?.remove ?? deleteFavorites;
     const move = deps?.move ?? moveFavorites;
     const selection = createSelection(data.items.map((item) => item.gid));
-    let busy = false;
+    const pending = createPendingAction();
     let retryAction = null;
     let movePopover = null;
     let armedDelete = false;
@@ -7877,9 +7942,9 @@ ${defaultKeySummary()}`)) {
       countLabel.textContent = `${total} selected`;
       statusText.hidden = retryAction === null;
       retryButton.hidden = retryAction === null;
-      removeButton.disabled = total === 0 || busy;
-      moveButton.disabled = total === 0 || busy;
-      retryButton.disabled = busy;
+      removeButton.disabled = total === 0 || pending.busy;
+      moveButton.disabled = total === 0 || pending.busy;
+      retryButton.disabled = pending.busy;
       if (total === 0 || armedDelete && total !== armedCount) {
         disarmDelete();
       }
@@ -7890,31 +7955,31 @@ ${defaultKeySummary()}`)) {
       }
       syncBulkSpace();
     };
-    const perform = async (action) => {
-      if (busy || selection.size === 0) {
+    const perform = (action) => {
+      if (pending.busy || selection.size === 0) {
         return;
       }
-      busy = true;
       retryAction = null;
       statusText.hidden = true;
       syncBar();
-      try {
-        await action.run();
-        showToast(action.success);
-        selection.clear();
-        busy = false;
-        syncBar();
-        ctx.reload();
-      } catch (error) {
-        retryAction = action;
-        statusText.textContent = errorText(error, "Favorite update failed.");
-      } finally {
-        busy = false;
-        syncBar();
-        if (retryAction !== null) {
-          retryButton.focus();
-        }
-      }
+      pending.run({
+        run: action.run,
+        signal: ctx.signal,
+        setBusy: () => {
+          syncBar();
+        },
+        success: () => {
+          showToast(action.success);
+          selection.clear();
+          ctx.reload();
+        },
+        failure: "Favorite update failed.",
+        failed: (message) => {
+          retryAction = action;
+          statusText.textContent = message;
+        },
+        recover: () => retryButton
+      });
     };
     const openMoveMenu = () => {
       movePopover?.close();
@@ -7975,7 +8040,7 @@ ${defaultKeySummary()}`)) {
       selection.setAll(selectAll.checked);
     }, { signal: ctx.signal });
     removeButton.addEventListener("click", () => {
-      if (selection.size === 0 || busy) {
+      if (selection.size === 0) {
         return;
       }
       if (!armedDelete) {
@@ -8414,45 +8479,41 @@ ${defaultKeySummary()}`)) {
       href: comment.authorHref,
       text: comment.author || "Anonymous"
     }) : el("span", { class: "comment-author", text: comment.author || "Anonymous" }), comment.uploader ? el("span", { class: "comment-badge", text: "Uploader" }) : "", el("span", { class: "comment-posted", text: comment.posted }), config === null ? el("span", { class: "comment-score-wrap" }, score) : voteButtons);
-    let pending = false;
-    const setPending = (busy) => {
-      pending = busy;
-      card.classList.toggle("is-busy", busy);
-      if (busy) {
-        card.setAttribute("aria-busy", "true");
-      } else {
-        card.removeAttribute("aria-busy");
-      }
-    };
-    const cast = async (vote) => {
-      if (pending || config === null) {
+    const voting = createPendingAction();
+    const cast = (vote) => {
+      if (config === null) {
         return;
       }
-      setPending(true);
-      try {
-        const result = await voteComment(config, comment.id, vote, { post: deps.post });
-        if (signal.aborted) {
-          return;
+      voting.run({
+        run: () => voteComment(config, comment.id, vote, { post: deps.post }),
+        signal,
+        setBusy: (busy) => {
+          card.classList.toggle("is-busy", busy);
+          if (busy) {
+            card.setAttribute("aria-busy", "true");
+          } else {
+            card.removeAttribute("aria-busy");
+          }
+        },
+        success: (result) => {
+          score.textContent = scoreText(result.score);
+          up.setAttribute("aria-pressed", result.vote > 0 ? "true" : "false");
+          down.setAttribute("aria-pressed", result.vote < 0 ? "true" : "false");
+        },
+        failure: "Something went wrong.",
+        failed: (message) => {
+          showToast(message);
         }
-        score.textContent = scoreText(result.score);
-        up.setAttribute("aria-pressed", result.vote > 0 ? "true" : "false");
-        down.setAttribute("aria-pressed", result.vote < 0 ? "true" : "false");
-      } catch (error) {
-        if (!signal.aborted) {
-          showToast(errorText(error));
-        }
-      } finally {
-        setPending(false);
-      }
+      });
     };
     if (config !== null) {
-      up.addEventListener("click", () => void cast(1), { signal });
-      down.addEventListener("click", () => void cast(-1), { signal });
+      up.addEventListener("click", () => cast(1), { signal });
+      down.addEventListener("click", () => cast(-1), { signal });
     }
     const body = el("div", { class: "comment-body", text: comment.body });
     const bodyHost = el("div", { class: "comment-body-host" }, body);
+    const editingAction = createPendingAction();
     let editing = false;
-    let saving = false;
     const editButton = config !== null && comment.editable ? buttonEl({
       class: "comment-edit",
       text: "Edit",
@@ -8492,20 +8553,12 @@ ${defaultKeySummary()}`)) {
         form.addEventListener("submit", (event) => {
           event.preventDefault();
           const text = textarea.value.trim();
-          if (saving) {
-            return;
-          }
           if (text === "") {
             status.textContent = "Comment cannot be empty.";
             return;
           }
-          saving = true;
-          save.disabled = true;
-          cancel.disabled = true;
-          save.textContent = "Saving…";
-          status.textContent = "Saving…";
-          (async () => {
-            try {
+          editingAction.run({
+            run: async () => {
               await edit(comment.id, text);
               if (signal.aborted) {
                 return;
@@ -8523,18 +8576,22 @@ ${defaultKeySummary()}`)) {
                   showToast(errorText(error));
                 }
               }
-            } catch (error) {
-              if (!signal.aborted) {
-                status.textContent = "Save failed.";
-                showToast(errorText(error));
+            },
+            signal,
+            setBusy: (busy) => {
+              save.disabled = busy;
+              cancel.disabled = busy;
+              save.textContent = busy ? "Saving…" : "Save";
+              if (busy) {
+                status.textContent = "Saving…";
               }
-            } finally {
-              saving = false;
-              save.disabled = false;
-              cancel.disabled = false;
-              save.textContent = "Save";
+            },
+            failure: "Something went wrong.",
+            failed: (message) => {
+              status.textContent = "Save failed.";
+              showToast(message);
             }
-          })();
+          });
         }, { signal });
       }, { signal });
     }
@@ -8570,7 +8627,7 @@ ${defaultKeySummary()}`)) {
     const status = el("span", { class: "comment-status", role: "status" });
     form.append(textarea, el("div", { class: "comment-compose-actions" }, button, status));
     section.append(form);
-    let posting = false;
+    const posting = createPendingAction();
     const refresh = async () => {
       status.replaceChildren("Posted. Refreshing…");
       try {
@@ -8597,30 +8654,31 @@ ${defaultKeySummary()}`)) {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const text = textarea.value.trim();
-      if (posting || text === "") {
+      if (text === "") {
         return;
       }
-      posting = true;
-      button.textContent = "Posting…";
-      status.textContent = "Posting…";
-      (async () => {
-        try {
+      posting.run({
+        run: async () => {
           await postComment2(data.url, text, signal);
           if (signal.aborted) {
             return;
           }
           textarea.value = "";
           await refresh();
-        } catch (error) {
-          if (!signal.aborted) {
-            status.textContent = "Post failed.";
-            showToast(errorText(error));
+        },
+        signal,
+        setBusy: (busy) => {
+          button.textContent = busy ? "Posting…" : "Post comment";
+          if (busy) {
+            status.textContent = "Posting…";
           }
-        } finally {
-          posting = false;
-          button.textContent = "Post comment";
+        },
+        failure: "Something went wrong.",
+        failed: (message) => {
+          status.textContent = "Post failed.";
+          showToast(message);
         }
-      })();
+      });
     }, { signal });
     return section;
   }
@@ -8652,7 +8710,7 @@ ${defaultKeySummary()}`)) {
     });
     const cells = [];
     const targets = [];
-    let pending = false;
+    const ratingAction = createPendingAction();
     let resetTimer;
     let current = rating.user;
     const restingValue = () => current ?? rating.average;
@@ -8672,12 +8730,12 @@ ${defaultKeySummary()}`)) {
       paint(value, true);
     };
     const preview = (half) => {
-      if (!pending) {
+      if (!ratingAction.busy) {
         paint(half / 2, false);
       }
     };
     const unpreview = () => {
-      if (!pending) {
+      if (!ratingAction.busy) {
         paint(restingValue(), false);
       }
     };
@@ -8686,35 +8744,37 @@ ${defaultKeySummary()}`)) {
         window.clearTimeout(resetTimer);
       }
     };
-    const submit = async (starCount) => {
-      if (pending) {
-        return;
-      }
+    const submit = (starCount) => {
       const previous = current;
-      pending = true;
-      stars.setAttribute("aria-busy", "true");
-      label.textContent = "Saving…";
-      paint(starCount, false);
-      try {
-        const result = await rateGallery(config, starCount, { post });
-        if (signal.aborted) {
-          return;
-        }
-        label.textContent = "Thanks for rating!";
-        if (result.votes !== null) {
-          count.textContent = countText(result.votes, "vote");
-        }
-        setValue(result.user ?? starCount);
-        destroy();
-        resetTimer = window.setTimeout(() => {
-          label.textContent = averageLabel({
-            ...rating,
-            average: result.average ?? rating.average,
-            user: result.user ?? starCount
-          });
-        }, CONFIRM_MS);
-      } catch (error) {
-        if (!signal.aborted) {
+      ratingAction.run({
+        run: () => rateGallery(config, starCount, { post }),
+        signal,
+        setBusy: (busy) => {
+          if (busy) {
+            stars.setAttribute("aria-busy", "true");
+            label.textContent = "Saving…";
+            paint(starCount, false);
+          } else {
+            stars.removeAttribute("aria-busy");
+          }
+        },
+        success: (result) => {
+          label.textContent = "Thanks for rating!";
+          if (result.votes !== null) {
+            count.textContent = countText(result.votes, "vote");
+          }
+          setValue(result.user ?? starCount);
+          destroy();
+          resetTimer = window.setTimeout(() => {
+            label.textContent = averageLabel({
+              ...rating,
+              average: result.average ?? rating.average,
+              user: result.user ?? starCount
+            });
+          }, CONFIRM_MS);
+        },
+        failure: "Something went wrong.",
+        failed: (message) => {
           current = previous;
           paint(restingValue(), current !== null);
           label.textContent = "Rating failed.";
@@ -8722,12 +8782,9 @@ ${defaultKeySummary()}`)) {
           resetTimer = window.setTimeout(() => {
             label.textContent = averageLabel(rating);
           }, FAILURE_MS);
-          showToast(errorText(error));
+          showToast(message);
         }
-      } finally {
-        pending = false;
-        stars.removeAttribute("aria-busy");
-      }
+      });
     };
     const coarse = typeof window.matchMedia === "function" && window.matchMedia("(any-pointer: coarse)").matches;
     if (coarse) {
@@ -8817,8 +8874,8 @@ ${defaultKeySummary()}`)) {
         button.disabled = busy;
       }
     };
-    const showError = (cause) => {
-      error.textContent = errorText(cause, "The action failed.");
+    const showError = (message) => {
+      error.textContent = message;
       error.hidden = false;
     };
     const binding = bindPopover(anchor, () => ({
@@ -8834,31 +8891,27 @@ ${defaultKeySummary()}`)) {
       className: "tag-menu-panel",
       autoFocus: true
     }, signal);
-    let running = false;
-    const run = async (action, focusTarget) => {
-      if (running) {
-        return;
-      }
-      running = true;
-      error.hidden = true;
-      setBusy(true);
-      let failed = false;
-      try {
-        await action();
-        binding.close();
-      } catch (cause) {
-        showError(cause);
-        failed = true;
-      } finally {
-        running = false;
-        setBusy(false);
-        if (failed) {
-          focusTarget.focus();
-        }
-      }
+    const pending = createPendingAction();
+    const run = (action, focusTarget) => {
+      pending.run({
+        run: action,
+        signal,
+        setBusy: (busy) => {
+          if (busy) {
+            error.hidden = true;
+          }
+          setBusy(busy);
+        },
+        success: () => {
+          binding.close();
+        },
+        failure: "The action failed.",
+        failed: showError,
+        recover: () => focusTarget
+      });
     };
-    buttons.up.addEventListener("click", () => void run(() => handlers.vote(raw, 1), buttons.up));
-    buttons.down.addEventListener("click", () => void run(() => handlers.vote(raw, -1), buttons.down));
+    buttons.up.addEventListener("click", () => run(() => handlers.vote(raw, 1), buttons.up));
+    buttons.down.addEventListener("click", () => run(() => handlers.vote(raw, -1), buttons.down));
     const applySign = (sign) => {
       if (handlers.token === null) {
         return;
@@ -8938,6 +8991,188 @@ ${defaultKeySummary()}`)) {
     }, "Tag definition", icon("external"))), error, divider(), form);
     openMenu = { anchor, binding };
     binding.open();
+  }
+
+  // src/ui/gallery-tag-row.ts
+  function tagLabel(tag) {
+    return tag.note === null ? tag.name : `${tag.name} — ${tag.note}`;
+  }
+  function tagTitle(tag, hint) {
+    return tag.note === null ? hint : `${tag.name} | ${tag.note} · ${hint}`;
+  }
+  function tagHint(match, actionsHint) {
+    if (match === undefined) {
+      return `Click to add to search · Alt-click to exclude · Middle-click for results${actionsHint}`;
+    }
+    const click = match.sign === "-" ? "Click to include" : "Click to remove";
+    const alt = match.sign === "-" ? "Alt-click to remove" : "Alt-click to exclude";
+    return `${termStateLabel(match)} · ${click} · ${alt} · Middle-click for results${actionsHint}`;
+  }
+  function createTagRow(data, actions, signal) {
+    if (data.tags.length === 0) {
+      return null;
+    }
+    const section = el("section", { class: "tag-section", "aria-label": "Tags" });
+    const title = el("h2", { class: "tag-title", text: "Tags" });
+    let source = data;
+    let links = [];
+    const actionsHint = actions.config === null ? "" : " · Right-click for tag actions";
+    const refresh = () => {
+      const terms = parseSearchTerms(actions.text());
+      for (const { chip, token, target, tag } of links) {
+        chip.setAttribute("href", actions.href(token, ""));
+        if (target === null) {
+          continue;
+        }
+        const match = terms.find((term) => termIdentity(term) === termIdentity(target));
+        chip.classList.toggle("is-added", match !== undefined);
+        chip.classList.toggle("is-excluded", match?.sign === "-");
+        chip.classList.toggle("is-or", match?.sign === "~");
+        chip.title = tagTitle(tag, tagHint(match, actionsHint));
+        const label = tagLabel(tag);
+        chip.setAttribute("aria-label", match === undefined ? label : `${label} — ${termState(match)}`);
+      }
+    };
+    const composer = () => {
+      if (actions.config === null) {
+        return null;
+      }
+      const input = tagInput("field-input tag-add-input");
+      const submit = buttonEl({ class: "btn btn-small", type: "submit", text: "Add tags" });
+      const form = el("form", { class: "tag-add" }, input, submit);
+      const pending = createPendingAction();
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const value = input.value.trim();
+        if (value === "") {
+          return;
+        }
+        pending.run({
+          run: () => actions.addTags(value),
+          signal,
+          setBusy: (busy) => {
+            submit.textContent = busy ? "Adding…" : "Add tags";
+          },
+          success: () => {
+            input.value = "";
+          },
+          failure: "Something went wrong.",
+          failed: (message) => {
+            showToast(message);
+          }
+        });
+      }, { signal });
+      return el("div", { class: "tag-row tag-add-row" }, el("span", { class: "tag-ns", "aria-hidden": "true" }), form);
+    };
+    const buildGroup = (group) => {
+      const chips = el("div", { class: "tag-chips" });
+      const nsClass = group.ns.replace(/[^a-z0-9_-]/gi, "");
+      for (const tag of group.tags) {
+        const token = tagTokenFromHref(tag.href, source.url);
+        const target = token === null ? null : parseSearchTerms(token)[0] ?? null;
+        const chip = el("a", {
+          class: `tag-chip ns-${nsClass}`,
+          href: token ? actions.href(token, "") : tag.href,
+          "data-tag": `${group.ns}:${tag.name}`,
+          title: tagTitle(tag, token ? tagHint(undefined, actionsHint) : `Open tag search${actionsHint}`),
+          "aria-label": tag.note === null ? null : tagLabel(tag)
+        }, el("span", { class: "tag-name", text: tag.name }), tag.note === null ? null : el("span", { class: "tag-note", text: tag.note }));
+        if (actions.config !== null) {
+          chip.setAttribute("aria-haspopup", "dialog");
+        }
+        if (token) {
+          links.push({ chip, token, target, tag });
+          const sign = (event) => event.altKey ? "-" : "";
+          chip.addEventListener("pointerdown", (event) => {
+            if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) {
+              chip.setAttribute("href", actions.href(token, sign(event)));
+            }
+          }, { signal });
+          chip.addEventListener("click", (event) => {
+            if (event.button !== 0) {
+              return;
+            }
+            if (event.metaKey || event.ctrlKey || event.shiftKey) {
+              chip.setAttribute("href", actions.href(token, sign(event)));
+              return;
+            }
+            event.preventDefault();
+            actions.add(token, sign(event));
+          }, { signal });
+        }
+        if (actions.config !== null) {
+          const openMenu = () => {
+            openTagMenu(chip, { ns: group.ns, name: tag.name }, tag.href, {
+              vote: actions.vote,
+              addTags: actions.addTags,
+              add: actions.add,
+              token,
+              watchTag: actions.watchTag,
+              hideTag: actions.hideTag,
+              colorTag: actions.colorTag
+            }, signal);
+          };
+          bindContextMenu(chip, openMenu, signal);
+          const trigger = buttonEl({
+            class: "tag-menu-trigger",
+            "aria-label": `Tag actions for ${tag.name}`,
+            "aria-haspopup": "dialog",
+            title: "Tag actions",
+            onclick: openMenu
+          }, "⋯");
+          chips.append(el("span", { class: "tag-chip-wrap" }, chip, trigger));
+        } else {
+          chips.append(chip);
+        }
+      }
+      return el("div", { class: "tag-row" }, el("span", { class: `tag-ns ns-${nsClass}`, text: `${group.ns}:` }), chips);
+    };
+    const captureFocus = () => {
+      const openChip = section.querySelector('.tag-chip[aria-expanded="true"]');
+      if (openChip?.dataset.tag !== undefined) {
+        return { tag: openChip.dataset.tag, composer: false };
+      }
+      const active = section.ownerDocument.activeElement;
+      if (active === null || !section.contains(active)) {
+        return { tag: null, composer: false };
+      }
+      const chip = active.closest(".tag-chip");
+      if (chip?.dataset.tag !== undefined) {
+        return { tag: chip.dataset.tag, composer: false };
+      }
+      return { tag: null, composer: active.closest(".tag-add") !== null };
+    };
+    const restoreFocus = (focus) => {
+      const chip = focus.tag === null ? undefined : [...section.querySelectorAll(".tag-chip")].find((node) => node.dataset.tag === focus.tag);
+      if (chip !== undefined) {
+        chip.focus();
+      } else if (focus.tag !== null || focus.composer) {
+        section.querySelector(".tag-add-input")?.focus();
+      }
+    };
+    const rebuild = (next) => {
+      source = next;
+      section.replaceChildren(title);
+      links = [];
+      for (const group of next.tags) {
+        section.append(buildGroup(group));
+      }
+      const addRow = composer();
+      if (addRow !== null) {
+        section.append(addRow);
+      }
+      refresh();
+    };
+    rebuild(data);
+    return {
+      element: section,
+      refresh,
+      update(next) {
+        const focus = captureFocus();
+        rebuild(next);
+        restoreFocus(focus);
+      }
+    };
   }
 
   // src/ui/page-advance.ts
@@ -9336,154 +9571,6 @@ ${defaultKeySummary()}`)) {
     const config = data.apiConfig;
     return config !== null && config.apiUid !== "-1" ? config : null;
   }
-  function sameTag(a, b) {
-    if (a.nsRaw === null || b.nsRaw === null) {
-      return a.nsRaw === b.nsRaw && fold(a.value) === fold(b.value);
-    }
-    const aNs = a.ns ?? a.nsRaw;
-    const bNs = b.ns ?? b.nsRaw;
-    return tagIdentity(aNs, a.value) === tagIdentity(bNs, b.value);
-  }
-  function tagState(term) {
-    if (term.sign === "-") {
-      return " — excluded from the search";
-    }
-    if (term.sign === "~") {
-      return " — optional (OR) in the search";
-    }
-    return " — in the search";
-  }
-  function stateTitle(term) {
-    const state = tagState(term).replace(/^ — /u, "");
-    return `${state.charAt(0).toUpperCase()}${state.slice(1)}`;
-  }
-  function tagHint(match, actionsHint) {
-    if (match === undefined) {
-      return `Click to add to search · Alt-click to exclude · Middle-click for results${actionsHint}`;
-    }
-    const click = match.sign === "-" ? "Click to include" : "Click to remove";
-    const alt = match.sign === "-" ? "Alt-click to remove" : "Alt-click to exclude";
-    return `${stateTitle(match)} · ${click} · ${alt} · Middle-click for results${actionsHint}`;
-  }
-  function tagLabel(tag) {
-    return tag.note === null ? tag.name : `${tag.name} — ${tag.note}`;
-  }
-  function tagTitle(tag, hint) {
-    return tag.note === null ? hint : `${tag.name} | ${tag.note} · ${hint}`;
-  }
-  function tagSection(data, actions, ctx) {
-    const section = el("section", { class: "tag-section", "aria-label": "Tags" });
-    section.append(el("h2", { class: "tag-title", text: "Tags" }));
-    const links = [];
-    const actionsHint = actions.config === null ? "" : " · Right-click for tag actions";
-    const refresh = () => {
-      const terms = parseSearchTerms(getSearchDraft().text);
-      for (const { chip, token, target, tag } of links) {
-        chip.setAttribute("href", actions.href(token, ""));
-        if (target === null) {
-          continue;
-        }
-        const match = terms.find((term) => sameTag(term, target));
-        chip.classList.toggle("is-added", match !== undefined);
-        chip.classList.toggle("is-excluded", match?.sign === "-");
-        chip.classList.toggle("is-or", match?.sign === "~");
-        chip.title = tagTitle(tag, tagHint(match, actionsHint));
-        const label = tagLabel(tag);
-        chip.setAttribute("aria-label", match === undefined ? label : `${label} — ${tagState(match).replace(/^ — /u, "")}`);
-      }
-    };
-    for (const group of data.tags) {
-      const chips = el("div", { class: "tag-chips" });
-      const nsClass = group.ns.replace(/[^a-z0-9_-]/gi, "");
-      for (const tag of group.tags) {
-        const token = tagTokenFromHref(tag.href, data.url);
-        const target = token === null ? null : parseSearchTerms(token)[0] ?? null;
-        const chip = el("a", {
-          class: `tag-chip ns-${nsClass}`,
-          href: token ? actions.href(token, "") : tag.href,
-          "data-tag": `${group.ns}:${tag.name}`,
-          title: tagTitle(tag, token ? tagHint(undefined, actionsHint) : `Open tag search${actionsHint}`),
-          "aria-label": tag.note === null ? null : tagLabel(tag)
-        }, el("span", { class: "tag-name", text: tag.name }), tag.note === null ? null : el("span", { class: "tag-note", text: tag.note }));
-        if (actions.config !== null) {
-          chip.setAttribute("aria-haspopup", "dialog");
-        }
-        if (token) {
-          links.push({ chip, token, target, tag });
-          const sign = (event) => event.altKey ? "-" : "";
-          chip.addEventListener("pointerdown", (event) => {
-            if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) {
-              chip.setAttribute("href", actions.href(token, sign(event)));
-            }
-          }, { signal: ctx.signal });
-          chip.addEventListener("click", (event) => {
-            if (event.button !== 0) {
-              return;
-            }
-            if (event.metaKey || event.ctrlKey || event.shiftKey) {
-              chip.setAttribute("href", actions.href(token, sign(event)));
-              return;
-            }
-            event.preventDefault();
-            actions.add(token, sign(event));
-          }, { signal: ctx.signal });
-        }
-        if (actions.config !== null) {
-          const openMenu = () => {
-            openTagMenu(chip, { ns: group.ns, name: tag.name }, tag.href, {
-              vote: actions.vote,
-              addTags: actions.addTags,
-              add: actions.add,
-              token,
-              watchTag: actions.watchTag,
-              hideTag: actions.hideTag,
-              colorTag: actions.colorTag
-            }, ctx.signal);
-          };
-          bindContextMenu(chip, openMenu, ctx.signal);
-          const trigger = buttonEl({
-            class: "tag-menu-trigger",
-            "aria-label": `Tag actions for ${tag.name}`,
-            "aria-haspopup": "dialog",
-            title: "Tag actions",
-            onclick: openMenu
-          }, "⋯");
-          chips.append(el("span", { class: "tag-chip-wrap" }, chip, trigger));
-        } else {
-          chips.append(chip);
-        }
-      }
-      section.append(el("div", { class: "tag-row" }, el("span", { class: `tag-ns ns-${nsClass}`, text: `${group.ns}:` }), chips));
-    }
-    if (actions.config !== null) {
-      const input = tagInput("field-input tag-add-input");
-      const submit = buttonEl({ class: "btn btn-small", type: "submit", text: "Add tags" });
-      const form = el("form", { class: "tag-add" }, input, submit);
-      let adding = false;
-      form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const value = input.value.trim();
-        if (value === "" || adding) {
-          return;
-        }
-        adding = true;
-        submit.textContent = "Adding…";
-        actions.addTags(value).then(() => {
-          input.value = "";
-        }).catch((error) => {
-          if (!ctx.signal.aborted) {
-            showToast(errorText(error));
-          }
-        }).finally(() => {
-          adding = false;
-          submit.textContent = "Add tags";
-        });
-      }, { signal: ctx.signal });
-      section.append(el("div", { class: "tag-row tag-add-row" }, el("span", { class: "tag-ns", "aria-hidden": "true" }), form));
-    }
-    refresh();
-    return { element: section, refresh };
-  }
   function siteActionItems(data) {
     const items = [];
     const { archiverHref, torrentsHref, reportHref, expungeHref, renameHref } = data.actions;
@@ -9579,7 +9666,7 @@ ${defaultKeySummary()}`)) {
   }
   function renderGallery(host, data, ctx, deps = {}) {
     host.replaceChildren();
-    let tagsSection = null;
+    let tagRow = null;
     const topbar = renderTopbar({
       onSearch: (text) => {
         const next = { ...getSearchDraft().query, text };
@@ -9590,7 +9677,7 @@ ${defaultKeySummary()}`)) {
       signal: ctx.signal
     });
     const unsubscribe = subscribeSearchDraft(() => {
-      tagsSection?.refresh();
+      tagRow?.refresh();
     });
     ctx.signal.addEventListener("abort", unsubscribe, { once: true });
     const favoriteState = createFavoriteState(data, data.favorite, isLoggedIn());
@@ -9708,47 +9795,6 @@ ${defaultKeySummary()}`)) {
       commentsNode = section;
       section.querySelector(".comment-input")?.focus();
     }
-    const refreshTags = async () => {
-      const next = await reload();
-      if (next === null) {
-        return;
-      }
-      const nextSection = buildTags(next);
-      if (nextSection === null) {
-        return;
-      }
-      const previous = tagsSection?.element ?? null;
-      let restoreTag = null;
-      let restoreComposer = false;
-      if (previous !== null) {
-        const openChip = previous.querySelector('.tag-chip[aria-expanded="true"]');
-        if (openChip?.dataset.tag !== undefined) {
-          restoreTag = openChip.dataset.tag;
-        } else {
-          const active = document.activeElement;
-          if (active != null && previous.contains(active)) {
-            const chip = active.closest(".tag-chip");
-            if (chip?.dataset.tag === undefined) {
-              restoreComposer = true;
-            } else {
-              restoreTag = chip.dataset.tag;
-            }
-          }
-        }
-      }
-      if (tagsSection === null) {
-        host.insertBefore(nextSection.element, grid);
-      } else {
-        tagsSection.element.replaceWith(nextSection.element);
-      }
-      tagsSection = nextSection;
-      const chip = restoreTag === null ? undefined : [...nextSection.element.querySelectorAll(".tag-chip")].find((node) => node.dataset.tag === restoreTag);
-      if (chip !== undefined) {
-        chip.focus();
-      } else if (restoreTag !== null || restoreComposer) {
-        nextSection.element.querySelector(".tag-add-input")?.focus();
-      }
-    };
     const runTagVote = async (tag, vote) => {
       if (config === null) {
         return;
@@ -9776,7 +9822,7 @@ ${defaultKeySummary()}`)) {
       });
       showToast(result === "added" ? "Tag added to My Tags" : "My Tags updated");
     };
-    const buildTags = (source) => source.tags.length > 0 ? tagSection(source, {
+    const tagActions = {
       href: (token, sign) => {
         const current = getSearchDraft();
         return buildSearchUrl({
@@ -9792,10 +9838,28 @@ ${defaultKeySummary()}`)) {
       watchTag: (tag) => runMyTag(tag, { watched: true }),
       hideTag: (tag) => runMyTag(tag, { hidden: true }),
       colorTag: (tag, color) => runMyTag(tag, { color }),
-      config
-    }, ctx) : null;
-    const tags = buildTags(data);
-    tagsSection = tags;
+      config,
+      text: () => getSearchDraft().text
+    };
+    const refreshTags = async () => {
+      const next = await reload();
+      if (next === null) {
+        return;
+      }
+      if (next.tags.length === 0) {
+        return;
+      }
+      if (tagRow === null) {
+        const created = createTagRow(next, tagActions, ctx.signal);
+        if (created !== null) {
+          tagRow = created;
+          host.insertBefore(created.element, grid);
+        }
+        return;
+      }
+      tagRow.update(next);
+    };
+    tagRow = createTagRow(data, tagActions, ctx.signal);
     commentsNode = buildComments(data);
     const missingSprites = new Set;
     const probedSprites = new Set;
@@ -9842,7 +9906,7 @@ ${defaultKeySummary()}`)) {
     };
     enhanceTiles([...grid.children]);
     const navigation = el("div", { class: "gallery-paging" });
-    appendChildren(host, [topbar, header, tags?.element ?? null, emptyThumbs ?? navigation]);
+    appendChildren(host, [topbar, header, tagRow?.element ?? null, emptyThumbs ?? navigation]);
     if (data.thumbs.length > 0) {
       host.append(grid);
     }
@@ -10013,6 +10077,7 @@ ${defaultKeySummary()}`)) {
       "aria-expanded": "false",
       text: "Details"
     });
+    const pending = createPendingAction();
     let requested = false;
     let open = false;
     const show = (visible) => {
@@ -10028,27 +10093,23 @@ ${defaultKeySummary()}`)) {
       }
       requested = true;
       show(true);
-      button.disabled = true;
       const panel = loadingPanel();
       detailsSlot.replaceChildren(panel);
-      loadInfo(page.url, torrent.gtid, ctx.signal).then((info) => {
-        if (ctx.signal.aborted) {
-          return;
+      pending.run({
+        run: () => loadInfo(page.url, torrent.gtid, ctx.signal),
+        signal: ctx.signal,
+        setBusy: (busy) => {
+          button.disabled = busy;
+        },
+        success: (info) => {
+          panel.removeAttribute("aria-busy");
+          panel.replaceChildren(...infoNodes(info));
+        },
+        failure: "Torrent details could not be loaded.",
+        failed: (message) => {
+          panel.removeAttribute("aria-busy");
+          panel.replaceChildren(el("p", { class: "gallery-torrent-error", role: "alert", text: message }));
         }
-        panel.removeAttribute("aria-busy");
-        panel.replaceChildren(...infoNodes(info));
-        button.disabled = false;
-      }, (error) => {
-        if (ctx.signal.aborted) {
-          return;
-        }
-        panel.removeAttribute("aria-busy");
-        panel.replaceChildren(el("p", {
-          class: "gallery-torrent-error",
-          role: "alert",
-          text: errorText(error, "Torrent details could not be loaded.")
-        }));
-        button.disabled = false;
       });
     }, { signal: ctx.signal });
     return el("article", { class: "gallery-torrent-card" }, el("div", { class: "gallery-torrent-head" }, title, button), el("div", { class: "gallery-torrent-meta" }, metaItem("Posted", torrent.posted), metaItem("Size", torrent.size), metaItem("Seeds", String(torrent.seeds)), metaItem("Peers", String(torrent.peers)), metaItem("Downloads", String(torrent.downloads)), metaItem("Uploader", torrent.uploader)), detailsSlot);
@@ -10541,13 +10602,8 @@ ${defaultKeySummary()}`)) {
     const relaxed = relaxedCount(urlQuery);
     const range = { since: urlQuery.since, until: urlQuery.until };
     const rangeActive = isDateRangeActive(range);
-    const filtered = rangeActive ? filterByDateRange(data.items, range) : null;
-    const shownItems = filtered?.items ?? data.items;
-    const crossedSince = filtered?.crossedSince ?? false;
-    let nextHref = data.nextHref;
-    if (rangeActive) {
-      nextHref = nextHref !== null && !crossedSince ? withDateRange(nextHref, range) : null;
-    }
+    const shownItems = data.items;
+    const nextHref = data.nextHref;
     const countNode = el("span", {
       text: rangeActive ? `${shownItems.length} shown` : data.resultText ?? countText(data.items.length, "item")
     });
@@ -10629,17 +10685,7 @@ ${defaultKeySummary()}`)) {
           if (pageSource === undefined) {
             return Promise.reject(new Error("No next-page source for this list route."));
           }
-          const request = pageSource(rangeActive ? withDateRange(url, range) : url, signal);
-          if (!rangeActive) {
-            return request;
-          }
-          return request.then((page) => {
-            const kept = filterByDateRange(page.items, range);
-            return {
-              items: kept.items,
-              next: kept.crossedSince || page.next === null ? null : withDateRange(page.next, range)
-            };
-          });
+          return pageSource(url, signal);
         },
         append: (incoming) => {
           const nodes = incoming.map((item) => resultCard(item, ctx.signal));
@@ -12775,97 +12821,92 @@ ${defaultKeySummary()}`)) {
     };
     render(page, 0);
   }
-  function createPageImageSlot(img, {
-    page: initialPage,
+  function createPageImageSlotFactory({
     retry,
     maxRetries,
-    onLoaded,
-    onGiveUp,
     signal,
-    isCurrent,
     probe: createProbe
   }) {
-    let page = initialPage;
-    let upgradePending = false;
-    let upgradeFailed = false;
-    let upgraded = false;
-    const show = () => {
-      showPageImage({
-        img,
-        page,
-        retry,
-        maxRetries,
-        onGiveUp: onGiveUp ?? (() => {
-          return;
-        }),
-        onLoaded: (loaded) => {
-          page = loaded;
-          onLoaded?.(loaded);
-        },
-        isCurrent
-      });
-    };
-    const reload = () => {
-      const source = img.getAttribute("src");
-      if (source === null || source === "") {
-        return false;
-      }
-      const base = source.replace(/([?&])nl=[^&]*/u, "");
-      const token = page.nlToken ?? String(Date.now());
-      img.src = `${base}${base.includes("?") ? "&" : "?"}nl=${token}`;
-      return true;
-    };
-    const upgrade = (level) => {
-      if (upgradePending || upgradeFailed || upgraded) {
-        return;
-      }
-      const source = page.originalHref;
-      if (source === null || source === page.imgSrc) {
-        return;
-      }
-      const dpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
-      if (level <= nativeZoomLimit(img.clientHeight * dpr, img.naturalHeight)) {
-        return;
-      }
-      upgradePending = true;
-      const probe = createProbe ? createProbe() : new Image;
-      probe.onload = () => {
-        upgradePending = false;
-        if (signal?.aborted || isCurrent?.() === false) {
-          return;
-        }
-        if (probe.naturalWidth <= img.naturalWidth && probe.naturalHeight <= img.naturalHeight) {
-          upgradeFailed = true;
-          return;
-        }
-        upgraded = true;
-        img.src = source;
-        log("original image", source);
-      };
-      probe.onerror = () => {
-        upgradePending = false;
-        upgradeFailed = true;
-      };
-      probe.src = source;
-    };
     return {
-      img,
-      get page() {
-        return page;
-      },
-      show,
-      reload,
-      upgrade
+      create(img, initialPage, hooks = {}) {
+        let page = initialPage;
+        let upgradePending = false;
+        let upgradeFailed = false;
+        let upgraded = false;
+        const isCurrent = () => signal?.aborted !== true && (hooks.isCurrent?.() ?? true);
+        const show = () => {
+          showPageImage({
+            img,
+            page,
+            retry,
+            maxRetries: maxRetries(),
+            onGiveUp: hooks.onGiveUp ?? (() => {
+              return;
+            }),
+            onLoaded: (loaded) => {
+              page = loaded;
+              hooks.onLoaded?.(loaded);
+            },
+            isCurrent
+          });
+        };
+        const reload = () => {
+          const source = img.getAttribute("src");
+          if (source === null || source === "") {
+            return false;
+          }
+          const base = source.replace(/([?&])nl=[^&]*/u, "");
+          const token = page.nlToken ?? String(Date.now());
+          img.src = `${base}${base.includes("?") ? "&" : "?"}nl=${token}`;
+          return true;
+        };
+        const upgrade = (level) => {
+          if (upgradePending || upgradeFailed || upgraded) {
+            return;
+          }
+          const source = page.originalHref;
+          if (source === null || source === page.imgSrc) {
+            return;
+          }
+          const dpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+          if (level <= nativeZoomLimit(img.clientHeight * dpr, img.naturalHeight)) {
+            return;
+          }
+          upgradePending = true;
+          const probe = createProbe ? createProbe() : new Image;
+          probe.onload = () => {
+            upgradePending = false;
+            if (!isCurrent()) {
+              return;
+            }
+            if (probe.naturalWidth <= img.naturalWidth && probe.naturalHeight <= img.naturalHeight) {
+              upgradeFailed = true;
+              return;
+            }
+            upgraded = true;
+            img.src = source;
+            log("original image", source);
+          };
+          probe.onerror = () => {
+            upgradePending = false;
+            upgradeFailed = true;
+          };
+          probe.src = source;
+        };
+        return {
+          img,
+          get page() {
+            return page;
+          },
+          show,
+          reload,
+          upgrade
+        };
+      }
     };
   }
 
   // src/reader-mode.ts
-  function readerLayout(mode) {
-    return {
-      spread: mode === "spread",
-      continuous: mode === "continuous"
-    };
-  }
   function clickIntent(ratio, mode, direction) {
     if (ratio >= 0.3 && ratio <= 0.7) {
       return "toggle";
@@ -12886,6 +12927,592 @@ ${defaultKeySummary()}`)) {
     }
     const forward = dx < 0;
     return (direction === "ltr" ? forward : !forward) ? "next" : "prev";
+  }
+
+  // src/ui/continuous-stack.ts
+  function createContinuousStack({
+    container,
+    initial,
+    next,
+    key,
+    load,
+    render,
+    onChange,
+    signal
+  }) {
+    const pages = [];
+    const appendPage = (item) => {
+      const rendered = render(item);
+      pages.push({ node: rendered.node, view: rendered.view });
+      container.insertBefore(rendered.node, scroll.element);
+    };
+    const scroll = infiniteScroll({
+      next,
+      key,
+      initialKeys: [key(initial)],
+      load,
+      noun: "pages",
+      rootMargin: "150% 0px",
+      signal,
+      onChange,
+      append: (items) => {
+        for (const item of items) {
+          appendPage(item);
+        }
+      }
+    });
+    scroll.element.classList.add("continuous-status", "reader-sentinel");
+    container.replaceChildren(scroll.element);
+    appendPage(initial);
+    return {
+      pages: () => pages,
+      state: scroll.state,
+      loadNext: scroll.loadNext,
+      retry: scroll.retry,
+      stop: scroll.stop
+    };
+  }
+
+  // src/reader-navigation.ts
+  function makeSurface(element, primary, visible) {
+    return {
+      element,
+      get page() {
+        return primary.page;
+      },
+      reload: () => primary.reload(),
+      upgrade(level) {
+        for (const slot of visible) {
+          slot.upgrade(level);
+        }
+      }
+    };
+  }
+  function createReaderNavigation(options) {
+    const slotFactory = createPageImageSlotFactory({
+      retry: (page) => loader.retryWithNl(page, { signal: options.signal }),
+      maxRetries: () => getSettings().maxNlRetry,
+      signal: options.signal
+    });
+    let mode = getSettings().readerMode;
+    let lastPage = null;
+    let adapter;
+    const reportHud = (page, source, next, prev = source.prevHref !== null) => {
+      options.onHud({
+        page,
+        first: source.firstHref !== null,
+        prev,
+        next,
+        last: source.lastHref !== null
+      });
+    };
+    const singleAdapter = () => {
+      let base = null;
+      let slot = null;
+      let surface = null;
+      const createMain = (data) => slotFactory.create(options.mainImage, data, {
+        isCurrent: () => mode === "single" && base === data,
+        onLoaded: options.onImageLoaded,
+        onGiveUp: () => options.onImageError(data)
+      });
+      const hud = () => {
+        if (base === null) {
+          return;
+        }
+        reportHud(slot?.page ?? base, base, base.nextHref !== null);
+      };
+      const show = (data) => {
+        base = data;
+        options.spreadWrap.hidden = false;
+        options.continuousContainer.hidden = true;
+        slot = createMain(data);
+        slot.show();
+        surface = makeSurface(options.mainImage, slot, [slot]);
+        options.onSurfaceChange();
+        hud();
+      };
+      const go = (direction) => {
+        if (base === null) {
+          return;
+        }
+        const target = direction === "prev" ? base.prevHref : base.nextHref;
+        if (target !== null) {
+          options.navigate(target, { replace: true });
+          return;
+        }
+        options.toast(direction === "prev" ? "First page" : "Last page");
+      };
+      const goEnd = (end) => {
+        if (base === null) {
+          return;
+        }
+        const target = end === "first" ? base.firstHref : base.lastHref;
+        if (target !== null) {
+          options.navigate(target, { replace: true });
+          return;
+        }
+        options.toast(end === "first" ? "First page" : "Last page");
+      };
+      return {
+        show,
+        go,
+        goEnd,
+        reload: () => slot?.reload() ?? false,
+        upgrade: (level) => surface?.upgrade(level),
+        surface: () => {
+          if (surface === null) {
+            throw new Error("reader surface is not mounted");
+          }
+          return surface;
+        },
+        page: () => slot?.page ?? base ?? lastPageOrThrow(),
+        handleScroll: () => {
+          return;
+        },
+        retryMain: () => {
+          if (base !== null) {
+            show(base);
+          }
+        },
+        stop: () => {
+          return;
+        }
+      };
+    };
+    const spreadAdapter = () => {
+      let base = null;
+      let mainSlot = null;
+      let companionSlot = null;
+      let companion = null;
+      let surface = null;
+      let pairToken = 0;
+      let navigationToken = 0;
+      const setSingle = (single) => {
+        options.spreadWrap.classList.toggle("is-single", single);
+      };
+      const visibleSlots = () => {
+        if (mainSlot === null) {
+          return [];
+        }
+        return companionSlot !== null && !options.spreadImage.hidden ? [mainSlot, companionSlot] : [mainSlot];
+      };
+      const syncSurface = () => {
+        surface = mainSlot === null ? null : makeSurface(options.spreadWrap, mainSlot, visibleSlots());
+        options.onSurfaceChange();
+      };
+      const hud = () => {
+        if (base === null || mainSlot === null) {
+          return;
+        }
+        const facingVisible = companion !== null && !options.spreadImage.hidden;
+        reportHud(mainSlot.page, base, facingVisible && companion !== null ? companion.nextHref !== null : base.nextHref !== null);
+      };
+      const createMain = (data) => slotFactory.create(options.mainImage, data, {
+        isCurrent: () => mode === "spread" && base === data,
+        onLoaded: options.onImageLoaded,
+        onGiveUp: () => options.onImageError(data)
+      });
+      const clear = () => {
+        pairToken += 1;
+        companion = null;
+        companionSlot = null;
+        options.spreadImage.hidden = true;
+        options.spreadImage.removeAttribute("src");
+        setSingle(false);
+      };
+      const show = (data) => {
+        base = data;
+        options.spreadWrap.hidden = false;
+        options.continuousContainer.hidden = true;
+        clear();
+        setSingle(data.nextHref === null);
+        mainSlot = createMain(data);
+        mainSlot.show();
+        syncSurface();
+        hud();
+        if (data.nextHref === null) {
+          return;
+        }
+        const loadToken = pairToken;
+        loader.viewerPage(data.nextHref, {
+          priority: priorityOf("facing"),
+          signal: options.signal
+        }).then((facing) => {
+          if (options.signal.aborted || loadToken !== pairToken || base === null) {
+            return;
+          }
+          companion = facing;
+          options.spreadImage.hidden = false;
+          setSingle(false);
+          options.spreadImage.alt = `${facing.galleryTitle.primary} — page ${facing.counterText}`;
+          companionSlot = slotFactory.create(options.spreadImage, facing, {
+            isCurrent: () => mode === "spread" && companion === facing,
+            onGiveUp: () => {
+              options.spreadImage.hidden = true;
+              setSingle(true);
+              syncSurface();
+              hud();
+            }
+          });
+          companionSlot.show();
+          syncSurface();
+          hud();
+          surface?.upgrade(options.zoomLevel());
+        }).catch(() => {
+          if (options.signal.aborted || loadToken !== pairToken || base === null) {
+            return;
+          }
+          clear();
+          setSingle(true);
+          syncSurface();
+          hud();
+        });
+      };
+      const go = (direction) => {
+        const from = base;
+        if (from === null) {
+          return;
+        }
+        const loadToken = ++navigationToken;
+        if (direction === "next") {
+          (async () => {
+            let trailing = companion;
+            if (trailing === null && from.nextHref !== null) {
+              trailing = await loader.viewerPage(from.nextHref, {
+                priority: priorityOf("facing"),
+                signal: options.signal
+              }).catch(() => null);
+            }
+            if (loadToken !== navigationToken || options.signal.aborted) {
+              return;
+            }
+            const target = trailing !== null ? trailing.nextHref : from.nextHref;
+            if (target !== null) {
+              options.navigate(target, { replace: true });
+              return;
+            }
+            options.toast("Last page");
+          })();
+          return;
+        }
+        (async () => {
+          const back = from.prevHref !== null ? await loader.viewerPage(from.prevHref, {
+            priority: priorityOf("facing"),
+            signal: options.signal
+          }).catch(() => null) : null;
+          if (loadToken !== navigationToken || options.signal.aborted) {
+            return;
+          }
+          const target = back !== null ? back.prevHref ?? back.viewerUrl : from.prevHref;
+          if (target !== null && target !== from.viewerUrl) {
+            options.navigate(target, { replace: true });
+            return;
+          }
+          options.toast("First page");
+        })();
+      };
+      const goEnd = (end) => {
+        if (base === null) {
+          return;
+        }
+        const target = end === "first" ? base.firstHref : base.lastHref;
+        if (target !== null) {
+          options.navigate(target, { replace: true });
+          return;
+        }
+        options.toast(end === "first" ? "First page" : "Last page");
+      };
+      return {
+        show,
+        go,
+        goEnd,
+        reload: () => mainSlot?.reload() ?? false,
+        upgrade: (level) => surface?.upgrade(level),
+        surface: () => {
+          if (surface === null) {
+            throw new Error("reader surface is not mounted");
+          }
+          return surface;
+        },
+        page: () => mainSlot?.page ?? base ?? lastPageOrThrow(),
+        handleScroll: () => {
+          return;
+        },
+        retryMain: () => {
+          if (base === null) {
+            return;
+          }
+          mainSlot = createMain(base);
+          mainSlot.show();
+          syncSurface();
+        },
+        stop: () => {
+          clear();
+          surface = null;
+          options.spreadWrap.classList.remove("is-single");
+        }
+      };
+    };
+    const continuousAdapter = () => {
+      let base = null;
+      let stack = null;
+      let index = 0;
+      let generation = 0;
+      let aspect = 1.4;
+      let frame;
+      let surface = null;
+      const renderPage = (data) => {
+        const node = el("div", { class: "reader-page" });
+        const img = el("img", {
+          class: "reader-page-img",
+          alt: `${data.galleryTitle.primary} — page ${data.counterText}`,
+          loading: "lazy"
+        });
+        const retry = buttonEl({
+          class: "btn btn-small reader-page-retry",
+          text: "Retry",
+          style: "position: absolute; z-index: 1;"
+        });
+        retry.hidden = true;
+        node.append(img, retry);
+        node.style.minHeight = `${Math.round(window.innerWidth * aspect)}px`;
+        const loadGeneration = generation;
+        const slot = slotFactory.create(img, data, {
+          isCurrent: () => generation === loadGeneration,
+          onGiveUp: () => {
+            node.classList.add("is-failed");
+            retry.hidden = false;
+          },
+          onLoaded: () => {
+            node.classList.remove("is-failed");
+            retry.hidden = true;
+            node.style.removeProperty("min-height");
+            if (img.naturalWidth > 0) {
+              aspect = img.naturalHeight / img.naturalWidth;
+            }
+          }
+        });
+        retry.addEventListener("click", () => {
+          retry.hidden = true;
+          node.classList.remove("is-failed");
+          slot.show();
+        }, { signal: options.signal });
+        slot.show();
+        return { node, view: slot };
+      };
+      const hud = () => {
+        if (base === null) {
+          return;
+        }
+        const pages = stack?.pages() ?? [];
+        const visible = pages[index]?.view.page ?? base;
+        const state = stack?.state();
+        reportHud(visible, base, !((state === undefined || state.done) && index >= pages.length - 1), index > 0);
+      };
+      const setSurface = (entry) => {
+        surface = entry === undefined ? null : makeSurface(entry.view.img, entry.view, [entry.view]);
+        options.onSurfaceChange();
+      };
+      const scrollTo = (next) => {
+        const entry = stack?.pages()[next];
+        if (entry === undefined) {
+          return;
+        }
+        entry.node.scrollIntoView({ block: "start" });
+        index = next;
+        setSurface(entry);
+        hud();
+        surface?.upgrade(options.zoomLevel());
+      };
+      const teardown = () => {
+        generation += 1;
+        stack?.stop();
+        stack = null;
+        index = 0;
+        surface = null;
+        options.continuousContainer.replaceChildren();
+      };
+      const show = (data) => {
+        base = data;
+        options.spreadWrap.hidden = true;
+        options.continuousContainer.hidden = false;
+        options.mainImage.removeAttribute("src");
+        options.spreadImage.hidden = true;
+        options.spreadImage.removeAttribute("src");
+        teardown();
+        stack = createContinuousStack({
+          container: options.continuousContainer,
+          initial: data,
+          next: data.nextHref,
+          key: (page) => page.viewerUrl,
+          signal: options.signal,
+          load: (url, signal) => loader.viewerPage(url, { priority: priorityOf("facing"), signal }).then((page) => ({
+            items: [page],
+            next: page.nextHref
+          })),
+          render: renderPage,
+          onChange: hud
+        });
+        index = 0;
+        setSurface(stack.pages()[0]);
+        hud();
+      };
+      const sync = () => {
+        const pages = stack?.pages() ?? [];
+        if (pages.length === 0) {
+          return;
+        }
+        const midpoint = window.innerHeight / 2;
+        let best = 0;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        pages.forEach((entry, position) => {
+          const rect = entry.node.getBoundingClientRect();
+          const distance = Math.abs(rect.top + rect.height / 2 - midpoint);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = position;
+          }
+        });
+        const previous = index;
+        index = best;
+        if (best !== previous) {
+          setSurface(pages[best]);
+        }
+        hud();
+        if (best !== previous) {
+          surface?.upgrade(options.zoomLevel());
+        }
+      };
+      const go = (direction) => {
+        const active = stack;
+        if (active === null) {
+          return;
+        }
+        if (direction === "prev") {
+          if (index <= 0) {
+            options.toast("First page");
+            return;
+          }
+          scrollTo(index - 1);
+          return;
+        }
+        (async () => {
+          if (index >= active.pages().length - 1) {
+            const state = active.state();
+            if (state.loading) {
+              return;
+            }
+            if (!state.done) {
+              const appended = state.failed ? await active.retry() : await active.loadNext();
+              if (active !== stack || options.signal.aborted) {
+                return;
+              }
+              if (!appended) {
+                const after = active.state();
+                if (after.failed) {
+                  options.toast("Could not load the next page");
+                } else if (after.done) {
+                  options.toast("Last page");
+                }
+                hud();
+                return;
+              }
+            }
+          }
+          if (index >= active.pages().length - 1) {
+            options.toast("Last page");
+            return;
+          }
+          scrollTo(index + 1);
+        })();
+      };
+      const goEnd = (end) => {
+        if (base === null) {
+          return;
+        }
+        const target = end === "first" ? base.firstHref : base.lastHref;
+        if (target !== null) {
+          options.navigate(target, { replace: true });
+          return;
+        }
+        options.toast(end === "first" ? "First page" : "Last page");
+      };
+      return {
+        show,
+        go,
+        goEnd,
+        reload: () => surface?.reload() ?? false,
+        upgrade: (level) => surface?.upgrade(level),
+        surface: () => {
+          if (surface === null) {
+            throw new Error("reader surface is not mounted");
+          }
+          return surface;
+        },
+        page: () => {
+          const pages = stack?.pages() ?? [];
+          return pages[index]?.view.page ?? base ?? lastPageOrThrow();
+        },
+        handleScroll: () => {
+          if (frame !== undefined) {
+            return;
+          }
+          frame = window.requestAnimationFrame(() => {
+            frame = undefined;
+            sync();
+          });
+        },
+        retryMain: () => {
+          return;
+        },
+        stop: () => {
+          if (frame !== undefined) {
+            window.cancelAnimationFrame(frame);
+            frame = undefined;
+          }
+          teardown();
+        }
+      };
+    };
+    function lastPageOrThrow() {
+      if (lastPage === null) {
+        throw new Error("reader has no page");
+      }
+      return lastPage;
+    }
+    const makeAdapter = (next) => next === "continuous" ? continuousAdapter() : next === "spread" ? spreadAdapter() : singleAdapter();
+    adapter = makeAdapter(mode);
+    return {
+      show(page) {
+        lastPage = page;
+        adapter.show(page);
+      },
+      setMode(next) {
+        if (next === mode) {
+          return;
+        }
+        adapter.stop();
+        mode = next;
+        adapter = makeAdapter(next);
+        if (lastPage !== null) {
+          adapter.show(lastPage);
+        }
+      },
+      go: (direction) => adapter.go(direction),
+      goEnd: (end) => adapter.goEnd(end),
+      reload: () => adapter.reload(),
+      upgrade: (level) => adapter.upgrade(level),
+      surface: () => adapter.surface(),
+      currentPage: () => adapter.page(),
+      handleScroll: () => adapter.handleScroll(),
+      retryMain: () => adapter.retryMain(),
+      clickIntent: (ratio, direction) => clickIntent(ratio, mode, direction),
+      swipeIntent: (dx, minDistance, direction) => swipeIntent(dx, minDistance, mode, direction),
+      get continuous() {
+        return mode === "continuous";
+      },
+      stop: () => adapter.stop()
+    };
   }
 
   // src/shell.html
@@ -12959,50 +13586,6 @@ ${defaultKeySummary()}`)) {
   </div>
 </div>
 `;
-
-  // src/ui/continuous-stack.ts
-  function createContinuousStack({
-    container,
-    initial,
-    next,
-    key,
-    load,
-    render,
-    onChange,
-    signal
-  }) {
-    const pages = [];
-    const appendPage = (item) => {
-      const rendered = render(item);
-      pages.push({ node: rendered.node, view: rendered.view });
-      container.insertBefore(rendered.node, scroll.element);
-    };
-    const scroll = infiniteScroll({
-      next,
-      key,
-      initialKeys: [key(initial)],
-      load,
-      noun: "pages",
-      rootMargin: "150% 0px",
-      signal,
-      onChange,
-      append: (items) => {
-        for (const item of items) {
-          appendPage(item);
-        }
-      }
-    });
-    scroll.element.classList.add("continuous-status", "reader-sentinel");
-    container.replaceChildren(scroll.element);
-    appendPage(initial);
-    return {
-      pages: () => pages,
-      state: scroll.state,
-      loadNext: scroll.loadNext,
-      retry: scroll.retry,
-      stop: scroll.stop
-    };
-  }
 
   // src/view-mode.ts
   function applyViewMode({
@@ -13083,92 +13666,15 @@ ${defaultKeySummary()}`)) {
         clearTimeout: (handle) => window.clearTimeout(handle)
       }
     });
-    const setSpreadSingle = (single) => {
-      ui.elWrap.classList.toggle("is-single", single);
-    };
     const setHelp = (open) => {
       ui.elHelp.hidden = !open;
     };
-    let current = pageData;
     let chromePinned = false;
-    let mainSlot = null;
-    let companionSlot = null;
-    let spreadCompanion = null;
-    let spreadToken = 0;
-    let navigationToken = 0;
-    let stack = null;
-    let continuousIndex = 0;
-    let continuousGeneration = 0;
-    let continuousAspect = 1.4;
     let activeMode = getSettings().readerMode;
     let resumeTimer;
     let resumePage = null;
-    function makeSurface(element, primary, visible) {
-      return {
-        element,
-        get page() {
-          return primary.page;
-        },
-        reload: () => primary.reload(),
-        upgrade(level) {
-          for (const slot of visible) {
-            slot.upgrade(level);
-          }
-        }
-      };
-    }
-    let surface = null;
-    const zoom = new ZoomController(ui.elReader, () => activeSurface().element, () => getSettings().fitHeight, ctx.signal, (level) => activeSurface().upgrade(level));
-    const updateTitleWidth = () => {
-      const viewportWidth = window.innerWidth;
-      const maxWidth = getSettings().fitHeight ? Math.max(220, (viewportWidth - ui.elImg.clientWidth) / 2 - 30) : Math.min(760, viewportWidth * 0.62);
-      ui.elTitle.style.maxWidth = `${maxWidth}px`;
-    };
-    function createMainSlot(data) {
-      return createPageImageSlot(ui.elImg, {
-        page: data,
-        retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
-        maxRetries: getSettings().maxNlRetry,
-        signal: ctx.signal,
-        isCurrent: () => current === data && !readerLayout(getSettings().readerMode).continuous,
-        onGiveUp: () => showError(),
-        onLoaded: (loaded) => {
-          hideError();
-          if (ui.elImg.naturalWidth > 0) {
-            continuousAspect = ui.elImg.naturalHeight / ui.elImg.naturalWidth;
-          }
-          log("image displayed", loaded.imgSrc);
-        }
-      });
-    }
-    function computeSurface() {
-      const mode = getSettings().readerMode;
-      if (mode === "continuous") {
-        const pages = stack?.pages() ?? [];
-        const entry = pages[continuousIndex] ?? pages[0];
-        if (entry) {
-          const slot = entry.view;
-          return makeSurface(slot.img, slot, [slot]);
-        }
-      } else if (mode === "spread" && mainSlot !== null) {
-        const spreadPrimary = mainSlot;
-        const visible = [spreadPrimary];
-        if (companionSlot !== null && !ui.elSpread.hidden) {
-          visible.push(companionSlot);
-        }
-        return makeSurface(ui.elWrap, spreadPrimary, visible);
-      }
-      const primary = mainSlot ?? createMainSlot(current);
-      return makeSurface(ui.elImg, primary, [primary]);
-    }
-    function refreshSurface() {
-      surface = computeSurface();
-    }
-    function activeSurface() {
-      surface ??= computeSurface();
-      return surface;
-    }
-    function flushResume() {
+    let hudPage = null;
+    const flushResume = () => {
       if (resumePage === null) {
         return;
       }
@@ -13177,8 +13683,8 @@ ${defaultKeySummary()}`)) {
         pageNum: resumePage.pageNum,
         counterText: resumePage.counterText
       });
-    }
-    function rememberPosition(data) {
+    };
+    const rememberPosition = (data) => {
       resumePage = data;
       if (resumeTimer !== undefined) {
         return;
@@ -13187,33 +13693,64 @@ ${defaultKeySummary()}`)) {
         resumeTimer = undefined;
         flushResume();
       }, 750);
-    }
+    };
     const hideError = () => {
       ui.elError.hidden = true;
     };
-    const showError = () => {
-      ui.elErrorText.textContent = `Page ${current.counterText} could not be loaded.`;
-      ui.elErrorNative.href = nativeUrl(current.viewerUrl);
+    const showError = (page) => {
+      ui.elErrorText.textContent = `Page ${page.counterText} could not be loaded.`;
+      ui.elErrorNative.href = nativeUrl(page.viewerUrl);
       ui.elErrorNative.textContent = "Open native page";
       ui.elError.hidden = false;
     };
-    const syncNav = (data) => {
-      ui.elFirst.disabled = data.firstHref === null;
-      ui.elPrev.disabled = data.prevHref === null;
-      ui.elNext.disabled = data.nextHref === null;
-      ui.elLast.disabled = data.lastHref === null;
+    const navigation = createReaderNavigation({
+      signal: ctx.signal,
+      navigate: ctx.navigate,
+      toast: showToast,
+      mainImage: ui.elImg,
+      spreadImage: ui.elSpread,
+      spreadWrap: ui.elWrap,
+      continuousContainer: ui.elContinuous,
+      onHud: (state) => {
+        ui.elFirst.disabled = !state.first;
+        ui.elPrev.disabled = !state.prev;
+        ui.elNext.disabled = !state.next;
+        ui.elLast.disabled = !state.last;
+        ui.elCounter.textContent = state.page.counterText;
+        ui.elFileInfo.textContent = state.page.fileInfo;
+        if (state.page !== hudPage) {
+          hudPage = state.page;
+          rememberPosition(state.page);
+        }
+      },
+      onSurfaceChange: () => {
+        zoom.syncSurface();
+      },
+      onImageLoaded: (page) => {
+        hideError();
+        log("image displayed", page.imgSrc);
+      },
+      onImageError: showError,
+      zoomLevel: () => zoom.getZoomLevel()
+    });
+    const zoom = new ZoomController(ui.elReader, () => navigation.surface().element, () => getSettings().fitHeight, ctx.signal, (level) => navigation.upgrade(level));
+    const updateTitleWidth = () => {
+      const viewportWidth = window.innerWidth;
+      const maxWidth = getSettings().fitHeight ? Math.max(220, (viewportWidth - ui.elImg.clientWidth) / 2 - 30) : Math.min(760, viewportWidth * 0.62);
+      ui.elTitle.style.maxWidth = `${maxWidth}px`;
     };
     const reloadImage = () => {
-      if (!activeSurface().reload()) {
+      if (!navigation.reload()) {
         return;
       }
       hideError();
       showToast("Reloading image");
     };
     const retryPage = () => {
+      const page = navigation.currentPage();
       (async () => {
         hideError();
-        const retried = await loader.retryWithNl(current, { signal: ctx.signal });
+        const retried = await loader.retryWithNl(page, { signal: ctx.signal });
         if (ctx.signal.aborted) {
           return;
         }
@@ -13221,333 +13758,16 @@ ${defaultKeySummary()}`)) {
           render(retried);
           return;
         }
-        showMain(current);
+        navigation.retryMain();
       })();
     };
-    const goEnd = (direction) => {
-      const target = direction === "first" ? current.firstHref : current.lastHref;
-      if (target) {
-        ctx.navigate(target, { replace: true });
-        return;
-      }
-      showToast(direction === "first" ? "First page" : "Last page");
-    };
-    const goSingle = (direction) => {
-      const target = direction === "prev" ? current.prevHref : current.nextHref;
-      if (target) {
-        ctx.navigate(target, { replace: true });
-        return;
-      }
-      showToast(direction === "prev" ? "First page" : "Last page");
-    };
-    async function goSpread(direction) {
-      const token = ++navigationToken;
-      if (direction === "next") {
-        let trailing = spreadCompanion;
-        if (!trailing && current.nextHref) {
-          trailing = await loader.viewerPage(current.nextHref, {
-            priority: priorityOf("facing"),
-            signal: ctx.signal
-          }).catch(() => null);
-        }
-        if (token !== navigationToken || ctx.signal.aborted) {
-          return;
-        }
-        const target = trailing ? trailing.nextHref : current.nextHref;
-        if (target) {
-          ctx.navigate(target, { replace: true });
-          return;
-        }
-        showToast("Last page");
-        return;
-      }
-      const back = current.prevHref ? await loader.viewerPage(current.prevHref, {
-        priority: priorityOf("facing"),
-        signal: ctx.signal
-      }).catch(() => null) : null;
-      if (token !== navigationToken || ctx.signal.aborted) {
-        return;
-      }
-      const target = back ? back.prevHref ?? back.viewerUrl : current.prevHref;
-      if (target !== null && target !== current.viewerUrl) {
-        ctx.navigate(target, { replace: true });
-        return;
-      }
-      showToast("First page");
-    }
-    function syncContinuousNav() {
-      if (!readerLayout(getSettings().readerMode).continuous) {
-        return;
-      }
-      const pages = stack?.pages() ?? [];
-      ui.elPrev.disabled = continuousIndex <= 0;
-      const state = stack?.state();
-      ui.elNext.disabled = (state === undefined || state.done) && continuousIndex >= pages.length - 1;
-    }
-    function scrollToContinuous(index) {
-      const entry = stack?.pages()[index];
-      if (!entry) {
-        return;
-      }
-      entry.node.scrollIntoView({ block: "start" });
-      continuousIndex = index;
-      refreshSurface();
-      zoom.syncSurface();
-      ui.elCounter.textContent = entry.view.page.counterText;
-      ui.elFileInfo.textContent = entry.view.page.fileInfo;
-      syncContinuousNav();
-      activeSurface().upgrade(zoom.getZoomLevel());
-    }
-    async function goContinuous(direction) {
-      const active = stack;
-      if (active === null) {
-        return;
-      }
-      if (direction === "prev") {
-        if (continuousIndex <= 0) {
-          showToast("First page");
-          return;
-        }
-        scrollToContinuous(continuousIndex - 1);
-        return;
-      }
-      if (continuousIndex >= active.pages().length - 1) {
-        const state = active.state();
-        if (state.loading) {
-          return;
-        }
-        if (!state.done) {
-          const appended = state.failed ? await active.retry() : await active.loadNext();
-          if (active !== stack || ctx.signal.aborted) {
-            return;
-          }
-          if (!appended) {
-            const after = active.state();
-            if (after.failed) {
-              showToast("Could not load the next page");
-            } else if (after.done) {
-              showToast("Last page");
-            }
-            syncContinuousNav();
-            return;
-          }
-        }
-      }
-      if (continuousIndex >= active.pages().length - 1) {
-        showToast("Last page");
-        return;
-      }
-      scrollToContinuous(continuousIndex + 1);
-    }
     const go = (direction) => {
-      const mode = getSettings().readerMode;
-      if (mode === "continuous") {
-        goContinuous(direction);
-        return;
-      }
-      if (mode === "spread") {
-        goSpread(direction);
-        return;
-      }
-      goSingle(direction);
+      navigation.go(direction);
     };
-    function clearSpread() {
-      spreadToken += 1;
-      spreadCompanion = null;
-      companionSlot = null;
-      ui.elSpread.hidden = true;
-      ui.elSpread.removeAttribute("src");
-      setSpreadSingle(false);
-      refreshSurface();
-    }
-    function renderSpread(data) {
-      clearSpread();
-      const token = spreadToken;
-      setSpreadSingle(data.nextHref === null);
-      if (!readerLayout(getSettings().readerMode).spread || data.nextHref === null) {
-        return;
-      }
-      loader.viewerPage(data.nextHref, {
-        priority: priorityOf("facing"),
-        signal: ctx.signal
-      }).then((companion) => {
-        if (ctx.signal.aborted || token !== spreadToken || !readerLayout(getSettings().readerMode).spread) {
-          return;
-        }
-        spreadCompanion = companion;
-        ui.elSpread.hidden = false;
-        setSpreadSingle(false);
-        ui.elSpread.alt = `${companion.galleryTitle.primary} — page ${companion.counterText}`;
-        companionSlot = createPageImageSlot(ui.elSpread, {
-          page: companion,
-          retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
-          maxRetries: getSettings().maxNlRetry,
-          signal: ctx.signal,
-          isCurrent: () => spreadCompanion === companion,
-          onGiveUp: () => {
-            ui.elSpread.hidden = true;
-            setSpreadSingle(true);
-            ui.elNext.disabled = data.nextHref === null;
-            refreshSurface();
-          }
-        });
-        companionSlot.show();
-        ui.elNext.disabled = companion.nextHref === null;
-        refreshSurface();
-        activeSurface().upgrade(zoom.getZoomLevel());
-      }).catch(() => {
-        if (ctx.signal.aborted || token !== spreadToken) {
-          return;
-        }
-        clearSpread();
-        setSpreadSingle(true);
-        ui.elNext.disabled = data.nextHref === null;
-      });
-    }
-    function continuousPage(data) {
-      const node = el("div", { class: "reader-page" });
-      const img = el("img", {
-        class: "reader-page-img",
-        alt: `${data.galleryTitle.primary} — page ${data.counterText}`,
-        loading: "lazy"
-      });
-      const retry = buttonEl({
-        class: "btn btn-small reader-page-retry",
-        text: "Retry",
-        style: "position: absolute; z-index: 1;"
-      });
-      retry.hidden = true;
-      node.append(img, retry);
-      node.style.minHeight = `${Math.round(window.innerWidth * continuousAspect)}px`;
-      const generation = continuousGeneration;
-      const slot = createPageImageSlot(img, {
-        page: data,
-        retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
-        maxRetries: getSettings().maxNlRetry,
-        signal: ctx.signal,
-        isCurrent: () => continuousGeneration === generation,
-        onGiveUp: () => {
-          node.classList.add("is-failed");
-          retry.hidden = false;
-        },
-        onLoaded: () => {
-          node.classList.remove("is-failed");
-          retry.hidden = true;
-          node.style.removeProperty("min-height");
-          if (img.naturalWidth > 0) {
-            continuousAspect = img.naturalHeight / img.naturalWidth;
-          }
-        }
-      });
-      retry.addEventListener("click", () => {
-        retry.hidden = true;
-        node.classList.remove("is-failed");
-        slot.show();
-      });
-      slot.show();
-      return { node, view: slot };
-    }
-    function teardownContinuous() {
-      continuousGeneration += 1;
-      stack?.stop();
-      stack = null;
-      continuousIndex = 0;
-      ui.elContinuous.replaceChildren();
-    }
-    function startContinuous(data) {
-      teardownContinuous();
-      stack = createContinuousStack({
-        container: ui.elContinuous,
-        initial: data,
-        next: data.nextHref,
-        key: (page) => page.viewerUrl,
-        signal: ctx.signal,
-        load: (url, signal) => loader.viewerPage(url, { priority: priorityOf("facing"), signal }).then((page) => ({
-          items: [page],
-          next: page.nextHref
-        })),
-        render: continuousPage,
-        onChange: () => syncContinuousNav()
-      });
-      continuousIndex = 0;
-      refreshSurface();
-      syncContinuousNav();
-    }
-    function syncContinuousCounter() {
-      const pages = stack?.pages() ?? [];
-      if (!readerLayout(getSettings().readerMode).continuous || pages.length === 0) {
-        return;
-      }
-      const midpoint = window.innerHeight / 2;
-      let best = 0;
-      let bestDistance = Number.POSITIVE_INFINITY;
-      pages.forEach((entry, index) => {
-        const rect = entry.node.getBoundingClientRect();
-        const distance = Math.abs(rect.top + rect.height / 2 - midpoint);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = index;
-        }
-      });
-      const previous = continuousIndex;
-      continuousIndex = best;
-      if (best !== previous) {
-        refreshSurface();
-        zoom.syncSurface();
-      }
-      const visible = pages[best];
-      if (visible) {
-        ui.elCounter.textContent = visible.view.page.counterText;
-        ui.elFileInfo.textContent = visible.view.page.fileInfo;
-        rememberPosition(visible.view.page);
-      }
-      syncContinuousNav();
-      if (best !== previous) {
-        activeSurface().upgrade(zoom.getZoomLevel());
-      }
-    }
-    let counterFrame;
-    function onContinuousScroll() {
-      if (!readerLayout(getSettings().readerMode).continuous || counterFrame !== undefined) {
-        return;
-      }
-      counterFrame = window.requestAnimationFrame(() => {
-        counterFrame = undefined;
-        syncContinuousCounter();
-      });
-    }
-    function showMain(data) {
-      mainSlot = createMainSlot(data);
-      mainSlot.show();
-      refreshSurface();
-    }
-    function syncLayout() {
-      const settings = getSettings();
-      const layout = readerLayout(settings.readerMode);
-      ui.elWrap.hidden = layout.continuous;
-      ui.elContinuous.hidden = !layout.continuous;
-      ui.elContinuous.style.setProperty("--reader-gap", `${settings.gap}px`);
-      if (layout.continuous) {
-        mainSlot = null;
-        ui.elImg.removeAttribute("src");
-        startContinuous(current);
-        clearSpread();
-        syncContinuousCounter();
-        return;
-      }
-      teardownContinuous();
-      if (layout.spread) {
-        showMain(current);
-        syncNav(current);
-        renderSpread(current);
-      } else {
-        showMain(current);
-        clearSpread();
-        syncNav(current);
-      }
-    }
+    const goEnd = (direction) => {
+      navigation.goEnd(direction);
+    };
     function render(data) {
-      current = data;
       ui.elTitle.replaceChildren(titleNodes(data.galleryTitle));
       ui.elCounter.textContent = data.counterText;
       ui.elFileInfo.textContent = data.fileInfo;
@@ -13559,13 +13779,11 @@ ${defaultKeySummary()}`)) {
       ui.elSearch.hidden = data.searchHref === null;
       ui.elSearch.href = data.searchHref ?? "";
       ui.elImg.alt = `${data.galleryTitle.primary} — page ${data.counterText}`;
-      syncNav(data);
       hideError();
-      syncLayout();
-      if (!getSettings().fitHeight && !readerLayout(getSettings().readerMode).continuous) {
+      navigation.show(data);
+      if (!getSettings().fitHeight && !navigation.continuous) {
         window.scrollTo(0, 0);
       }
-      rememberPosition(data);
       log("rendered", data.counterText);
     }
     let cursorHidden = false;
@@ -13576,8 +13794,12 @@ ${defaultKeySummary()}`)) {
       readerMode: getSettings().readerMode,
       readingDirection: getSettings().readingDirection
     });
+    ui.elContinuous.style.setProperty("--reader-gap", `${getSettings().gap}px`);
     render(pageData);
-    window.addEventListener("scroll", onContinuousScroll, { passive: true, signal: ctx.signal });
+    window.addEventListener("scroll", () => navigation.handleScroll(), {
+      passive: true,
+      signal: ctx.signal
+    });
     const off = onSettingsChange((settings) => {
       applyViewMode({
         viewer: true,
@@ -13590,7 +13812,7 @@ ${defaultKeySummary()}`)) {
       updateTitleWidth();
       if (settings.readerMode !== activeMode) {
         activeMode = settings.readerMode;
-        syncLayout();
+        navigation.setMode(settings.readerMode);
       }
       zoom.updateZoom(null, settings.fitHeight);
     });
@@ -13647,7 +13869,7 @@ ${defaultKeySummary()}`)) {
         panPoint = null;
         suppressClick = true;
         const [first, second] = [...activePointers.values()];
-        if (first !== undefined && second !== undefined && getSettings().fitHeight && getSettings().readerMode !== "continuous") {
+        if (first !== undefined && second !== undefined && getSettings().fitHeight && !navigation.continuous) {
           pinchStart = {
             distance: Math.hypot(second.x - first.x, second.y - first.y),
             zoom: zoom.getZoomLevel()
@@ -13656,7 +13878,7 @@ ${defaultKeySummary()}`)) {
         return;
       }
       suppressClick = false;
-      if (zoom.getZoomLevel() > 1 && getSettings().fitHeight && getSettings().readerMode !== "continuous") {
+      if (zoom.getZoomLevel() > 1 && getSettings().fitHeight && !navigation.continuous) {
         swipeStart = null;
         panPoint = { x: event.clientX, y: event.clientY };
       } else {
@@ -13719,7 +13941,7 @@ ${defaultKeySummary()}`)) {
       if (Math.abs(dx) < Math.abs(dy) * 1.5) {
         return;
       }
-      const intent = swipeIntent(dx, SWIPE_MIN, getSettings().readerMode, getSettings().readingDirection);
+      const intent = navigation.swipeIntent(dx, SWIPE_MIN, getSettings().readingDirection);
       if (intent === null) {
         return;
       }
@@ -13743,7 +13965,7 @@ ${defaultKeySummary()}`)) {
         return;
       }
       const ratio = event.clientX / Math.max(1, window.innerWidth);
-      const intent = clickIntent(ratio, getSettings().readerMode, getSettings().readingDirection);
+      const intent = navigation.clickIntent(ratio, getSettings().readingDirection);
       if (intent === "toggle") {
         toggleChrome();
       } else {
@@ -13834,12 +14056,12 @@ ${defaultKeySummary()}`)) {
       } else if (event.key === "r" || event.key === "R") {
         reloadImage();
       } else if (isKey(event, "up")) {
-        if (!getSettings().fitHeight || getSettings().readerMode === "continuous") {
+        if (!getSettings().fitHeight || navigation.continuous) {
           event.preventDefault();
           window.scrollBy(0, -getSettings().scrollStep);
         }
       } else if (isKey(event, "down")) {
-        if (!getSettings().fitHeight || getSettings().readerMode === "continuous") {
+        if (!getSettings().fitHeight || navigation.continuous) {
           event.preventDefault();
           window.scrollBy(0, getSettings().scrollStep);
         }
@@ -13860,10 +14082,7 @@ ${defaultKeySummary()}`)) {
       flushResume();
       prefetcher.cancel();
       resizeObserver.disconnect();
-      teardownContinuous();
-      if (counterFrame !== undefined) {
-        window.cancelAnimationFrame(counterFrame);
-      }
+      navigation.stop();
       ui.elImg.removeAttribute("src");
       ui.elSpread.removeAttribute("src");
     }, { once: true });
@@ -13883,7 +14102,14 @@ ${defaultKeySummary()}`)) {
       const { doc, url: finalUrl } = await fetchDocument(url, signal, priorityOf("append"));
       return page(doc, finalUrl);
     };
+    const feed = (route) => {
+      if (pageSource === undefined) {
+        return;
+      }
+      return spec.feed === undefined ? pageSource : spec.feed(route, pageSource);
+    };
     return {
+      prepare: (route) => ({ route, bootUrl: null, state: {} }),
       load: async (route, signal, options) => {
         const { doc, url } = await fetchDocument(spec.request?.(route) ?? route.url, signal, priorityOf("navigation"), options);
         const data = spec.parse(doc, url, route);
@@ -13895,15 +14121,61 @@ ${defaultKeySummary()}`)) {
         spec.sanity?.(data, doc);
         return data;
       },
-      render: (host, data, ctx) => spec.render(host, data, ctx, pageSource),
+      render: (host, data, ctx, route) => spec.render(host, data, ctx, feed(route)),
       title: (data) => spec.title(data),
-      pageSource
+      feed
     };
+  }
+  function listRange(route) {
+    return { since: route.query.since, until: route.query.until };
+  }
+  function listRouteData(route, doc, url) {
+    const page = parseListPage(doc, url);
+    const range = listRange(route);
+    if (!isDateRangeActive(range)) {
+      return { page, query: route.query, scope: route.scope };
+    }
+    const filtered = filterByDateRange(page.items, range);
+    return {
+      page: {
+        ...page,
+        items: filtered.items,
+        nextHref: page.nextHref !== null && !filtered.crossedSince ? withDateRange(page.nextHref, range) : null
+      },
+      query: route.query,
+      scope: route.scope
+    };
+  }
+  function listFeed(route, source) {
+    const range = listRange(route);
+    if (!isDateRangeActive(range)) {
+      return source;
+    }
+    return async (url, signal) => {
+      const page = await source(withDateRange(url, range), signal);
+      const kept = filterByDateRange(page.items, range);
+      return {
+        items: kept.items,
+        next: kept.crossedSince || page.next === null ? null : withDateRange(page.next, range)
+      };
+    };
+  }
+  function prepareListRoute(route, context) {
+    const filtered = applyPersistedListFilters(route);
+    const requestUrl = listRequestUrl(filtered.url);
+    const bootUrl = context.previous === null && (filtered.url !== route.url || requestUrl !== filtered.url) ? requestUrl : null;
+    return { route: filtered, bootUrl, state: {} };
+  }
+  function prepareViewerRoute(route, context) {
+    const remembered = context.previousState.fromGallery === true;
+    const fromGallery = context.replace ? remembered : context.previous?.kind === "gallery";
+    return { route, bootUrl: null, state: { fromGallery } };
   }
   function createRouteViews(deps) {
     const table = {
       viewer: {
         match: (url) => VIEWER_PATH.test(url.pathname) ? { kind: "viewer", url: url.href } : null,
+        prepare: prepareViewerRoute,
         load: async (route, signal) => {
           const data = await deps.viewerPage(route.url, {
             signal,
@@ -13965,22 +14237,20 @@ ${defaultKeySummary()}`)) {
         ...documentView(deps, {
           tag: "list",
           request: (route) => listRequestUrl(route.url),
-          parse: (doc, url, route) => ({
-            page: parseListPage(doc, url),
-            query: route.query,
-            scope: route.scope
-          }),
+          parse: (doc, url, route) => listRouteData(route, doc, url),
           sanity: (data, doc) => assertListPage(data.page, doc),
           page: (doc, url) => {
             const page = parseListPage(doc, url);
             return { items: page.items, next: page.nextHref };
           },
+          feed: listFeed,
           render: (host, data, ctx, pageSource) => renderList(host, data.page, data.query, ctx, data.scope, { pageSource }),
           title: (data) => {
             const pathTag = tagTokenFromHref(new URL(data.page.url).pathname, data.page.url);
             return documentTitle(listLabels(data.query, data.scope, pathTag).title);
           }
-        })
+        }),
+        prepare: prepareListRoute
       },
       torrents: {
         match: (url) => url.pathname === SITE_PATHS.torrents ? { kind: "torrents", url: url.href } : null,
@@ -14065,7 +14335,7 @@ ${defaultKeySummary()}`)) {
         })
       }
     };
-    function routeView(route) {
+    function viewFor(route) {
       if (route.kind === "native" || !Object.hasOwn(table, route.kind)) {
         throw new Error(`Cannot render a ${route.kind} route`);
       }
@@ -14081,21 +14351,25 @@ ${defaultKeySummary()}`)) {
       }
       return null;
     }
-    return { routeView, match };
+    return { routeView: viewFor, match };
   }
   var productionViews = createRouteViews(loader);
-  var routeView = (route) => productionViews.routeView(route);
+  function routeView(route) {
+    return productionViews.routeView(route);
+  }
   var matchOwnedRoute = (url) => productionViews.match(url);
 
   // src/router.ts
-  function parseRoute(href) {
+  function parseRoute(href, base = location.href) {
     let url;
+    let origin;
     try {
-      url = new URL(href, location.href);
+      url = new URL(href, base);
+      origin = new URL(base).origin;
     } catch {
       return { kind: "native", url: href };
     }
-    if (url.origin !== location.origin || !/^https?:$/.test(url.protocol)) {
+    if (url.origin !== origin || !/^https?:$/.test(url.protocol)) {
       return { kind: "native", url: url.href };
     }
     if (url.searchParams.has("eh_native")) {
@@ -14103,7 +14377,7 @@ ${defaultKeySummary()}`)) {
     }
     return matchOwnedRoute(url) ?? { kind: "native", url: url.href };
   }
-  function startLinkInterception(navigate) {
+  function startLinkInterception(navigate, doc = document) {
     const onClick = (event) => {
       if (event.defaultPrevented || event.button !== 0) {
         return;
@@ -14136,7 +14410,7 @@ ${defaultKeySummary()}`)) {
       event.preventDefault();
       navigate(href);
     };
-    document.addEventListener("click", onClick);
+    doc.addEventListener("click", onClick);
   }
 
   // src/site-ads.ts
@@ -19704,285 +19978,7 @@ body.fit-h.reader-continuous #reader {
     };
   }
 
-  // src/app.ts
-  var viewHost = null;
-  var navController = null;
-  var navId = 0;
-  var hiding = true;
-  var stopScrollRestore = null;
-  function restoreScroll(y) {
-    stopScrollRestore?.();
-    const restore = restoreScrollWhenReady(y, { advance: advancePage });
-    const controller = new AbortController;
-    const stop = () => {
-      controller.abort();
-      restore();
-    };
-    const options = { once: true, passive: true, signal: controller.signal };
-    window.addEventListener("wheel", stop, options);
-    window.addEventListener("touchstart", stop, options);
-    window.addEventListener("pointerdown", stop, options);
-    window.addEventListener("keydown", stop, options);
-    stopScrollRestore = stop;
-    return stop;
-  }
-  var lifecycle = createViewLifecycle({
-    host: () => viewHost,
-    closePanels: closeFavoriteMenu,
-    resetViewMode,
-    trackSticky: trackStickyChrome,
-    scrollTo: (y) => {
-      window.scrollTo(0, y);
-    },
-    restoreScroll
-  });
-  function hideDocument() {
-    const apply = () => {
-      if (!hiding) {
-        return;
-      }
-      const root = document.documentElement;
-      if (!root) {
-        setTimeout(apply, 0);
-        return;
-      }
-      root.style.setProperty("visibility", "hidden", "important");
-      root.style.setProperty("background", "#34353b", "important");
-    };
-    apply();
-  }
-  var stopNativeErrorGuard = null;
-  function guardAgainstNativeImageErrors() {
-    const guard = (event) => {
-      const target = event.target;
-      if (target instanceof Element && target.localName === "img" && (target.getAttribute("onerror") ?? "").includes("nl(")) {
-        event.stopImmediatePropagation();
-      }
-    };
-    window.addEventListener("error", guard, true);
-    stopNativeErrorGuard = () => {
-      window.removeEventListener("error", guard, true);
-      stopNativeErrorGuard = null;
-    };
-  }
-  function isNativeHandler(handler, marker) {
-    return typeof handler === "function" && handler.toString().includes(marker);
-  }
-  function detachNativePage() {
-    if (isNativeHandler(window.onresize, "update_window_extents")) {
-      window.onresize = null;
-    }
-    if (isNativeHandler(window.onpopstate, "apply_json_state")) {
-      window.onpopstate = null;
-    }
-    if (isNativeHandler(document.onkeydown, "holdingOverrideKey")) {
-      document.onkeydown = null;
-    }
-    if (isNativeHandler(document.onkeyup, "holdingOverrideKey")) {
-      document.onkeyup = null;
-    }
-    for (const image of document.querySelectorAll("#i3 img, #img")) {
-      image.onload = null;
-      image.onerror = null;
-      image.removeAttribute("src");
-    }
-  }
-  function revealDocument() {
-    hiding = false;
-    stopNativeErrorGuard?.();
-    const root = document.documentElement;
-    if (!root) {
-      return;
-    }
-    root.style.removeProperty("visibility");
-    root.style.removeProperty("background");
-  }
-  function ensureShell() {
-    if (viewHost) {
-      return;
-    }
-    for (const node of document.head.querySelectorAll('link[rel="stylesheet"], style')) {
-      node.remove();
-    }
-    if (!document.querySelector('meta[name="viewport"]')) {
-      document.head.append(el("meta", { name: "viewport", content: "width=device-width, initial-scale=1" }));
-    }
-    stopNativeErrorGuard?.();
-    detachNativePage();
-    document.body.replaceChildren();
-    document.body.className = "eh-body";
-    document.body.removeAttribute("style");
-    viewHost = el("main", { id: "eh-view", tabindex: "-1" });
-    const root = el("div", { id: "eh-root" }, viewHost);
-    const skip = el("a", { class: "eh-skip", href: "#eh-view" }, "Skip to content");
-    skip.addEventListener("click", (event) => {
-      event.preventDefault();
-      viewHost?.focus({ preventScroll: true });
-      window.scrollTo(0, 0);
-    });
-    document.body.append(skip, root, el("div", { id: "eh-loading", class: "eh-loading", "aria-hidden": "true" }));
-    startLinkInterception(navigate);
-    window.addEventListener("popstate", onPopState);
-    registerMenuCommands();
-    injectStyles();
-  }
-  function setLoading(active) {
-    document.body.classList.toggle("is-loading", active);
-    if (active) {
-      viewHost?.setAttribute("aria-busy", "true");
-    } else {
-      viewHost?.removeAttribute("aria-busy");
-    }
-  }
-  function viewContext(route, signal) {
-    return {
-      signal,
-      navigate,
-      reload: () => {
-        transition(route, window.scrollY, { fresh: true });
-      },
-      setLeaveGuard: (guard) => {
-        lifecycle.setLeaveGuard(guard);
-      }
-    };
-  }
-  function present2(route, view, data, scrollY, focus = false) {
-    lifecycle.mount({
-      route,
-      title: view.title(data),
-      scrollY,
-      focus,
-      render: (host, signal) => {
-        view.render(host, data, viewContext(route, signal));
-      }
-    });
-  }
-  function errorView(error, route) {
-    if (!viewHost) {
-      return;
-    }
-    let title = "Something went wrong";
-    let message;
-    let detail;
-    if (error instanceof RateLimitedError) {
-      title = "Rate limited";
-      message = "The site is throttling requests from this connection. Wait a moment, then retry.";
-      showBanner(error.text);
-    } else if (error instanceof RequestPurgedError) {
-      title = "Requests paused";
-      message = "The site is throttling requests from this connection, so this page was not loaded. " + "Wait a moment, then retry.";
-    } else if (error instanceof LoginRequiredError) {
-      title = "Sign in required";
-      message = `This page is not available to guests. Sign in to ${siteLabel()} and try again.`;
-    } else if (error instanceof HttpError && error.status === 404) {
-      title = "Page not found";
-      message = "The site does not serve this page. It may have moved, or the link may be wrong.";
-    } else if (error instanceof HttpError) {
-      message = `The site answered with an error (HTTP ${error.status}).`;
-    } else if (!navigator.onLine) {
-      title = "You appear to be offline";
-      message = "Check your connection, then retry.";
-    } else {
-      console.error(LOG_TAG, "unhandled route error", error);
-      message = "The page could not be loaded. Retry, or open the site's own version below.";
-      detail = "If this keeps happening, the site layout may have changed.";
-    }
-    const native = nativeUrl(route.url);
-    const pageTitle = documentTitle(title);
-    if (error instanceof LoginRequiredError) {
-      lifecycle.mount({
-        route,
-        title: pageTitle,
-        focus: true,
-        render: (host, signal) => {
-          host.append(siteNav(signal), loginGate({ title, message, nativeHref: native }));
-        }
-      });
-      return;
-    }
-    lifecycle.mount({
-      route,
-      title: pageTitle,
-      focus: true,
-      render: (host, signal) => {
-        host.append(siteNav(signal), statePanel({
-          tone: "error",
-          headingLevel: 1,
-          title,
-          text: message,
-          detail,
-          actions: [
-            {
-              label: "Retry",
-              primary: true,
-              onClick: () => {
-                transition(parseRoute(location.href), null);
-              }
-            },
-            nativePageAction(native)
-          ]
-        }));
-      }
-    });
-  }
-  function saveScroll() {
-    const state = history.state ?? {};
-    history.replaceState({ ...state, eh: true, scrollY: window.scrollY }, "", location.href);
-  }
-  async function transition(route, scrollY, options = {}) {
-    const id = ++navId;
-    navController?.abort();
-    navController = new AbortController;
-    setLoading(true);
-    try {
-      const view = routeView(route);
-      const data = await view.load(route, navController.signal, options);
-      if (id !== navId) {
-        return;
-      }
-      present2(route, view, data, scrollY, true);
-    } catch (error) {
-      if (id !== navId || isAbortError(error)) {
-        return;
-      }
-      if (error instanceof ParseMismatchError) {
-        console.error(LOG_TAG, "parse mismatch, opening the native page", error);
-        location.replace(nativeUrl(route.url));
-        return;
-      }
-      console.error(LOG_TAG, "navigation failed", error);
-      errorView(error, route);
-    } finally {
-      if (id === navId) {
-        setLoading(false);
-      }
-    }
-  }
-  function navigate(url, options = {}) {
-    let route = parseRoute(url);
-    if (!lifecycle.guard()) {
-      return;
-    }
-    if (route.kind === "native") {
-      location.href = url;
-      return;
-    }
-    route = applyPersistedListFilters(route);
-    saveScroll();
-    const fromGallery = route.kind === "viewer" && lifecycle.currentRoute()?.kind === "gallery";
-    const previous = history.state ?? {};
-    const state = {
-      eh: true,
-      scrollY: 0,
-      fromGallery: options.replace ? previous.fromGallery === true : fromGallery
-    };
-    if (options.replace) {
-      history.replaceState(state, "", route.url);
-    } else {
-      history.pushState(state, "", route.url);
-    }
-    transition(route, null);
-  }
+  // src/app-shell.ts
   function isFragmentOnlyChange(current, next) {
     if (current === "") {
       return false;
@@ -19995,100 +19991,412 @@ body.fit-h.reader-continuous #reader {
       return false;
     }
   }
-  function onPopState(event) {
-    const currentUrl = lifecycle.currentRoute()?.url ?? "";
-    let route = parseRoute(location.href);
-    if (route.kind === "native") {
-      if (!lifecycle.guard()) {
-        history.pushState(event.state, "", currentUrl);
-        return;
-      }
-      location.reload();
-      return;
+  function createAppShell(env) {
+    const doc = env.document;
+    const viewWindow = env.window;
+    const { routeView } = env.views;
+    let viewHost = null;
+    let navController = null;
+    let navId = 0;
+    let hiding = true;
+    let stopScrollRestore = null;
+    let stopNativeErrorGuard = null;
+    function historyState() {
+      const state = env.history.state;
+      return typeof state === "object" && state !== null ? state : {};
     }
-    if (isFragmentOnlyChange(currentUrl, location.href)) {
-      return;
+    function restoreScroll(y) {
+      stopScrollRestore?.();
+      const restore = restoreScrollWhenReady(y, {
+        advance: advancePage,
+        scrollTo: (target) => viewWindow.scrollTo(0, target),
+        scrollY: () => viewWindow.scrollY,
+        scrollHeight: () => doc.documentElement.scrollHeight,
+        frame: (callback) => viewWindow.requestAnimationFrame(callback),
+        cancelFrame: (handle) => viewWindow.cancelAnimationFrame(handle)
+      });
+      const controller = new AbortController;
+      const stop = () => {
+        controller.abort();
+        restore();
+      };
+      const options = {
+        once: true,
+        passive: true,
+        signal: controller.signal
+      };
+      viewWindow.addEventListener("wheel", stop, options);
+      viewWindow.addEventListener("touchstart", stop, options);
+      viewWindow.addEventListener("pointerdown", stop, options);
+      viewWindow.addEventListener("keydown", stop, options);
+      stopScrollRestore = stop;
+      return stop;
     }
-    if (!lifecycle.guard()) {
-      history.pushState(event.state, "", currentUrl);
-      return;
-    }
-    route = applyPersistedListFilters(route);
-    if (route.url !== location.href) {
-      history.replaceState(event.state, "", route.url);
-    }
-    const state = event.state;
-    transition(route, state?.scrollY ?? 0);
-  }
-  function startOwned(initialRoute) {
-    const view = routeView(initialRoute);
-    if (isLoginPage(document)) {
-      throw new LoginRequiredError;
-    }
-    if (isNotFoundPage(document)) {
-      ensureShell();
-      errorView(new HttpError(404, location.href), initialRoute);
-      revealDocument();
-      return;
-    }
-    const initial = view.parse(document, initialRoute);
-    ensureShell();
-    history.replaceState({ eh: true, scrollY: 0 }, "", location.href);
-    try {
-      present2(initialRoute, view, initial, 0, false);
-    } catch (error) {
-      console.error(LOG_TAG, "initial render failed", error);
-      errorView(error, initialRoute);
-    }
-    revealDocument();
-    if (getSettings().tagSuggestions) {
-      loadTagIndex().catch((error) => log("tag index prefetch failed", error));
-    }
-    log("ready", getSettings().fitHeight ? "fit-height" : "natural-width");
-  }
-  function boot() {
-    let route = parseRoute(location.href);
-    if (route.kind === "native") {
-      return;
-    }
-    blockSiteAds();
-    hideDocument();
-    guardAgainstNativeImageErrors();
-    const effective = applyPersistedListFilters(route);
-    if (effective !== route) {
-      location.replace(effective.url);
-      return;
-    }
-    route = effective;
-    if (route.kind === "list") {
-      const requestUrl = listRequestUrl(route.url);
-      if (requestUrl !== route.url) {
-        location.replace(requestUrl);
-        return;
-      }
-    }
-    const start = () => {
-      try {
-        startOwned(route);
-      } catch (error) {
-        console.error(LOG_TAG, "startup failed", error);
-        if (error instanceof ParseMismatchError) {
-          revealDocument();
-          location.replace(nativeUrl(location.href));
+    const lifecycle = createViewLifecycle({
+      host: () => viewHost,
+      closePanels: closeFavoriteMenu,
+      resetViewMode,
+      trackSticky: trackStickyChrome,
+      scrollTo: (y) => viewWindow.scrollTo(0, y),
+      restoreScroll
+    });
+    function hideDocument() {
+      const apply = () => {
+        if (!hiding) {
           return;
         }
-        if (error instanceof LoginRequiredError) {
-          ensureShell();
-          errorView(error, route);
+        const root = doc.documentElement;
+        if (!root) {
+          env.setTimeout(apply, 0);
+          return;
         }
+        root.style.setProperty("visibility", "hidden", "important");
+        root.style.setProperty("background", "#34353b", "important");
+      };
+      apply();
+    }
+    function guardAgainstNativeImageErrors() {
+      const guard = (event) => {
+        const target = event.target;
+        if (target instanceof Element && target.localName === "img" && (target.getAttribute("onerror") ?? "").includes("nl(")) {
+          event.stopImmediatePropagation();
+        }
+      };
+      viewWindow.addEventListener("error", guard, true);
+      stopNativeErrorGuard = () => {
+        viewWindow.removeEventListener("error", guard, true);
+        stopNativeErrorGuard = null;
+      };
+    }
+    function isNativeHandler(handler, marker) {
+      return typeof handler === "function" && handler.toString().includes(marker);
+    }
+    function detachNativePage() {
+      if (isNativeHandler(viewWindow.onresize, "update_window_extents")) {
+        viewWindow.onresize = null;
+      }
+      if (isNativeHandler(viewWindow.onpopstate, "apply_json_state")) {
+        viewWindow.onpopstate = null;
+      }
+      if (isNativeHandler(doc.onkeydown, "holdingOverrideKey")) {
+        doc.onkeydown = null;
+      }
+      if (isNativeHandler(doc.onkeyup, "holdingOverrideKey")) {
+        doc.onkeyup = null;
+      }
+      for (const image of doc.querySelectorAll("#i3 img, #img")) {
+        image.onload = null;
+        image.onerror = null;
+        image.removeAttribute("src");
+      }
+    }
+    function revealDocument() {
+      hiding = false;
+      stopNativeErrorGuard?.();
+      const root = doc.documentElement;
+      if (!root) {
+        return;
+      }
+      root.style.removeProperty("visibility");
+      root.style.removeProperty("background");
+    }
+    function ensureShell() {
+      if (viewHost) {
+        return;
+      }
+      for (const node of doc.head.querySelectorAll('link[rel="stylesheet"], style')) {
+        node.remove();
+      }
+      if (!doc.querySelector('meta[name="viewport"]')) {
+        doc.head.append(el("meta", { name: "viewport", content: "width=device-width, initial-scale=1" }));
+      }
+      stopNativeErrorGuard?.();
+      detachNativePage();
+      doc.body.replaceChildren();
+      doc.body.className = "eh-body";
+      doc.body.removeAttribute("style");
+      viewHost = el("main", { id: "eh-view", tabindex: "-1" });
+      const root = el("div", { id: "eh-root" }, viewHost);
+      const skip = el("a", { class: "eh-skip", href: "#eh-view" }, "Skip to content");
+      skip.addEventListener("click", (event) => {
+        event.preventDefault();
+        viewHost?.focus({ preventScroll: true });
+        viewWindow.scrollTo(0, 0);
+      });
+      doc.body.append(skip, root, el("div", { id: "eh-loading", class: "eh-loading", "aria-hidden": "true" }));
+      startLinkInterception(navigate, doc);
+      viewWindow.addEventListener("popstate", onPopState);
+      registerMenuCommands();
+      injectStyles();
+    }
+    function setLoading(active) {
+      doc.body.classList.toggle("is-loading", active);
+      if (active) {
+        viewHost?.setAttribute("aria-busy", "true");
+      } else {
+        viewHost?.removeAttribute("aria-busy");
+      }
+    }
+    function viewContext(route, signal) {
+      return {
+        signal,
+        navigate,
+        reload: () => {
+          transition(route, viewWindow.scrollY, { fresh: true });
+        },
+        setLeaveGuard: (guard) => {
+          lifecycle.setLeaveGuard(guard);
+        }
+      };
+    }
+    function present(route, view, data, scrollY, focus = false) {
+      lifecycle.mount({
+        route,
+        title: view.title(data),
+        scrollY,
+        focus,
+        render: (host, signal) => {
+          view.render(host, data, viewContext(route, signal), route);
+        }
+      });
+    }
+    function errorView(error, route) {
+      if (!viewHost) {
+        return;
+      }
+      let title = "Something went wrong";
+      let message;
+      let detail;
+      if (error instanceof RateLimitedError) {
+        title = "Rate limited";
+        message = "The site is throttling requests from this connection. Wait a moment, then retry.";
+        showBanner(error.text);
+      } else if (error instanceof RequestPurgedError) {
+        title = "Requests paused";
+        message = "The site is throttling requests from this connection, so this page was not loaded. " + "Wait a moment, then retry.";
+      } else if (error instanceof LoginRequiredError) {
+        title = "Sign in required";
+        message = `This page is not available to guests. Sign in to ${siteLabel()} and try again.`;
+      } else if (error instanceof HttpError && error.status === 404) {
+        title = "Page not found";
+        message = "The site does not serve this page. It may have moved, or the link may be wrong.";
+      } else if (error instanceof HttpError) {
+        message = `The site answered with an error (HTTP ${error.status}).`;
+      } else if (!env.navigator.onLine) {
+        title = "You appear to be offline";
+        message = "Check your connection, then retry.";
+      } else {
+        console.error(LOG_TAG, "unhandled route error", error);
+        message = "The page could not be loaded. Retry, or open the site's own version below.";
+        detail = "If this keeps happening, the site layout may have changed.";
+      }
+      const native = nativeUrl(route.url);
+      const pageTitle = documentTitle(title);
+      if (error instanceof LoginRequiredError) {
+        lifecycle.mount({
+          route,
+          title: pageTitle,
+          focus: true,
+          render: (host, signal) => {
+            host.append(siteNav(signal), loginGate({ title, message, nativeHref: native }));
+          }
+        });
+        return;
+      }
+      lifecycle.mount({
+        route,
+        title: pageTitle,
+        focus: true,
+        render: (host, signal) => {
+          host.append(siteNav(signal), statePanel({
+            tone: "error",
+            headingLevel: 1,
+            title,
+            text: message,
+            detail,
+            actions: [
+              {
+                label: "Retry",
+                primary: true,
+                onClick: () => {
+                  transition(parseRoute(env.location.href, env.url()), null);
+                }
+              },
+              nativePageAction(native)
+            ]
+          }));
+        }
+      });
+    }
+    function saveScroll() {
+      env.history.replaceState({ ...historyState(), eh: true, scrollY: viewWindow.scrollY }, "", env.url());
+    }
+    async function transition(route, scrollY, options = {}) {
+      const id = ++navId;
+      navController?.abort();
+      navController = new AbortController;
+      setLoading(true);
+      try {
+        const view = routeView(route);
+        const data = await view.load(route, navController.signal, options);
+        if (id !== navId) {
+          return;
+        }
+        present(route, view, data, scrollY, true);
+      } catch (error) {
+        if (id !== navId || isAbortError(error)) {
+          return;
+        }
+        if (error instanceof ParseMismatchError) {
+          console.error(LOG_TAG, "parse mismatch, opening the native page", error);
+          env.location.replace(nativeUrl(route.url));
+          return;
+        }
+        console.error(LOG_TAG, "navigation failed", error);
+        errorView(error, route);
+      } finally {
+        if (id === navId) {
+          setLoading(false);
+        }
+      }
+    }
+    function navigate(url, options = {}) {
+      const route = parseRoute(url, env.url());
+      if (!lifecycle.guard()) {
+        return;
+      }
+      if (route.kind === "native") {
+        env.location.assign(url);
+        return;
+      }
+      const replace = options.replace === true;
+      const prepared = routeView(route).prepare(route, {
+        previous: lifecycle.currentRoute(),
+        replace,
+        previousState: historyState()
+      });
+      saveScroll();
+      const state = { eh: true, scrollY: 0, ...prepared.state };
+      if (replace) {
+        env.history.replaceState(state, "", prepared.route.url);
+      } else {
+        env.history.pushState(state, "", prepared.route.url);
+      }
+      transition(prepared.route, null);
+    }
+    function onPopState(event) {
+      const currentUrl = lifecycle.currentRoute()?.url ?? "";
+      const route = parseRoute(env.location.href, env.url());
+      if (route.kind === "native") {
+        if (!lifecycle.guard()) {
+          env.history.pushState(event.state, "", currentUrl);
+          return;
+        }
+        env.location.reload();
+        return;
+      }
+      if (isFragmentOnlyChange(currentUrl, env.location.href)) {
+        return;
+      }
+      if (!lifecycle.guard()) {
+        env.history.pushState(event.state, "", currentUrl);
+        return;
+      }
+      const prepared = routeView(route).prepare(route, {
+        previous: lifecycle.currentRoute(),
+        replace: false,
+        previousState: historyState()
+      });
+      if (prepared.route.url !== env.location.href) {
+        env.history.replaceState(event.state, "", prepared.route.url);
+      }
+      const state = event.state;
+      transition(prepared.route, state?.scrollY ?? 0);
+    }
+    function startOwned(initialRoute) {
+      const view = routeView(initialRoute);
+      if (isLoginPage(doc)) {
+        throw new LoginRequiredError;
+      }
+      if (isNotFoundPage(doc)) {
+        ensureShell();
+        errorView(new HttpError(404, env.location.href), initialRoute);
         revealDocument();
+        return;
+      }
+      const initial = view.parse(doc, initialRoute);
+      ensureShell();
+      env.history.replaceState({ eh: true, scrollY: 0 }, "", env.location.href);
+      try {
+        present(initialRoute, view, initial, 0, false);
+      } catch (error) {
+        console.error(LOG_TAG, "initial render failed", error);
+        errorView(error, initialRoute);
+      }
+      revealDocument();
+      if (getSettings().tagSuggestions) {
+        loadTagIndex().catch((error) => log("tag index prefetch failed", error));
+      }
+      log("ready", getSettings().fitHeight ? "fit-height" : "natural-width");
+    }
+    return {
+      boot() {
+        const route = parseRoute(env.url(), env.url());
+        if (route.kind === "native") {
+          return;
+        }
+        blockSiteAds();
+        hideDocument();
+        guardAgainstNativeImageErrors();
+        const prepared = routeView(route).prepare(route, {
+          previous: null,
+          replace: true,
+          previousState: {}
+        });
+        if (prepared.bootUrl !== null) {
+          env.location.replace(prepared.bootUrl);
+          return;
+        }
+        const start = () => {
+          try {
+            startOwned(prepared.route);
+          } catch (error) {
+            console.error(LOG_TAG, "startup failed", error);
+            if (error instanceof ParseMismatchError) {
+              revealDocument();
+              env.location.replace(nativeUrl(env.location.href));
+              return;
+            }
+            if (error instanceof LoginRequiredError) {
+              ensureShell();
+              errorView(error, prepared.route);
+            }
+            revealDocument();
+          }
+        };
+        if (doc.readyState === "loading") {
+          doc.addEventListener("DOMContentLoaded", start, { once: true });
+        } else {
+          start();
+        }
       }
     };
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", start, { once: true });
-    } else {
-      start();
-    }
+  }
+
+  // src/app.ts
+  var environment = {
+    url: () => location.href,
+    location,
+    history,
+    document,
+    navigator,
+    window,
+    setTimeout: (handler, timeoutMs) => window.setTimeout(handler, timeoutMs),
+    views: { routeView }
+  };
+  var shell = createAppShell(environment);
+  function boot() {
+    shell.boot();
   }
 
   // src/main.ts

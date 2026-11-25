@@ -97,10 +97,13 @@ describe("tag combobox", () => {
         ],
       },
       1,
-      new Map([
-        [tagKeyId("english"), 500],
-        [tagKeyId("en"), 5],
-      ]),
+      {
+        counts: new Map([
+          [tagKeyId("english"), 500],
+          [tagKeyId("en"), 5],
+        ]),
+        max: 500,
+      },
     );
     const { open } = harness("en", new Map(), undefined, popular);
     open();

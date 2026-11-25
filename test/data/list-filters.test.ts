@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, test } from "bun:test";
 
 import { applyPersistedListFilters, saveListFilters } from "../../src/data/list-filters";
 import { emptySearchQuery } from "../../src/parse/query";
-import type { Route } from "../../src/router";
 import { parseRoute } from "../../src/router";
+import type { RouteOf } from "../../src/routes/types";
 
-function listing(url = "https://e-hentai.org/"): Route {
+function listing(url = "https://e-hentai.org/"): RouteOf<"list"> {
   const route = parseRoute(url);
   if (route.kind !== "list") {
     throw new Error(`expected a list route for ${url}`);

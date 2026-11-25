@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { coreVocabularyGroups } from "../../src/tags/core";
+import { coreTagData } from "../../src/tags/core";
 import { resetTagCounts } from "../../src/tags/counts";
 import { getTagIndex, loadTagIndex, resetTagIndex, tagId } from "../../src/tags/db";
 import { encodeTagVocabulary } from "../../src/tags/index-codec";
@@ -26,12 +26,13 @@ afterEach(() => {
 
 describe("core tag vocabulary", () => {
   test("embeds a usable slice of every namespace", () => {
-    const groups = coreVocabularyGroups();
+    const data = coreTagData();
 
-    expect(groups).not.toBeNull();
-    if (!groups) {
+    expect(data).not.toBeNull();
+    if (!data) {
       throw new Error("expected the embedded vocabulary to decode");
     }
+    const groups = data.groups;
     expect(groups.size).toBe(12);
     const total = [...groups.values()].reduce((sum, keys) => sum + keys.length, 0);
     expect(total).toBeGreaterThan(1000);
@@ -40,6 +41,8 @@ describe("core tag vocabulary", () => {
     }
     expect(groups.get("language")).toContain("english");
     expect(groups.get("female")).toContain("big breasts");
+    expect(data.counts?.max).toBeGreaterThan(1_000_000);
+    expect(data.counts?.counts.size).toBeGreaterThan(800);
   });
 
   test("serves the core with empty storage without touching the network", () => {
@@ -55,6 +58,9 @@ describe("core tag vocabulary", () => {
     expect(index?.updated).toBe(0);
     expect(index?.lookup.get(tagId("language", "english"))).toBeDefined();
     expect(index?.lookup.get(tagId("female", "big breasts"))).toBeDefined();
+    // First-run suggestions rank with the same popularity the core was selected by.
+    expect(index?.maxCount).toBeGreaterThan(1_000_000);
+    expect(index?.lookup.get(tagId("language", "english"))?.count).toBeGreaterThan(0);
   });
 
   test("loads the core while the full download is still pending", async () => {

@@ -4,9 +4,9 @@ import { dirname } from "node:path";
 import type { StorageAdapter } from "../src/store";
 
 /**
- * `src/ui/styles.ts` imports Tailwind's generated sheet with a text import, and `app.ts` pulls that
- * in at module load. The sheet is a build artifact under `.cache/`, so a fresh checkout would fail
- * before the suite runs; an empty sheet keeps the boot tests independent of a build.
+ * `src/ui/styles.ts` imports Tailwind's generated sheet with a text import, and the app shell pulls
+ * that in at module load. The sheet is a build artifact under `.cache/`, so a fresh checkout would
+ * fail before the suite runs; an empty sheet keeps the boot tests independent of a build.
  */
 const generatedSheet = new URL("../.cache/app.css", import.meta.url);
 if (!existsSync(generatedSheet)) {

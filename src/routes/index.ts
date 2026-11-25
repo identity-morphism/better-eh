@@ -1,4 +1,11 @@
-import { listRequestUrl } from "../data/list-date";
+import {
+  filterByDateRange,
+  isDateRangeActive,
+  listRequestUrl,
+  withDateRange,
+} from "../data/list-date";
+import type { DateRange } from "../data/list-date";
+import { applyPersistedListFilters } from "../data/list-filters";
 import type { HtmlResponse } from "../fetch/loader";
 import { loader } from "../fetch/loader";
 import type { Priority } from "../net/priority";
@@ -53,9 +60,12 @@ import {
   VIEWER_PATH,
 } from "./identity";
 import type {
+  ListRouteData,
   LoadOptions,
   OwnedKind,
   OwnedRoute,
+  PrepareContext,
+  PreparedRoute,
   Route,
   RouteDataByKind,
   RouteOf,
@@ -89,6 +99,8 @@ interface DocumentSpec<K extends OwnedKind, I = unknown> {
   sanity?: (data: RouteDataByKind[K], doc: Document) => void;
   /** Parse one appended page from the same document; omitted when the route does not paginate. */
   page?: (doc: Document, url: string) => CursorPage<I>;
+  /** Apply this route's paging policy to the append feed. */
+  feed?: (route: RouteOf<K>, source: PageSource<I>) => PageSource<I>;
   render(
     host: HTMLElement,
     data: RouteDataByKind[K],
@@ -133,7 +145,15 @@ function documentView<K extends OwnedKind, I = unknown>(
           return page(doc, finalUrl);
         };
 
+  const feed = (route: RouteOf<K>): PageSource<I> | undefined => {
+    if (pageSource === undefined) {
+      return undefined;
+    }
+    return spec.feed === undefined ? pageSource : spec.feed(route, pageSource);
+  };
+
   return {
+    prepare: (route) => ({ route, bootUrl: null, state: {} }),
     load: async (route, signal, options) => {
       const { doc, url } = await fetchDocument(
         spec.request?.(route) ?? route.url,
@@ -150,10 +170,87 @@ function documentView<K extends OwnedKind, I = unknown>(
       spec.sanity?.(data, doc);
       return data;
     },
-    render: (host, data, ctx) => spec.render(host, data, ctx, pageSource),
+    render: (host, data, ctx, route) => spec.render(host, data, ctx, feed(route)),
     title: (data) => spec.title(data),
-    pageSource,
+    feed,
   };
+}
+
+/** The client-side posted-date range a list route carries. */
+function listRange(route: RouteOf<"list">): DateRange {
+  return { since: route.query.since, until: route.query.until };
+}
+
+/**
+ * Parse a list page under the route's own date policy: the initial page is bounded and paged links
+ * carry the range, so the view never has to re-wrap the feed.
+ */
+function listRouteData(route: RouteOf<"list">, doc: Document, url: string): ListRouteData {
+  const page = parseListPage(doc, url);
+  const range = listRange(route);
+  if (!isDateRangeActive(range)) {
+    return { page, query: route.query, scope: route.scope };
+  }
+  const filtered = filterByDateRange(page.items, range);
+  return {
+    page: {
+      ...page,
+      items: filtered.items,
+      nextHref:
+        page.nextHref !== null && !filtered.crossedSince
+          ? withDateRange(page.nextHref, range)
+          : null,
+    },
+    query: route.query,
+    scope: route.scope,
+  };
+}
+
+/** The list route's append feed: every appended page is bounded and its next link carried. */
+function listFeed(route: RouteOf<"list">, source: PageSource<ListItem>): PageSource<ListItem> {
+  const range = listRange(route);
+  if (!isDateRangeActive(range)) {
+    return source;
+  }
+  return async (url, signal) => {
+    const page = await source(withDateRange(url, range), signal);
+    const kept = filterByDateRange(page.items, range);
+    return {
+      items: kept.items,
+      next: kept.crossedSince || page.next === null ? null : withDateRange(page.next, range),
+    };
+  };
+}
+
+/**
+ * Prepare a listing address: remembered filters fill a bare listing, and a cold load starts the
+ * site's cursor at the range's newest day. The browser must first load that effective address;
+ * in-app navigation loads it through the row's request translation instead.
+ */
+function prepareListRoute(
+  route: RouteOf<"list">,
+  context: PrepareContext,
+): PreparedRoute<RouteOf<"list">> {
+  const filtered = applyPersistedListFilters(route);
+  const requestUrl = listRequestUrl(filtered.url);
+  const bootUrl =
+    context.previous === null && (filtered.url !== route.url || requestUrl !== filtered.url)
+      ? requestUrl
+      : null;
+  return { route: filtered, bootUrl, state: {} };
+}
+
+/**
+ * The reader keeps the marker that lets its back action pop the gallery entry instead of opening a
+ * paged gallery URL; replace-navigations (next/previous page) preserve the current marker.
+ */
+function prepareViewerRoute(
+  route: RouteOf<"viewer">,
+  context: PrepareContext,
+): PreparedRoute<RouteOf<"viewer">> {
+  const remembered = context.previousState.fromGallery === true;
+  const fromGallery = context.replace ? remembered : context.previous?.kind === "gallery";
+  return { route, bootUrl: null, state: { fromGallery } };
 }
 
 /**
@@ -164,6 +261,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
   const table: RouteTable = {
     viewer: {
       match: (url) => (VIEWER_PATH.test(url.pathname) ? { kind: "viewer", url: url.href } : null),
+      prepare: prepareViewerRoute,
       // The loader returns parsed pages itself, so only the initial document needs a parse call.
       load: async (route, signal) => {
         const data = await deps.viewerPage(route.url, {
@@ -233,16 +331,13 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       ...documentView<"list", ListItem>(deps, {
         tag: "list",
         request: (route) => listRequestUrl(route.url),
-        parse: (doc, url, route) => ({
-          page: parseListPage(doc, url),
-          query: route.query,
-          scope: route.scope,
-        }),
+        parse: (doc, url, route) => listRouteData(route, doc, url),
         sanity: (data, doc) => assertListPage(data.page, doc),
         page: (doc, url) => {
           const page = parseListPage(doc, url);
           return { items: page.items, next: page.nextHref };
         },
+        feed: listFeed,
         render: (host, data, ctx, pageSource) =>
           renderList(host, data.page, data.query, ctx, data.scope, { pageSource }),
         title: (data) => {
@@ -250,6 +345,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
           return documentTitle(listLabels(data.query, data.scope, pathTag).title);
         },
       }),
+      prepare: prepareListRoute,
     },
     torrents: {
       match: (url) =>
@@ -349,9 +445,9 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
   };
 
-  function routeView<K extends OwnedKind>(route: RouteOf<K>): RouteViewFor<K>;
-  function routeView(route: Route): RouteView<unknown>;
-  function routeView(route: Route): RouteView<unknown> {
+  function viewFor<K extends OwnedKind>(route: RouteOf<K>): RouteViewFor<K>;
+  function viewFor(route: Route): RouteView<unknown>;
+  function viewFor(route: Route): RouteView<unknown> {
     if (route.kind === "native" || !Object.hasOwn(table, route.kind)) {
       throw new Error(`Cannot render a ${route.kind} route`);
     }
@@ -370,13 +466,14 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     return null;
   }
 
-  return { routeView, match };
+  return { routeView: viewFor, match };
 }
 
 const productionViews = createRouteViews(loader);
 
-export const routeView: RouteViews["routeView"] = (route: Route) =>
-  productionViews.routeView(route);
+export function routeView(route: Route): RouteView<unknown> {
+  return productionViews.routeView(route);
+}
 
 /** Production owned-route classifier, used by `parseRoute` after its origin checks. */
 export const matchOwnedRoute: RouteViews["match"] = (url: URL) => productionViews.match(url);

@@ -2,7 +2,7 @@ import type { GalleryPost } from "../data/gallery-actions";
 import { rateGallery } from "../data/gallery-actions";
 import type { GalleryApiConfig, GalleryRating } from "../types";
 import { buttonEl, el } from "./dom";
-import { errorText } from "./error-text";
+import { createPendingAction } from "./pending-action";
 import { HALF_STEPS, halfClass, litHalves, starGlyphs } from "./stars";
 import { countText } from "./text";
 import { showToast } from "./toast";
@@ -54,7 +54,7 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
   const cells: HTMLElement[] = [];
   /** Buttons and the half-cell range each one owns; coarse pointers own two cells per button. */
   const targets: { button: HTMLButtonElement; last: number }[] = [];
-  let pending = false;
+  const ratingAction = createPendingAction();
   let resetTimer: number | undefined;
   let current = rating.user;
 
@@ -82,13 +82,13 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
   };
 
   const preview = (half: number): void => {
-    if (!pending) {
+    if (!ratingAction.busy) {
       paint(half / 2, false);
     }
   };
 
   const unpreview = (): void => {
-    if (!pending) {
+    if (!ratingAction.busy) {
       paint(restingValue(), false);
     }
   };
@@ -99,37 +99,39 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
     }
   };
 
-  const submit = async (starCount: number): Promise<void> => {
-    if (pending) {
-      return;
-    }
+  const submit = (starCount: number): void => {
     const previous = current;
-    pending = true;
-    // Disabling the targets would drop focus to <body> as soon as one is clicked. The `pending`
-    // guard already rejects a second submission, so expose the wait instead.
-    stars.setAttribute("aria-busy", "true");
-    label.textContent = "Saving…";
-    paint(starCount, false);
-    try {
-      const result = await rateGallery(config, starCount, { post });
-      if (signal.aborted) {
-        return;
-      }
-      label.textContent = "Thanks for rating!";
-      if (result.votes !== null) {
-        count.textContent = countText(result.votes, "vote");
-      }
-      setValue(result.user ?? starCount);
-      destroy();
-      resetTimer = window.setTimeout(() => {
-        label.textContent = averageLabel({
-          ...rating,
-          average: result.average ?? rating.average,
-          user: result.user ?? starCount,
-        });
-      }, CONFIRM_MS);
-    } catch (error) {
-      if (!signal.aborted) {
+    void ratingAction.run({
+      run: () => rateGallery(config, starCount, { post }),
+      signal,
+      setBusy: (busy) => {
+        // Disabling the targets would drop focus to <body> as soon as one is clicked. The action's
+        // guard already rejects a second submission, so expose the wait instead.
+        if (busy) {
+          stars.setAttribute("aria-busy", "true");
+          label.textContent = "Saving…";
+          paint(starCount, false);
+        } else {
+          stars.removeAttribute("aria-busy");
+        }
+      },
+      success: (result) => {
+        label.textContent = "Thanks for rating!";
+        if (result.votes !== null) {
+          count.textContent = countText(result.votes, "vote");
+        }
+        setValue(result.user ?? starCount);
+        destroy();
+        resetTimer = window.setTimeout(() => {
+          label.textContent = averageLabel({
+            ...rating,
+            average: result.average ?? rating.average,
+            user: result.user ?? starCount,
+          });
+        }, CONFIRM_MS);
+      },
+      failure: "Something went wrong.",
+      failed: (message) => {
         // Put the rejected rating back: the server did not accept it. The message is temporary so
         // the average (or "Not yet rated") comes back instead of being replaced for good.
         current = previous;
@@ -139,12 +141,9 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
         resetTimer = window.setTimeout(() => {
           label.textContent = averageLabel(rating);
         }, FAILURE_MS);
-        showToast(errorText(error));
-      }
-    } finally {
-      pending = false;
-      stars.removeAttribute("aria-busy");
-    }
+        showToast(message);
+      },
+    });
   };
 
   // `any-pointer` keeps touch working on hybrid laptops, where the primary pointer is still a
@@ -164,7 +163,7 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
         "aria-pressed": "false",
         onfocusin: () => preview(star * 2),
         onclick: () => {
-          void submit(star);
+          submit(star);
         },
       });
       const firstCell = (star - 1) * 2;
@@ -190,7 +189,7 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
         onpointerenter: () => preview(half),
         onfocusin: () => preview(half),
         onclick: () => {
-          void submit(half / 2);
+          submit(half / 2);
         },
       });
       button.append(...starGlyphs());

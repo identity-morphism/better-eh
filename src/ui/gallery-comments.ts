@@ -7,6 +7,7 @@ import {
 import type { GalleryApiConfig, GalleryComment, GalleryData } from "../types";
 import { appendChildren, buttonEl, el } from "./dom";
 import { errorText } from "./error-text";
+import { createPendingAction } from "./pending-action";
 import { showToast } from "./toast";
 
 /** Read a signal without letting control-flow narrowing carry a stale value across an await. */
@@ -83,49 +84,44 @@ function commentCard(
     config === null ? el("span", { class: "comment-score-wrap" }, score) : voteButtons,
   );
 
-  let pending = false;
-  const setPending = (busy: boolean): void => {
-    pending = busy;
-    card.classList.toggle("is-busy", busy);
-    if (busy) {
-      card.setAttribute("aria-busy", "true");
-    } else {
-      card.removeAttribute("aria-busy");
-    }
-  };
-
-  const cast = async (vote: 1 | -1): Promise<void> => {
-    if (pending || config === null) {
+  const voting = createPendingAction();
+  const cast = (vote: 1 | -1): void => {
+    if (config === null) {
       return;
     }
-    setPending(true);
-    try {
-      const result = await voteComment(config, comment.id, vote, { post: deps.post });
-      if (signal.aborted) {
-        return;
-      }
-      score.textContent = scoreText(result.score);
-      up.setAttribute("aria-pressed", result.vote > 0 ? "true" : "false");
-      down.setAttribute("aria-pressed", result.vote < 0 ? "true" : "false");
-    } catch (error) {
-      if (!signal.aborted) {
-        showToast(errorText(error));
-      }
-    } finally {
-      setPending(false);
-    }
+    void voting.run({
+      run: () => voteComment(config, comment.id, vote, { post: deps.post }),
+      signal,
+      setBusy: (busy) => {
+        card.classList.toggle("is-busy", busy);
+        if (busy) {
+          card.setAttribute("aria-busy", "true");
+        } else {
+          card.removeAttribute("aria-busy");
+        }
+      },
+      success: (result) => {
+        score.textContent = scoreText(result.score);
+        up.setAttribute("aria-pressed", result.vote > 0 ? "true" : "false");
+        down.setAttribute("aria-pressed", result.vote < 0 ? "true" : "false");
+      },
+      failure: "Something went wrong.",
+      failed: (message) => {
+        showToast(message);
+      },
+    });
   };
 
   if (config !== null) {
-    up.addEventListener("click", () => void cast(1), { signal });
-    down.addEventListener("click", () => void cast(-1), { signal });
+    up.addEventListener("click", () => cast(1), { signal });
+    down.addEventListener("click", () => cast(-1), { signal });
   }
 
   const body = el("div", { class: "comment-body", text: comment.body });
   const bodyHost = el("div", { class: "comment-body-host" }, body);
 
+  const editingAction = createPendingAction();
   let editing = false;
-  let saving = false;
   const editButton =
     config !== null && comment.editable
       ? buttonEl({
@@ -182,21 +178,13 @@ function commentCard(
           (event) => {
             event.preventDefault();
             const text = textarea.value.trim();
-            if (saving) {
-              return;
-            }
             if (text === "") {
               status.textContent = "Comment cannot be empty.";
               return;
             }
-            saving = true;
-            save.disabled = true;
-            cancel.disabled = true;
-            save.textContent = "Saving…";
-            status.textContent = "Saving…";
 
-            void (async () => {
-              try {
+            void editingAction.run({
+              run: async () => {
                 await edit(comment.id, text);
                 if (signal.aborted) {
                   return;
@@ -214,18 +202,22 @@ function commentCard(
                     showToast(errorText(error));
                   }
                 }
-              } catch (error) {
-                if (!signal.aborted) {
-                  status.textContent = "Save failed.";
-                  showToast(errorText(error));
+              },
+              signal,
+              setBusy: (busy) => {
+                save.disabled = busy;
+                cancel.disabled = busy;
+                save.textContent = busy ? "Saving…" : "Save";
+                if (busy) {
+                  status.textContent = "Saving…";
                 }
-              } finally {
-                saving = false;
-                save.disabled = false;
-                cancel.disabled = false;
-                save.textContent = "Save";
-              }
-            })();
+              },
+              failure: "Something went wrong.",
+              failed: (message) => {
+                status.textContent = "Save failed.";
+                showToast(message);
+              },
+            });
           },
           { signal },
         );
@@ -279,7 +271,7 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
   form.append(textarea, el("div", { class: "comment-compose-actions" }, button, status));
   section.append(form);
 
-  let posting = false;
+  const posting = createPendingAction();
 
   /** Re-render the comments after a post; failure here must not claim the post failed. */
   const refresh = async (): Promise<void> => {
@@ -316,32 +308,33 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
     (event) => {
       event.preventDefault();
       const text = textarea.value.trim();
-      if (posting || text === "") {
+      if (text === "") {
         return;
       }
-      posting = true;
-      // A disabled button loses focus in every browser; the `posting` guard is the real lock.
-      button.textContent = "Posting…";
-      status.textContent = "Posting…";
 
-      void (async () => {
-        try {
+      void posting.run({
+        run: async () => {
           await postComment(data.url, text, signal);
           if (signal.aborted) {
             return;
           }
           textarea.value = "";
           await refresh();
-        } catch (error) {
-          if (!signal.aborted) {
-            status.textContent = "Post failed.";
-            showToast(errorText(error));
+        },
+        signal,
+        setBusy: (busy) => {
+          // A disabled button loses focus in every browser; the action's guard is the real lock.
+          button.textContent = busy ? "Posting…" : "Post comment";
+          if (busy) {
+            status.textContent = "Posting…";
           }
-        } finally {
-          posting = false;
-          button.textContent = "Post comment";
-        }
-      })();
+        },
+        failure: "Something went wrong.",
+        failed: (message) => {
+          status.textContent = "Post failed.";
+          showToast(message);
+        },
+      });
     },
     { signal },
   );

@@ -72,10 +72,13 @@ describe("tag completion memory", () => {
     const index = buildTagIndex(
       { data: [{ namespace: "female", data: { enema: {}, english: {} } }] },
       1,
-      new Map([
-        [tagKeyId("enema"), 100],
-        [tagKeyId("english"), 100_000],
-      ]),
+      {
+        counts: new Map([
+          [tagKeyId("enema"), 100],
+          [tagKeyId("english"), 100_000],
+        ]),
+        max: 100_000,
+      },
     );
     const firstKey = (): string | undefined => {
       const result = buildSuggestions(index, "en", 2, new Map(), 50, tagCompletions());

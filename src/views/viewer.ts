@@ -4,18 +4,14 @@ import { loader } from "../fetch/loader";
 import { createPrefetcher } from "../fetch/prefetch";
 import { isKey } from "../keymap";
 import { log } from "../log";
-import { priorityOf } from "../net/priority";
 import { net } from "../net/queue";
-import type { PageImageSlot } from "../page-image";
-import { createPageImageSlot } from "../page-image";
-import { clickIntent, readerLayout, swipeIntent } from "../reader-mode";
+import type { ReaderHudState } from "../reader-navigation";
+import { createReaderNavigation } from "../reader-navigation";
 import { nativeUrl } from "../routes/identity";
 import { getSettings, onSettingsChange, updateSetting } from "../settings";
 import shellHtml from "../shell.html" with { type: "text" };
 import type { PageData } from "../types";
-import type { ContinuousStack } from "../ui/continuous-stack";
-import { createContinuousStack } from "../ui/continuous-stack";
-import { buttonEl, el, icon, isEditableTarget } from "../ui/dom";
+import { icon, isEditableTarget } from "../ui/dom";
 import { titleNodes } from "../ui/title";
 import { showToast } from "../ui/toast";
 import { applyViewMode, setCursorHidden } from "../view-mode";
@@ -76,77 +72,88 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     },
   });
 
-  /**
-   * A spread with no facing page should not keep the half-width slot reserved for one. The class
-   * only takes effect under `body.reader-spread`, so single and continuous layouts ignore it.
-   */
-  const setSpreadSingle = (single: boolean): void => {
-    ui.elWrap.classList.toggle("is-single", single);
-  };
-
   const setHelp = (open: boolean): void => {
     ui.elHelp.hidden = !open;
   };
 
-  let current = pageData;
   let chromePinned = false;
-  let mainSlot: PageImageSlot<HTMLImageElement> | null = null;
-  let companionSlot: PageImageSlot<HTMLImageElement> | null = null;
-  let spreadCompanion: PageData | null = null;
-  let spreadToken = 0;
-  let navigationToken = 0;
-  let stack: ContinuousStack<PageImageSlot<HTMLImageElement>> | null = null;
-  let continuousIndex = 0;
-  /** Invalidates the slots of a stack that was torn down, so their retries cannot fire. */
-  let continuousGeneration = 0;
-  /** Last loaded page's height/width, used to reserve space before a lazy page arrives. */
-  let continuousAspect = 1.4;
   let activeMode = getSettings().readerMode;
   let resumeTimer: number | undefined;
   let resumePage: PageData | null = null;
+  let hudPage: PageData | null = null;
 
-  /**
-   * Everything the reader currently shows: the zoom target, the page the HUD and `R` act on, the
-   * image `R` reloads, and every image a deep zoom may upgrade. One value, so single, spread and
-   * continuous stop each deciding independently what “the current image” means.
-   */
-  interface ReaderSurface {
-    readonly element: HTMLElement;
-    readonly page: PageData;
-    /** Reload the page `R` acts on; false when there is nothing to reload. */
-    reload: () => boolean;
-    /** Upgrade every visible image that has outgrown its served copy. */
-    upgrade: (level: number) => void;
-  }
+  const flushResume = (): void => {
+    if (resumePage === null) {
+      return;
+    }
+    saveResume(resumePage.galleryHref, {
+      pageUrl: resumePage.viewerUrl,
+      pageNum: resumePage.pageNum,
+      counterText: resumePage.counterText,
+    });
+  };
 
-  function makeSurface(
-    element: HTMLElement,
-    primary: PageImageSlot<HTMLImageElement>,
-    visible: PageImageSlot<HTMLImageElement>[],
-  ): ReaderSurface {
-    return {
-      element,
-      get page() {
-        return primary.page;
-      },
-      reload: () => primary.reload(),
-      upgrade(level) {
-        for (const slot of visible) {
-          slot.upgrade(level);
-        }
-      },
-    };
-  }
+  /** Throttle storage writes while scrolling a stack, but always keep the latest page. */
+  const rememberPosition = (data: PageData): void => {
+    resumePage = data;
+    if (resumeTimer !== undefined) {
+      return;
+    }
+    resumeTimer = window.setTimeout(() => {
+      resumeTimer = undefined;
+      flushResume();
+    }, 750);
+  };
 
-  /** The one value every surface consumer reads; refreshed only when what is visible changes. */
-  let surface: ReaderSurface | null = null;
+  const hideError = (): void => {
+    ui.elError.hidden = true;
+  };
+
+  const showError = (page: PageData): void => {
+    ui.elErrorText.textContent = `Page ${page.counterText} could not be loaded.`;
+    // Retry cannot help when the page carries no `nl` token, so the native view is the way out.
+    ui.elErrorNative.href = nativeUrl(page.viewerUrl);
+    ui.elErrorNative.textContent = "Open native page";
+    ui.elError.hidden = false;
+  };
+
+  const navigation = createReaderNavigation({
+    signal: ctx.signal,
+    navigate: ctx.navigate,
+    toast: showToast,
+    mainImage: ui.elImg,
+    spreadImage: ui.elSpread,
+    spreadWrap: ui.elWrap,
+    continuousContainer: ui.elContinuous,
+    onHud: (state: ReaderHudState) => {
+      ui.elFirst.disabled = !state.first;
+      ui.elPrev.disabled = !state.prev;
+      ui.elNext.disabled = !state.next;
+      ui.elLast.disabled = !state.last;
+      ui.elCounter.textContent = state.page.counterText;
+      ui.elFileInfo.textContent = state.page.fileInfo;
+      if (state.page !== hudPage) {
+        hudPage = state.page;
+        rememberPosition(state.page);
+      }
+    },
+    onSurfaceChange: () => {
+      zoom.syncSurface();
+    },
+    onImageLoaded: (page) => {
+      hideError();
+      log("image displayed", page.imgSrc);
+    },
+    onImageError: showError,
+    zoomLevel: () => zoom.getZoomLevel(),
+  });
 
   const zoom = new ZoomController(
     ui.elReader,
-    () => activeSurface().element,
+    () => navigation.surface().element,
     () => getSettings().fitHeight,
     ctx.signal,
-    (level) => activeSurface().upgrade(level),
+    (level) => navigation.upgrade(level),
   );
 
   const updateTitleWidth = (): void => {
@@ -157,100 +164,9 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     ui.elTitle.style.maxWidth = `${maxWidth}px`;
   };
 
-  function createMainSlot(data: PageData): PageImageSlot<HTMLImageElement> {
-    return createPageImageSlot(ui.elImg, {
-      page: data,
-      retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
-      maxRetries: getSettings().maxNlRetry,
-      signal: ctx.signal,
-      isCurrent: () => current === data && !readerLayout(getSettings().readerMode).continuous,
-      onGiveUp: () => showError(),
-      onLoaded: (loaded) => {
-        hideError();
-        if (ui.elImg.naturalWidth > 0) {
-          continuousAspect = ui.elImg.naturalHeight / ui.elImg.naturalWidth;
-        }
-        log("image displayed", loaded.imgSrc);
-      },
-    });
-  }
-
-  function computeSurface(): ReaderSurface {
-    const mode = getSettings().readerMode;
-    if (mode === "continuous") {
-      const pages = stack?.pages() ?? [];
-      const entry = pages[continuousIndex] ?? pages[0];
-      if (entry) {
-        const slot = entry.view;
-        return makeSurface(slot.img, slot, [slot]);
-      }
-    } else if (mode === "spread" && mainSlot !== null) {
-      const spreadPrimary = mainSlot;
-      const visible: PageImageSlot<HTMLImageElement>[] = [spreadPrimary];
-      if (companionSlot !== null && !ui.elSpread.hidden) {
-        visible.push(companionSlot);
-      }
-      return makeSurface(ui.elWrap, spreadPrimary, visible);
-    }
-
-    const primary = mainSlot ?? createMainSlot(current);
-    return makeSurface(ui.elImg, primary, [primary]);
-  }
-
-  function refreshSurface(): void {
-    surface = computeSurface();
-  }
-
-  function activeSurface(): ReaderSurface {
-    surface ??= computeSurface();
-    return surface;
-  }
-
-  function flushResume(): void {
-    if (resumePage === null) {
-      return;
-    }
-    saveResume(resumePage.galleryHref, {
-      pageUrl: resumePage.viewerUrl,
-      pageNum: resumePage.pageNum,
-      counterText: resumePage.counterText,
-    });
-  }
-
-  /** Throttle storage writes while scrolling a stack, but always keep the latest page. */
-  function rememberPosition(data: PageData): void {
-    resumePage = data;
-    if (resumeTimer !== undefined) {
-      return;
-    }
-    resumeTimer = window.setTimeout(() => {
-      resumeTimer = undefined;
-      flushResume();
-    }, 750);
-  }
-
-  const hideError = (): void => {
-    ui.elError.hidden = true;
-  };
-
-  const showError = (): void => {
-    ui.elErrorText.textContent = `Page ${current.counterText} could not be loaded.`;
-    // Retry cannot help when the page carries no `nl` token, so the native view is the way out.
-    ui.elErrorNative.href = nativeUrl(current.viewerUrl);
-    ui.elErrorNative.textContent = "Open native page";
-    ui.elError.hidden = false;
-  };
-
-  const syncNav = (data: PageData): void => {
-    ui.elFirst.disabled = data.firstHref === null;
-    ui.elPrev.disabled = data.prevHref === null;
-    ui.elNext.disabled = data.nextHref === null;
-    ui.elLast.disabled = data.lastHref === null;
-  };
-
   /** Reload the visible image, bypassing the browser cache (native `R` / "Reload broken image"). */
   const reloadImage = (): void => {
-    if (!activeSurface().reload()) {
+    if (!navigation.reload()) {
       return;
     }
     hideError();
@@ -263,9 +179,10 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
    * error panel's Retry button inert; the image's own ladder reports a second failure.
    */
   const retryPage = (): void => {
+    const page = navigation.currentPage();
     void (async () => {
       hideError();
-      const retried = await loader.retryWithNl(current, { signal: ctx.signal });
+      const retried = await loader.retryWithNl(page, { signal: ctx.signal });
       if (ctx.signal.aborted) {
         return;
       }
@@ -273,383 +190,19 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
         render(retried);
         return;
       }
-      showMain(current);
+      navigation.retryMain();
     })();
   };
 
-  const goEnd = (direction: "first" | "last"): void => {
-    const target = direction === "first" ? current.firstHref : current.lastHref;
-    if (target) {
-      ctx.navigate(target, { replace: true });
-      return;
-    }
-    showToast(direction === "first" ? "First page" : "Last page");
-  };
-
-  const goSingle = (direction: "prev" | "next"): void => {
-    const target = direction === "prev" ? current.prevHref : current.nextHref;
-    if (target) {
-      ctx.navigate(target, { replace: true });
-      return;
-    }
-    showToast(direction === "prev" ? "First page" : "Last page");
-  };
-
-  async function goSpread(direction: "prev" | "next"): Promise<void> {
-    const token = ++navigationToken;
-    if (direction === "next") {
-      let trailing = spreadCompanion;
-      if (!trailing && current.nextHref) {
-        trailing = await loader
-          .viewerPage(current.nextHref, {
-            priority: priorityOf("facing"),
-            signal: ctx.signal,
-          })
-          .catch(() => null);
-      }
-      if (token !== navigationToken || ctx.signal.aborted) {
-        return;
-      }
-      const target = trailing ? trailing.nextHref : current.nextHref;
-      if (target) {
-        ctx.navigate(target, { replace: true });
-        return;
-      }
-      showToast("Last page");
-      return;
-    }
-
-    const back = current.prevHref
-      ? await loader
-          .viewerPage(current.prevHref, {
-            priority: priorityOf("facing"),
-            signal: ctx.signal,
-          })
-          .catch(() => null)
-      : null;
-    if (token !== navigationToken || ctx.signal.aborted) {
-      return;
-    }
-    // Page 1 has no previous, so stepping back from page 2 means page 1 itself.
-    const target = back ? (back.prevHref ?? back.viewerUrl) : current.prevHref;
-    if (target !== null && target !== current.viewerUrl) {
-      ctx.navigate(target, { replace: true });
-      return;
-    }
-    showToast("First page");
-  }
-
-  function syncContinuousNav(): void {
-    if (!readerLayout(getSettings().readerMode).continuous) {
-      return;
-    }
-    const pages = stack?.pages() ?? [];
-    ui.elPrev.disabled = continuousIndex <= 0;
-    const state = stack?.state();
-    // A failed fetch is retryable, so it must not disable Next or present itself as the end.
-    ui.elNext.disabled = (state === undefined || state.done) && continuousIndex >= pages.length - 1;
-  }
-
-  function scrollToContinuous(index: number): void {
-    const entry = stack?.pages()[index];
-    if (!entry) {
-      return;
-    }
-    entry.node.scrollIntoView({ block: "start" });
-    continuousIndex = index;
-    refreshSurface();
-    zoom.syncSurface();
-    ui.elCounter.textContent = entry.view.page.counterText;
-    ui.elFileInfo.textContent = entry.view.page.fileInfo;
-    syncContinuousNav();
-    // A page scrolled into a zoomed stack needs its original too, not only the one that zoomed.
-    activeSurface().upgrade(zoom.getZoomLevel());
-  }
-
-  async function goContinuous(direction: "prev" | "next"): Promise<void> {
-    const active = stack;
-    if (active === null) {
-      return;
-    }
-    if (direction === "prev") {
-      if (continuousIndex <= 0) {
-        showToast("First page");
-        return;
-      }
-      scrollToContinuous(continuousIndex - 1);
-      return;
-    }
-
-    if (continuousIndex >= active.pages().length - 1) {
-      const state = active.state();
-      if (state.loading) {
-        return;
-      }
-      if (!state.done) {
-        const appended = state.failed ? await active.retry() : await active.loadNext();
-        if (active !== stack || ctx.signal.aborted) {
-          return;
-        }
-        if (!appended) {
-          const after = active.state();
-          if (after.failed) {
-            showToast("Could not load the next page");
-          } else if (after.done) {
-            showToast("Last page");
-          }
-          syncContinuousNav();
-          return;
-        }
-      }
-    }
-
-    if (continuousIndex >= active.pages().length - 1) {
-      showToast("Last page");
-      return;
-    }
-    scrollToContinuous(continuousIndex + 1);
-  }
-
   const go = (direction: "prev" | "next"): void => {
-    const mode = getSettings().readerMode;
-    if (mode === "continuous") {
-      void goContinuous(direction);
-      return;
-    }
-    if (mode === "spread") {
-      void goSpread(direction);
-      return;
-    }
-    goSingle(direction);
+    navigation.go(direction);
   };
 
-  function clearSpread(): void {
-    spreadToken += 1;
-    spreadCompanion = null;
-    companionSlot = null;
-    ui.elSpread.hidden = true;
-    ui.elSpread.removeAttribute("src");
-    setSpreadSingle(false);
-    refreshSurface();
-  }
-
-  function renderSpread(data: PageData): void {
-    clearSpread();
-    const token = spreadToken;
-    setSpreadSingle(data.nextHref === null);
-    if (!readerLayout(getSettings().readerMode).spread || data.nextHref === null) {
-      return;
-    }
-
-    void loader
-      .viewerPage(data.nextHref, {
-        priority: priorityOf("facing"),
-        signal: ctx.signal,
-      })
-      .then((companion) => {
-        if (
-          ctx.signal.aborted ||
-          token !== spreadToken ||
-          !readerLayout(getSettings().readerMode).spread
-        ) {
-          return;
-        }
-        spreadCompanion = companion;
-        ui.elSpread.hidden = false;
-        setSpreadSingle(false);
-        ui.elSpread.alt = `${companion.galleryTitle.primary} — page ${companion.counterText}`;
-        companionSlot = createPageImageSlot(ui.elSpread, {
-          page: companion,
-          retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
-          maxRetries: getSettings().maxNlRetry,
-          signal: ctx.signal,
-          isCurrent: () => spreadCompanion === companion,
-          onGiveUp: () => {
-            ui.elSpread.hidden = true;
-            setSpreadSingle(true);
-            ui.elNext.disabled = data.nextHref === null;
-            refreshSurface();
-          },
-        });
-        companionSlot.show();
-        ui.elNext.disabled = companion.nextHref === null;
-        refreshSurface();
-        // If the pair is already zoomed, the newly visible facing page needs its original too.
-        activeSurface().upgrade(zoom.getZoomLevel());
-      })
-      .catch(() => {
-        if (ctx.signal.aborted || token !== spreadToken) {
-          return;
-        }
-        clearSpread();
-        setSpreadSingle(true);
-        ui.elNext.disabled = data.nextHref === null;
-      });
-  }
-
-  function continuousPage(data: PageData): {
-    node: HTMLElement;
-    view: PageImageSlot<HTMLImageElement>;
-  } {
-    const node = el("div", { class: "reader-page" });
-    const img = el("img", {
-      class: "reader-page-img",
-      alt: `${data.galleryTitle.primary} — page ${data.counterText}`,
-      loading: "lazy",
-    });
-    const retry = buttonEl({
-      class: "btn btn-small reader-page-retry",
-      text: "Retry",
-      style: "position: absolute; z-index: 1;",
-    });
-    retry.hidden = true;
-    node.append(img, retry);
-    // Lazy images have no intrinsic height before they load, which makes a fast scroll jump as
-    // each page arrives. Reserve the previous page's aspect until this one can measure itself.
-    node.style.minHeight = `${Math.round(window.innerWidth * continuousAspect)}px`;
-
-    const generation = continuousGeneration;
-    const slot = createPageImageSlot(img, {
-      page: data,
-      retry: (page) => loader.retryWithNl(page, { signal: ctx.signal }),
-      maxRetries: getSettings().maxNlRetry,
-      signal: ctx.signal,
-      isCurrent: () => continuousGeneration === generation,
-      onGiveUp: () => {
-        node.classList.add("is-failed");
-        retry.hidden = false;
-      },
-      onLoaded: () => {
-        node.classList.remove("is-failed");
-        retry.hidden = true;
-        node.style.removeProperty("min-height");
-        if (img.naturalWidth > 0) {
-          continuousAspect = img.naturalHeight / img.naturalWidth;
-        }
-      },
-    });
-    retry.addEventListener("click", () => {
-      retry.hidden = true;
-      node.classList.remove("is-failed");
-      slot.show();
-    });
-    slot.show();
-    return { node, view: slot };
-  }
-
-  function teardownContinuous(): void {
-    continuousGeneration += 1;
-    stack?.stop();
-    stack = null;
-    continuousIndex = 0;
-    ui.elContinuous.replaceChildren();
-  }
-
-  function startContinuous(data: PageData): void {
-    teardownContinuous();
-    stack = createContinuousStack<PageData, PageImageSlot<HTMLImageElement>>({
-      container: ui.elContinuous,
-      initial: data,
-      next: data.nextHref,
-      key: (page) => page.viewerUrl,
-      signal: ctx.signal,
-      load: (url, signal) =>
-        loader.viewerPage(url, { priority: priorityOf("facing"), signal }).then((page) => ({
-          items: [page],
-          next: page.nextHref,
-        })),
-      render: continuousPage,
-      onChange: () => syncContinuousNav(),
-    });
-    continuousIndex = 0;
-    refreshSurface();
-    syncContinuousNav();
-  }
-
-  function syncContinuousCounter(): void {
-    const pages = stack?.pages() ?? [];
-    if (!readerLayout(getSettings().readerMode).continuous || pages.length === 0) {
-      return;
-    }
-    const midpoint = window.innerHeight / 2;
-    let best = 0;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    pages.forEach((entry, index) => {
-      const rect = entry.node.getBoundingClientRect();
-      const distance = Math.abs(rect.top + rect.height / 2 - midpoint);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = index;
-      }
-    });
-    const previous = continuousIndex;
-    continuousIndex = best;
-    if (best !== previous) {
-      refreshSurface();
-      zoom.syncSurface();
-    }
-    const visible = pages[best];
-    if (visible) {
-      ui.elCounter.textContent = visible.view.page.counterText;
-      ui.elFileInfo.textContent = visible.view.page.fileInfo;
-      rememberPosition(visible.view.page);
-    }
-    syncContinuousNav();
-    if (best !== previous) {
-      activeSurface().upgrade(zoom.getZoomLevel());
-    }
-  }
-
-  let counterFrame: number | undefined;
-  function onContinuousScroll(): void {
-    if (!readerLayout(getSettings().readerMode).continuous || counterFrame !== undefined) {
-      return;
-    }
-    counterFrame = window.requestAnimationFrame(() => {
-      counterFrame = undefined;
-      syncContinuousCounter();
-    });
-  }
-
-  function showMain(data: PageData): void {
-    mainSlot = createMainSlot(data);
-    mainSlot.show();
-    refreshSurface();
-  }
-
-  /** Show the containers and load the neighbours the selected mode needs. */
-  function syncLayout(): void {
-    const settings = getSettings();
-    const layout = readerLayout(settings.readerMode);
-    ui.elWrap.hidden = layout.continuous;
-    ui.elContinuous.hidden = !layout.continuous;
-    ui.elContinuous.style.setProperty("--reader-gap", `${settings.gap}px`);
-
-    if (layout.continuous) {
-      mainSlot = null;
-      // The stack renders and loads the current page; the hidden single image must not fetch it
-      // a second time.
-      ui.elImg.removeAttribute("src");
-      startContinuous(current);
-      clearSpread();
-      syncContinuousCounter();
-      return;
-    }
-
-    teardownContinuous();
-    if (layout.spread) {
-      showMain(current);
-      syncNav(current);
-      renderSpread(current);
-    } else {
-      showMain(current);
-      clearSpread();
-      syncNav(current);
-    }
-  }
+  const goEnd = (direction: "first" | "last"): void => {
+    navigation.goEnd(direction);
+  };
 
   function render(data: PageData): void {
-    current = data;
     ui.elTitle.replaceChildren(titleNodes(data.galleryTitle));
     ui.elCounter.textContent = data.counterText;
     ui.elFileInfo.textContent = data.fileInfo;
@@ -661,17 +214,15 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     ui.elSearch.hidden = data.searchHref === null;
     ui.elSearch.href = data.searchHref ?? "";
     ui.elImg.alt = `${data.galleryTitle.primary} — page ${data.counterText}`;
-    syncNav(data);
     hideError();
 
-    // The layout owns which surface loads the page: the stack's first entry in continuous mode,
-    // the main image otherwise, plus the facing page in spread.
-    syncLayout();
+    // The active adapter owns which surface loads the page: the main image, the spread pair, or
+    // the stack's first entry.
+    navigation.show(data);
 
-    if (!getSettings().fitHeight && !readerLayout(getSettings().readerMode).continuous) {
+    if (!getSettings().fitHeight && !navigation.continuous) {
       window.scrollTo(0, 0);
     }
-    rememberPosition(data);
     log("rendered", data.counterText);
   }
 
@@ -683,8 +234,12 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     readerMode: getSettings().readerMode,
     readingDirection: getSettings().readingDirection,
   });
+  ui.elContinuous.style.setProperty("--reader-gap", `${getSettings().gap}px`);
   render(pageData);
-  window.addEventListener("scroll", onContinuousScroll, { passive: true, signal: ctx.signal });
+  window.addEventListener("scroll", () => navigation.handleScroll(), {
+    passive: true,
+    signal: ctx.signal,
+  });
 
   const off = onSettingsChange((settings) => {
     applyViewMode({
@@ -698,7 +253,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     updateTitleWidth();
     if (settings.readerMode !== activeMode) {
       activeMode = settings.readerMode;
-      syncLayout();
+      navigation.setMode(settings.readerMode);
     }
     zoom.updateZoom(null, settings.fitHeight);
   });
@@ -769,7 +324,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
           first !== undefined &&
           second !== undefined &&
           getSettings().fitHeight &&
-          getSettings().readerMode !== "continuous"
+          !navigation.continuous
         ) {
           pinchStart = {
             distance: Math.hypot(second.x - first.x, second.y - first.y),
@@ -780,11 +335,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
       }
       // A swipe that the browser did not follow with a click must not swallow the next tap.
       suppressClick = false;
-      if (
-        zoom.getZoomLevel() > 1 &&
-        getSettings().fitHeight &&
-        getSettings().readerMode !== "continuous"
-      ) {
+      if (zoom.getZoomLevel() > 1 && getSettings().fitHeight && !navigation.continuous) {
         // While zoomed, one finger pans instead of swiping to another page.
         swipeStart = null;
         panPoint = { x: event.clientX, y: event.clientY };
@@ -856,12 +407,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
       if (Math.abs(dx) < Math.abs(dy) * 1.5) {
         return;
       }
-      const intent = swipeIntent(
-        dx,
-        SWIPE_MIN,
-        getSettings().readerMode,
-        getSettings().readingDirection,
-      );
+      const intent = navigation.swipeIntent(dx, SWIPE_MIN, getSettings().readingDirection);
       if (intent === null) {
         return;
       }
@@ -899,7 +445,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
         return;
       }
       const ratio = event.clientX / Math.max(1, window.innerWidth);
-      const intent = clickIntent(ratio, getSettings().readerMode, getSettings().readingDirection);
+      const intent = navigation.clickIntent(ratio, getSettings().readingDirection);
       if (intent === "toggle") {
         toggleChrome();
       } else {
@@ -1024,12 +570,12 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
       } else if (event.key === "r" || event.key === "R") {
         reloadImage();
       } else if (isKey(event, "up")) {
-        if (!getSettings().fitHeight || getSettings().readerMode === "continuous") {
+        if (!getSettings().fitHeight || navigation.continuous) {
           event.preventDefault();
           window.scrollBy(0, -getSettings().scrollStep);
         }
       } else if (isKey(event, "down")) {
-        if (!getSettings().fitHeight || getSettings().readerMode === "continuous") {
+        if (!getSettings().fitHeight || navigation.continuous) {
           event.preventDefault();
           window.scrollBy(0, getSettings().scrollStep);
         }
@@ -1055,11 +601,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
       flushResume();
       prefetcher.cancel();
       resizeObserver.disconnect();
-      teardownContinuous();
-      if (counterFrame !== undefined) {
-        window.cancelAnimationFrame(counterFrame);
-      }
-      // The mount lifecycle resets view mode right after aborting this view.
+      navigation.stop();
       ui.elImg.removeAttribute("src");
       ui.elSpread.removeAttribute("src");
     },

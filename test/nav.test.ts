@@ -1,10 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 
-// app.ts imports the built stylesheet, which does not exist in a clean checkout. The stub must be
-// registered before app.ts is evaluated, so its import cannot be static.
+// app-shell imports the built stylesheet, which does not exist in a clean checkout. The stub must
+// be registered before app-shell is evaluated, so its import cannot be static.
 void mock.module("../src/ui/styles", () => ({ injectStyles: () => undefined }));
 
-const { isFragmentOnlyChange } = await import("../src/app");
+const { isFragmentOnlyChange } = await import("../src/app-shell");
 
 const GALLERY = "https://e-hentai.org/g/123/0123456789/";
 

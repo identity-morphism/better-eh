@@ -14,11 +14,11 @@ import type { SearchTerm, TagNamespace, TagSign } from "./model";
 import {
   fold,
   formatTagToken,
-  isTagTerm,
   parseSearchTerms,
   TAG_NAMESPACES,
   tagIdentity,
   termAt,
+  termTagIdentity,
 } from "./model";
 
 const RECENT_LIMIT = 6;
@@ -220,13 +220,13 @@ function namespaceSuggestions(query: string, tail: string): NamespaceSuggestion[
 function appliedTerms(terms: readonly SearchTerm[], phrase: SearchTerm): Map<string, SearchTerm> {
   const applied = new Map<string, SearchTerm>();
   for (const term of terms) {
-    if (!isTagTerm(term) || term.ns === null) {
+    const id = termTagIdentity(term);
+    if (id === null) {
       continue;
     }
     if (term.start >= phrase.start && term.end <= phrase.end) {
       continue;
     }
-    const id = tagIdentity(term.ns, term.value);
     if (!applied.has(id)) {
       applied.set(id, term);
     }

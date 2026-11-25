@@ -2,7 +2,7 @@ import { isRecord } from "../guards";
 import type { SearchFilters, SearchQuery } from "../parse/query";
 import { emptySearchFilters, parseSearchQuery, writeSearchFilters } from "../parse/query";
 import { categoryPathBit } from "../routes/identity";
-import type { Route } from "../routes/types";
+import type { RouteOf } from "../routes/types";
 import { createStore, gmStorage } from "../store";
 
 const KEY = "eh:list-filters:v1";
@@ -76,8 +76,8 @@ function hasFilters(prefs: SearchFilters): boolean {
  * a tag page, an uploader page, pagination links) inherits the remembered set. The route's URL and
  * query are rebuilt together, so callers never re-parse the patched address.
  */
-export function applyPersistedListFilters(route: Route): Route {
-  if (route.kind !== "list" || (route.scope !== "search" && route.scope !== "uploader")) {
+export function applyPersistedListFilters(route: RouteOf<"list">): RouteOf<"list"> {
+  if (route.scope !== "search" && route.scope !== "uploader") {
     return route;
   }
   const url = new URL(route.url);

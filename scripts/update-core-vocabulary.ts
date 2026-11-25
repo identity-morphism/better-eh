@@ -2,9 +2,9 @@
  * Generate the embedded core tag vocabulary.
  *
  * Reads the checked-in vocabulary and popularity assets, keeps the 200 most popular tags of each
- * namespace and writes them into `src/tags/core-vocabulary.ts`. The generated constant lets
- * suggestions work before the full asset has ever been downloaded; the runtime still upgrades to
- * the complete index once that download lands.
+ * namespace and writes them and their counts into `src/tags/core-vocabulary.ts`. The generated
+ * payload lets suggestions rank by popularity before the full asset has ever been downloaded; the
+ * runtime still upgrades to the complete index once that download lands.
  *
  * Output depends only on the two assets. Per namespace, keys rank by popularity count descending
  * and then key ascending; the kept keys are sorted ascending again for the front-coded encoder.
@@ -18,7 +18,11 @@ import { join } from "node:path";
 
 import { decodeTagVocabulary, encodeTagVocabulary } from "../src/tags/index-codec";
 import { TAG_NAMESPACES } from "../src/tags/model";
-import { decodeTagCountsFromBytes, tagKeyId } from "../src/tags/tag-counts-codec";
+import {
+  decodeTagCountsFromBytes,
+  encodeTagCountsBytes,
+  tagKeyId,
+} from "../src/tags/tag-counts-codec";
 import { readExistingAsset } from "./asset-file";
 
 const ROOT = join(import.meta.dir, "..");
@@ -32,6 +36,7 @@ interface GeneratedSource {
   readonly source: string;
   readonly tagCount: number;
   readonly byteLength: number;
+  readonly countLength: number;
 }
 
 /** First 12 hex characters of the SHA-256 digest, enough to identify the source asset. */
@@ -60,17 +65,43 @@ function selectCoreGroups(
   return groups;
 }
 
-function generateSource(
-  indexBytes: Uint8Array,
-  countsBytes: Uint8Array,
-  groups: ReadonlyMap<string, readonly string[]>,
-): GeneratedSource {
-  const encoded = encodeTagVocabulary(groups);
-  const base64 = Buffer.from(encoded).toString("base64");
+function chunksOf(base64: string): string[] {
   const chunks: string[] = [];
   for (let offset = 0; offset < base64.length; offset += BASE64_CHUNK) {
     chunks.push(`  "${base64.slice(offset, offset + BASE64_CHUNK)}"`);
   }
+  return chunks;
+}
+
+/** The selected tags' counts, quantized against the full snapshot maximum. */
+function selectCoreCounts(
+  groups: ReadonlyMap<string, readonly string[]>,
+  counts: ReadonlyMap<number, number>,
+  max: number,
+): Uint8Array | null {
+  const selected = new Map<string, number>();
+  for (const keys of groups.values()) {
+    for (const key of keys) {
+      const count = counts.get(tagKeyId(key)) ?? 0;
+      if (count > 0) {
+        selected.set(key, count);
+      }
+    }
+  }
+  return selected.size === 0 ? null : encodeTagCountsBytes(selected, max);
+}
+
+function generateSource(
+  indexBytes: Uint8Array,
+  countsBytes: Uint8Array,
+  groups: ReadonlyMap<string, readonly string[]>,
+  coreCountsBytes: Uint8Array | null,
+  snapshotMax: number,
+): GeneratedSource {
+  const encoded = encodeTagVocabulary(groups);
+  const base64 = Buffer.from(encoded).toString("base64");
+  const countBase64 =
+    coreCountsBytes === null ? "" : Buffer.from(coreCountsBytes).toString("base64");
   const tagCount = [...groups.values()].reduce((sum, keys) => sum + keys.length, 0);
 
   const source = [
@@ -81,13 +112,22 @@ function generateSource(
     ` * assets/tag-counts.bin ${sourceHash(countsBytes)}`,
     " *",
     ` * ${tagCount} tags in ${groups.size} namespaces, ${encoded.length} encoded bytes.`,
+    ` * Popularity: ${coreCountsBytes?.length ?? 0} bytes, denominator ${snapshotMax}.`,
     " */",
     "export const CORE_VOCABULARY_BASE64 =",
-    `${chunks.join(" +\n")};`,
+    `${chunksOf(base64).join(" +\n")};`,
+    "",
+    "export const CORE_COUNTS_BASE64 =",
+    countBase64 === "" ? '"";' : `${chunksOf(countBase64).join(" +\n")};`,
     "",
   ].join("\n");
 
-  return { source, tagCount, byteLength: encoded.length };
+  return {
+    source,
+    tagCount,
+    byteLength: encoded.length,
+    countLength: coreCountsBytes?.length ?? 0,
+  };
 }
 
 async function main(): Promise<void> {
@@ -112,12 +152,14 @@ async function main(): Promise<void> {
   }
 
   const groups = selectCoreGroups(vocabulary, counts.counts);
-  const generated = generateSource(indexBytes, countsBytes, groups);
+  const coreCountsBytes = selectCoreCounts(groups, counts.counts, counts.max);
+  const generated = generateSource(indexBytes, countsBytes, groups, coreCountsBytes, counts.max);
   const output = Bun.file(OUTPUT_PATH);
   const existing = (await output.exists()) ? await output.text() : null;
   if (existing === generated.source) {
     console.log(
-      `Core vocabulary unchanged: ${generated.tagCount} tags, ${generated.byteLength} bytes`,
+      `Core vocabulary unchanged: ${generated.tagCount} tags, ${generated.byteLength} bytes, ` +
+        `${generated.countLength} popularity bytes`,
     );
     return;
   }
@@ -129,7 +171,8 @@ async function main(): Promise<void> {
   mkdirSync(join(ROOT, "src", "tags"), { recursive: true });
   await Bun.write(OUTPUT_PATH, generated.source);
   console.log(
-    `Wrote src/tags/core-vocabulary.ts: ${generated.tagCount} tags, ${generated.byteLength} bytes`,
+    `Wrote src/tags/core-vocabulary.ts: ${generated.tagCount} tags, ${generated.byteLength} bytes, ` +
+      `${generated.countLength} popularity bytes`,
   );
 }
 
