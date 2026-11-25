@@ -20,8 +20,9 @@ export interface QuickTagsHandle {
 /**
  * Render the pinned saved expressions as quick-tag buttons.
  *
- * Each button toggles its expression's terms in the current draft. The editor is the shared one, so
- * a name, query, mode or pin changed there is reflected here immediately.
+ * A quick tag always toggles: a click adds its expression's terms to the current draft, or removes
+ * them when all are present. The editor is the shared one, so a name, query or pin changed there is
+ * reflected here immediately.
  */
 export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
   const { signal } = options;
@@ -33,12 +34,6 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
   const refresh = (next?: string): void => {
     text = next ?? options.getText();
     for (const entry of entries) {
-      if (entry.tag.mode === "run") {
-        // A run expression replaces the search; there is no on/off state to report.
-        entry.node.removeAttribute("aria-pressed");
-        entry.node.title = `Run ${entry.tag.name}`;
-        continue;
-      }
       const on = containsExpression(text, entry.tag.query);
       entry.node.setAttribute("aria-pressed", String(on));
       entry.node.title = on ? `Remove ${entry.tag.query}` : `Add ${entry.tag.query}`;
@@ -56,11 +51,8 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
       );
       node.addEventListener(
         "click",
-        (event) => {
-          // The saved mode decides the click; Alt asks for the other verb. `click()` synthesizes an
-          // event with no modifier state, so compare against the boolean rather than the value.
-          const run = (tag.mode === "run") !== (event.altKey === true);
-          options.search(run ? tag.query : toggleExpressionInSearch(options.getText(), tag.query));
+        () => {
+          options.search(toggleExpressionInSearch(options.getText(), tag.query));
         },
         { signal },
       );

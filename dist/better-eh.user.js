@@ -4697,6 +4697,9 @@ ${defaultKeySummary()}`)) {
   function isMode(value) {
     return value === "run" || value === "toggle";
   }
+  function expressionMode(mode, pinned) {
+    return pinned ? "toggle" : mode;
+  }
   function isExpression(value) {
     if (typeof value !== "object" || value === null) {
       return false;
@@ -4787,16 +4790,19 @@ ${defaultKeySummary()}`)) {
       migrateLegacy();
       values = store2.read();
     }
-    return values.filter(isExpression).map((entry) => ({
-      name: normalize2(entry.name),
-      query: normalize2(entry.query),
-      mode: entry.mode,
-      pinned: entry.pinned,
-      savedAt: entry.savedAt
-    })).filter((entry) => entry.name !== "" && entry.query !== "").sort((a, b) => b.savedAt - a.savedAt).slice(0, EXPRESSION_LIMIT);
+    return values.filter(isExpression).map((entry) => {
+      const pinned = entry.pinned;
+      return {
+        name: normalize2(entry.name),
+        query: normalize2(entry.query),
+        mode: expressionMode(entry.mode, pinned),
+        pinned,
+        savedAt: entry.savedAt
+      };
+    }).filter((entry) => entry.name !== "" && entry.query !== "").sort((a, b) => b.savedAt - a.savedAt).slice(0, EXPRESSION_LIMIT);
   }
   function quickExpressions() {
-    return savedExpressions().filter((entry) => entry.pinned);
+    return savedExpressions().filter((entry) => entry.pinned && entry.mode === "toggle");
   }
   function removeExpression(name) {
     const key = normalize2(name).toLowerCase();
@@ -4804,284 +4810,18 @@ ${defaultKeySummary()}`)) {
     notify2();
   }
   function replaceExpressions(expressions) {
-    const next = expressions.map((entry) => ({
-      name: normalize2(entry.name),
-      query: normalize2(entry.query),
-      mode: entry.mode,
-      pinned: entry.pinned === true,
-      savedAt: entry.savedAt
-    })).filter((entry) => entry.name !== "" && entry.query !== "").slice(0, EXPRESSION_LIMIT);
+    const next = expressions.map((entry) => {
+      const pinned = entry.pinned === true;
+      return {
+        name: normalize2(entry.name),
+        query: normalize2(entry.query),
+        mode: expressionMode(entry.mode, pinned),
+        pinned,
+        savedAt: entry.savedAt
+      };
+    }).filter((entry) => entry.name !== "" && entry.query !== "").slice(0, EXPRESSION_LIMIT);
     store2.write(next);
     notify2();
-  }
-
-  // src/ui/saved-expressions.ts
-  var MODES = [
-    { value: "run", label: "Run search" },
-    { value: "toggle", label: "Toggle terms" }
-  ];
-  function modeSelect(value, index) {
-    const select = el("select", { class: "field-select expression-mode", "aria-label": `Expression ${index + 1} action` }, ...MODES.map((mode) => el("option", { value: mode.value, text: mode.label, selected: mode.value === value })));
-    return select;
-  }
-  function openExpressionEditor(anchor, signal, onSaved, options = {}) {
-    const draft = savedExpressions().map((entry) => ({ ...entry }));
-    const seed = options.seed?.trim() ?? "";
-    if (seed !== "") {
-      draft.push({ name: "", query: seed, mode: "run", pinned: false, savedAt: Date.now() });
-    }
-    const list = el("div", { class: "expression-list" });
-    let panel = null;
-    const focusQuery = (index) => {
-      list.querySelectorAll(".expression-query")[index]?.focus();
-    };
-    const renderRows = (focusIndex) => {
-      list.replaceChildren(...draft.map((entry, index) => {
-        const name = textInput({
-          class: "field-input expression-input expression-name",
-          value: entry.name,
-          placeholder: "Name",
-          "aria-label": `Expression ${index + 1} name`
-        });
-        name.addEventListener("input", () => {
-          const current = draft[index];
-          if (current !== undefined) {
-            draft[index] = { ...current, name: name.value };
-          }
-        });
-        const query = textInput({
-          class: "field-input expression-input expression-query",
-          value: entry.query,
-          placeholder: 'f:tag$ ~p:"other tag$"',
-          "aria-label": `Expression ${index + 1} search`
-        });
-        query.addEventListener("input", () => {
-          const current = draft[index];
-          if (current !== undefined) {
-            draft[index] = { ...current, query: query.value };
-          }
-        });
-        const mode = modeSelect(entry.mode, index);
-        mode.addEventListener("change", () => {
-          const current = draft[index];
-          if (current !== undefined) {
-            draft[index] = {
-              ...current,
-              mode: mode.options[mode.selectedIndex]?.value === "toggle" ? "toggle" : "run"
-            };
-          }
-        });
-        const pin = el("input", {
-          type: "checkbox",
-          checked: entry.pinned ? "checked" : null,
-          "aria-label": `Show ${entry.name || "expression"} as a quick tag`
-        });
-        pin.addEventListener("change", () => {
-          const current = draft[index];
-          if (current !== undefined) {
-            draft[index] = { ...current, pinned: pin.checked === true };
-          }
-        });
-        const remove = el("button", {
-          class: "expression-remove",
-          type: "button",
-          text: "×",
-          title: "Remove expression",
-          "aria-label": `Remove expression ${index + 1}`
-        });
-        remove.addEventListener("click", () => {
-          draft.splice(index, 1);
-          renderRows();
-        });
-        return el("div", { class: "expression-row" }, name, query, remove, el("div", { class: "expression-options" }, mode, el("label", { class: "check expression-pin" }, pin, el("span", { text: "Quick tag" }))));
-      }));
-      if (focusIndex !== undefined) {
-        focusQuery(focusIndex);
-      }
-    };
-    const add = el("button", {
-      class: "btn btn-ghost btn-small",
-      type: "button",
-      text: "+ Add"
-    });
-    add.addEventListener("click", () => {
-      draft.push({
-        name: "",
-        query: "",
-        mode: "run",
-        pinned: false,
-        savedAt: Date.now()
-      });
-      renderRows(draft.length - 1);
-    });
-    const save = el("button", { class: "btn btn-small", type: "submit", text: "Save" });
-    const cancel = el("button", {
-      class: "btn btn-ghost btn-small",
-      type: "button",
-      text: "Cancel"
-    });
-    cancel.addEventListener("click", () => {
-      panel?.close();
-    });
-    const form = el("form", { class: "expression-editor" }, el("p", { class: "expression-editor-title", text: "Saved searches and quick tags" }), el("p", {
-      class: "expression-editor-hint",
-      text: "Run replaces the search; Toggle adds or removes the terms. Quick tags also appear under the search field."
-    }), list, el("div", { class: "expression-editor-actions" }, add, el("span", { class: "expression-editor-spacer" }), cancel, save));
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      replaceExpressions(draft.map((entry) => ({
-        ...entry,
-        name: entry.name.trim() || entry.query.trim(),
-        query: entry.query.trim()
-      })));
-      onSaved?.();
-      panel?.close();
-    });
-    renderRows();
-    panel = openPopover({
-      content: form,
-      anchor,
-      label: "Saved searches and quick tags",
-      className: "expression-editor-panel",
-      signal,
-      autoFocus: true
-    });
-    if (seed !== "") {
-      focusQuery(draft.length - 1);
-    }
-  }
-
-  // src/ui/search-history.ts
-  function queryButton(text, label, onPick) {
-    return el("button", { class: "search-history-query", type: "button", title: text, onclick: onPick }, el("span", { class: "search-history-name", text: label }), label === text ? null : el("span", { class: "search-history-text", text }));
-  }
-  function searchHistoryButton(options) {
-    const button = el("button", {
-      class: "topbar-history",
-      type: "button",
-      "aria-label": "Search history",
-      title: "Recent and saved searches",
-      "aria-haspopup": "dialog",
-      "aria-expanded": "false"
-    });
-    button.append(icon("history"));
-    function renderInto(container, close) {
-      container.replaceChildren();
-      const heading = el("h2", { class: "search-history-title", text: "Search history" });
-      container.append(heading);
-      const recent = recentQueries();
-      if (recent.length > 0) {
-        container.append(el("h3", { class: "search-history-heading", text: "Recent" }));
-        const list = el("div", { class: "search-history-list" });
-        for (const entry of recent) {
-          list.append(queryButton(entry.text, entry.text, () => {
-            close();
-            options.onPick(entry.text);
-          }));
-        }
-        container.append(list);
-        const clear = el("button", {
-          class: "search-history-clear",
-          type: "button",
-          text: "Clear recent"
-        });
-        clear.addEventListener("click", () => {
-          clearRecentQueries();
-          renderInto(container, close);
-        });
-        container.append(clear);
-      }
-      const saved = savedExpressions();
-      if (saved.length > 0) {
-        container.append(el("h3", { class: "search-history-heading", text: "Saved" }));
-        const list = el("div", { class: "search-history-list" });
-        for (const entry of saved) {
-          const row = el("div", { class: "search-history-saved" });
-          row.append(queryButton(entry.query, entry.name, () => {
-            close();
-            if (entry.mode === "toggle") {
-              options.onToggle(entry.query);
-            } else {
-              options.onPick(entry.query);
-            }
-          }));
-          const keepsTerms = entry.mode === "toggle";
-          const toggle = el("button", {
-            class: "search-history-toggle",
-            type: "button",
-            text: keepsTerms ? "▶" : "±",
-            "aria-label": `${keepsTerms ? "Run" : "Toggle terms of"} ${entry.name}`,
-            title: keepsTerms ? "Replace the search with these terms" : "Add or remove these terms"
-          });
-          toggle.addEventListener("click", () => {
-            close();
-            if (keepsTerms) {
-              options.onPick(entry.query);
-            } else {
-              options.onToggle(entry.query);
-            }
-          });
-          const remove = el("button", {
-            class: "search-history-remove",
-            type: "button",
-            text: "×",
-            "aria-label": `Remove saved search ${entry.name}`,
-            title: `Remove ${entry.name}`
-          });
-          remove.addEventListener("click", () => {
-            removeExpression(entry.name);
-            renderInto(container, close);
-          });
-          row.append(toggle, remove);
-          list.append(row);
-        }
-        container.append(list);
-        const edit = el("button", {
-          class: "search-history-edit",
-          type: "button",
-          text: "Edit saved",
-          title: "Edit saved searches and quick tags"
-        });
-        edit.addEventListener("click", () => {
-          openExpressionEditor(edit, options.signal, () => {
-            renderInto(container, close);
-          });
-        });
-        container.append(edit);
-      }
-      if (recent.length === 0 && saved.length === 0) {
-        container.append(el("p", {
-          class: "search-history-empty",
-          text: "No recent searches yet. Queries you submit appear here."
-        }));
-      }
-      const saveCurrent = el("button", {
-        class: "btn btn-small search-history-save-current",
-        type: "button",
-        text: "Save current search",
-        title: "Save the current search",
-        "aria-haspopup": "dialog",
-        "aria-expanded": "false"
-      });
-      saveCurrent.addEventListener("click", () => {
-        openExpressionEditor(saveCurrent, options.signal, () => {
-          renderInto(container, close);
-        }, { seed: options.getQuery() });
-      });
-      container.append(saveCurrent);
-    }
-    const popover = bindPopover(button, (close) => {
-      const content = el("div", { class: "search-history" });
-      renderInto(content, close);
-      return { content };
-    }, {
-      role: "dialog",
-      label: "Search history",
-      className: "search-history-panel",
-      autoFocus: true
-    }, options.signal);
-    button.addEventListener("click", () => popover.toggle(), { signal: options.signal });
-    return button;
   }
 
   // src/tags/base64.ts
@@ -6671,6 +6411,297 @@ ${defaultKeySummary()}`)) {
         }
       }
     };
+  }
+
+  // src/ui/saved-expressions.ts
+  var MODES = [
+    { value: "run", label: "Run search" },
+    { value: "toggle", label: "Toggle terms" }
+  ];
+  var TOGGLE_MODE_INDEX = MODES.findIndex((mode) => mode.value === "toggle");
+  function modeSelect(value, index) {
+    const select = el("select", { class: "field-select expression-mode", "aria-label": `Expression ${index + 1} action` }, ...MODES.map((mode) => el("option", { value: mode.value, text: mode.label, selected: mode.value === value })));
+    return select;
+  }
+  function openExpressionEditor(anchor, signal, onSaved, options = {}) {
+    const draft = savedExpressions().map((entry) => ({ ...entry }));
+    const seed = options.seed?.trim() ?? "";
+    if (seed !== "") {
+      draft.push({ name: "", query: seed, mode: "run", pinned: false, savedAt: Date.now() });
+    }
+    const list = el("div", { class: "expression-list" });
+    let panel = null;
+    let rowSignal = null;
+    const focusQuery = (index) => {
+      list.querySelectorAll(".expression-query")[index]?.focus();
+    };
+    const renderRows = (focusIndex) => {
+      rowSignal?.abort();
+      const rows = new AbortController;
+      rowSignal = rows;
+      list.replaceChildren(...draft.map((entry, index) => {
+        const name = textInput({
+          class: "field-input expression-input expression-name",
+          value: entry.name,
+          placeholder: "Name",
+          "aria-label": `Expression ${index + 1} name`
+        });
+        name.addEventListener("input", () => {
+          const current = draft[index];
+          if (current !== undefined) {
+            draft[index] = { ...current, name: name.value };
+          }
+        });
+        const query = textInput({
+          class: "field-input expression-input expression-query",
+          value: entry.query,
+          placeholder: 'f:tag$ ~p:"other tag$"',
+          "aria-label": `Expression ${index + 1} search`
+        });
+        query.addEventListener("input", () => {
+          const current = draft[index];
+          if (current !== undefined) {
+            draft[index] = { ...current, query: query.value };
+          }
+        });
+        if (getSettings().tagSuggestions) {
+          attachTagCombobox({ input: query, signal: rows.signal });
+        }
+        const mode = modeSelect(entry.mode, index);
+        const pin = el("input", {
+          type: "checkbox",
+          checked: entry.pinned ? "checked" : null,
+          "aria-label": `Show ${entry.name || "expression"} as a quick tag`
+        });
+        mode.addEventListener("change", () => {
+          const current = draft[index];
+          if (current === undefined) {
+            return;
+          }
+          const next = mode.options[mode.selectedIndex]?.value === "run" ? "run" : "toggle";
+          const pinned = next === "toggle" && current.pinned;
+          draft[index] = { ...current, mode: next, pinned };
+          pin.checked = pinned;
+        });
+        pin.addEventListener("change", () => {
+          const current = draft[index];
+          if (current === undefined) {
+            return;
+          }
+          const pinned = pin.checked === true;
+          draft[index] = {
+            ...current,
+            pinned,
+            mode: pinned ? "toggle" : current.mode
+          };
+          if (pinned) {
+            mode.selectedIndex = TOGGLE_MODE_INDEX;
+          }
+        });
+        const remove = el("button", {
+          class: "expression-remove",
+          type: "button",
+          text: "×",
+          title: "Remove expression",
+          "aria-label": `Remove expression ${index + 1}`
+        });
+        remove.addEventListener("click", () => {
+          draft.splice(index, 1);
+          renderRows();
+        });
+        return el("div", { class: "expression-row" }, name, query, remove, el("div", { class: "expression-options" }, mode, el("label", { class: "check expression-pin" }, pin, el("span", { text: "Quick tag" }))));
+      }));
+      if (focusIndex !== undefined) {
+        focusQuery(focusIndex);
+      }
+    };
+    const add = el("button", {
+      class: "btn btn-ghost btn-small",
+      type: "button",
+      text: "+ Add"
+    });
+    add.addEventListener("click", () => {
+      draft.push({
+        name: "",
+        query: "",
+        mode: "run",
+        pinned: false,
+        savedAt: Date.now()
+      });
+      renderRows(draft.length - 1);
+    });
+    const save = el("button", { class: "btn btn-small", type: "submit", text: "Save" });
+    const cancel = el("button", {
+      class: "btn btn-ghost btn-small",
+      type: "button",
+      text: "Cancel"
+    });
+    cancel.addEventListener("click", () => {
+      panel?.close();
+    });
+    const form = el("form", { class: "expression-editor" }, el("p", { class: "expression-editor-title", text: "Saved searches and quick tags" }), el("p", {
+      class: "expression-editor-hint",
+      text: "Saved searches replace the search. Quick tags toggle their terms and also appear under the search field."
+    }), list, el("div", { class: "expression-editor-actions" }, add, el("span", { class: "expression-editor-spacer" }), cancel, save));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      replaceExpressions(draft.map((entry) => ({
+        ...entry,
+        name: entry.name.trim() || entry.query.trim(),
+        query: entry.query.trim()
+      })));
+      onSaved?.();
+      panel?.close();
+    });
+    renderRows();
+    panel = openPopover({
+      content: form,
+      anchor,
+      label: "Saved searches and quick tags",
+      className: "expression-editor-panel",
+      signal,
+      autoFocus: true,
+      onClose: () => {
+        rowSignal?.abort();
+        rowSignal = null;
+      }
+    });
+    if (seed !== "") {
+      focusQuery(draft.length - 1);
+    }
+  }
+
+  // src/ui/search-history.ts
+  function queryButton(text, label, onPick) {
+    return el("button", { class: "search-history-query", type: "button", title: text, onclick: onPick }, el("span", { class: "search-history-name", text: label }), label === text ? null : el("span", { class: "search-history-text", text }));
+  }
+  function searchHistoryButton(options) {
+    const button = el("button", {
+      class: "topbar-history",
+      type: "button",
+      "aria-label": "Search history",
+      title: "Recent and saved searches",
+      "aria-haspopup": "dialog",
+      "aria-expanded": "false"
+    });
+    button.append(icon("history"));
+    function renderInto(container, close) {
+      container.replaceChildren();
+      const heading = el("h2", { class: "search-history-title", text: "Search history" });
+      container.append(heading);
+      const recent = recentQueries();
+      if (recent.length > 0) {
+        container.append(el("h3", { class: "search-history-heading", text: "Recent" }));
+        const list = el("div", { class: "search-history-list" });
+        for (const entry of recent) {
+          list.append(queryButton(entry.text, entry.text, () => {
+            close();
+            options.onPick(entry.text);
+          }));
+        }
+        container.append(list);
+        const clear = el("button", {
+          class: "search-history-clear",
+          type: "button",
+          text: "Clear recent"
+        });
+        clear.addEventListener("click", () => {
+          clearRecentQueries();
+          renderInto(container, close);
+        });
+        container.append(clear);
+      }
+      const saved = savedExpressions();
+      if (saved.length > 0) {
+        container.append(el("h3", { class: "search-history-heading", text: "Saved" }));
+        const list = el("div", { class: "search-history-list" });
+        for (const entry of saved) {
+          const row = el("div", { class: "search-history-saved" });
+          row.append(queryButton(entry.query, entry.name, () => {
+            close();
+            if (entry.mode === "toggle") {
+              options.onToggle(entry.query);
+            } else {
+              options.onPick(entry.query);
+            }
+          }));
+          const keepsTerms = entry.mode === "toggle";
+          const toggle = el("button", {
+            class: "search-history-toggle",
+            type: "button",
+            text: keepsTerms ? "▶" : "±",
+            "aria-label": `${keepsTerms ? "Run" : "Toggle terms of"} ${entry.name}`,
+            title: keepsTerms ? "Replace the search with these terms" : "Add or remove these terms"
+          });
+          toggle.addEventListener("click", () => {
+            close();
+            if (keepsTerms) {
+              options.onPick(entry.query);
+            } else {
+              options.onToggle(entry.query);
+            }
+          });
+          const remove = el("button", {
+            class: "search-history-remove",
+            type: "button",
+            text: "×",
+            "aria-label": `Remove saved search ${entry.name}`,
+            title: `Remove ${entry.name}`
+          });
+          remove.addEventListener("click", () => {
+            removeExpression(entry.name);
+            renderInto(container, close);
+          });
+          row.append(toggle, remove);
+          list.append(row);
+        }
+        container.append(list);
+        const edit = el("button", {
+          class: "search-history-edit",
+          type: "button",
+          text: "Edit saved",
+          title: "Edit saved searches and quick tags"
+        });
+        edit.addEventListener("click", () => {
+          openExpressionEditor(edit, options.signal, () => {
+            renderInto(container, close);
+          });
+        });
+        container.append(edit);
+      }
+      if (recent.length === 0 && saved.length === 0) {
+        container.append(el("p", {
+          class: "search-history-empty",
+          text: "No recent searches yet. Queries you submit appear here."
+        }));
+      }
+      const saveCurrent = el("button", {
+        class: "btn btn-small search-history-save-current",
+        type: "button",
+        text: "Save current search",
+        title: "Save the current search",
+        "aria-haspopup": "dialog",
+        "aria-expanded": "false"
+      });
+      saveCurrent.addEventListener("click", () => {
+        openExpressionEditor(saveCurrent, options.signal, () => {
+          renderInto(container, close);
+        }, { seed: options.getQuery() });
+      });
+      container.append(saveCurrent);
+    }
+    const popover = bindPopover(button, (close) => {
+      const content = el("div", { class: "search-history" });
+      renderInto(content, close);
+      return { content };
+    }, {
+      role: "dialog",
+      label: "Search history",
+      className: "search-history-panel",
+      autoFocus: true
+    }, options.signal);
+    button.addEventListener("click", () => popover.toggle(), { signal: options.signal });
+    return button;
   }
 
   // src/ui/topbar.ts
@@ -10448,11 +10479,6 @@ ${defaultKeySummary()}`)) {
     const refresh = (next) => {
       text = next ?? options.getText();
       for (const entry of entries) {
-        if (entry.tag.mode === "run") {
-          entry.node.removeAttribute("aria-pressed");
-          entry.node.title = `Run ${entry.tag.name}`;
-          continue;
-        }
         const on = containsExpression(text, entry.tag.query);
         entry.node.setAttribute("aria-pressed", String(on));
         entry.node.title = on ? `Remove ${entry.tag.query}` : `Add ${entry.tag.query}`;
@@ -10463,9 +10489,8 @@ ${defaultKeySummary()}`)) {
       row.replaceChildren();
       for (const tag of tags) {
         const node = el("button", { class: "quick-tag", type: "button", "aria-pressed": "false" }, el("span", { class: "quick-tag-label", text: tag.name }));
-        node.addEventListener("click", (event) => {
-          const run = tag.mode === "run" !== (event.altKey === true);
-          options.search(run ? tag.query : toggleExpressionInSearch(options.getText(), tag.query));
+        node.addEventListener("click", () => {
+          options.search(toggleExpressionInSearch(options.getText(), tag.query));
         }, { signal });
         row.append(node);
         entries.push({ tag, node });

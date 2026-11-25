@@ -48,13 +48,21 @@ describe("saved expressions", () => {
     expect(savedExpressions()).toEqual([]);
   });
 
-  test("only pinned expressions feed the quick-tag row", () => {
+  test("pinned expressions become toggle quick tags", () => {
     replaceExpressions([
       { name: "Run only", query: "one", mode: "run", pinned: false, savedAt: 1 },
       { name: "Pinned run", query: "two", mode: "run", pinned: true, savedAt: 2 },
     ]);
 
-    expect(quickExpressions().map((entry) => entry.name)).toEqual(["Pinned run"]);
+    expect(quickExpressions().map((entry) => [entry.name, entry.mode])).toEqual([
+      ["Pinned run", "toggle"],
+    ]);
+  });
+
+  test("normalizes an already-stored pinned run expression on read", () => {
+    GM_setValue(KEY, [{ name: "Pinned run", query: "two", mode: "run", pinned: true, savedAt: 2 }]);
+
+    expect(savedExpressions()).toMatchObject([{ mode: "toggle", pinned: true }]);
   });
 
   test("replaces the whole list and caps it", () => {
