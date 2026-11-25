@@ -10295,8 +10295,12 @@ ${defaultKeySummary()}`)) {
   // src/ui/form-controls.ts
   function selectedValue(select) {
     const options = [...select.querySelectorAll("option")];
-    const selected = options.find((option) => option.selected === true || option.hasAttribute("selected"));
-    return selected?.value ?? options[0]?.value ?? "";
+    const live = options.find((option) => option.selected === true);
+    if (live !== undefined) {
+      return live.value;
+    }
+    const attributed = options.find((option) => option.hasAttribute("selected"));
+    return attributed?.value ?? options[0]?.value ?? "";
   }
   function setSelectValue(select, value) {
     const options = [...select.querySelectorAll("option")];

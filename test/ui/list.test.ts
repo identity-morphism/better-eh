@@ -109,6 +109,42 @@ describe("renderList", () => {
     expect(url.searchParams.get("f_spf")).toBe("10");
   });
 
+  test("keeps an applied rating selected and the filter panel open", () => {
+    render("f_search=test");
+    const details = host.querySelector<HTMLDetailsElement>("details.filters");
+    const form = host.querySelector<HTMLFormElement>("form.filters-grid");
+    const rating = form?.querySelector<HTMLSelectElement>("select.field-select");
+    if (!details || !form || !rating) {
+      throw new Error("missing advanced filter fields");
+    }
+    details.setAttribute("open", "");
+    details.dispatchEvent(new Event("toggle"));
+
+    const options = [...rating.querySelectorAll<HTMLOptionElement>("option")];
+    const any = options.find((option) => option.value === "0");
+    const four = options.find((option) => option.value === "4");
+    if (!any || !four) {
+      throw new Error("missing rating options");
+    }
+    // A browser keeps the `selected` attribute on the default option after the user picks another
+    // one. The live selection, not that stale attribute, is what Apply must read.
+    Object.defineProperty(any, "selected", { configurable: true, value: false });
+    Object.defineProperty(four, "selected", { configurable: true, value: true });
+
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(navigations).toHaveLength(1);
+    const url = new URL(navigations[0] ?? "", "https://e-hentai.org");
+    expect(url.searchParams.get("f_srdd")).toBe("4");
+
+    // The next page rebuilds the panel from the applied address and the remembered open state.
+    renderList(host, { ...EMPTY, url: url.href }, parseSearchQuery(url), viewContext());
+    const reopened = host.querySelector<HTMLSelectElement>("select.field-select");
+    expect(reopened?.querySelector<HTMLOptionElement>('option[value="4"]')?.selected).toBe(true);
+    expect(host.querySelector<HTMLDetailsElement>("details.filters")?.hasAttribute("open")).toBe(
+      true,
+    );
+  });
+
   test("a quick tag edits the draft without submitting a search", () => {
     replaceQuickTags([{ name: "TAGS", query: "f:keyword$", savedAt: 1 }]);
     render("f_search=cat");
