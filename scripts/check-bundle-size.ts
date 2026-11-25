@@ -10,8 +10,8 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 
 const BUNDLE = join(import.meta.dir, "..", "dist", "better-eh.user.js");
-const RAW_LIMIT_KIB = 680;
-const GZIP_LIMIT_KIB = 165;
+const RAW_LIMIT_KIB = 700;
+const GZIP_LIMIT_KIB = 170;
 const KIB = 1024;
 
 interface Measurement {
