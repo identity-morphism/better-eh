@@ -126,6 +126,19 @@ Tailwind CSS is emitted without `--minify` so the whole bundle stays readable. B
 names and statement breaks, so re-printing only re-wraps lines (roughly 11% more lines and 9 KB for
 this script), and any minifier would break the unminified requirement.
 
+## Tag data refresh
+
+`Update tag popularity` (Mondays 05:17 UTC) and `Update tag vocabulary` (Mondays 05:47 UTC) rewrite
+`assets/*.bin`, regenerate `src/tags/core-vocabulary.ts` and exit when the upstream release has not
+moved. A real refresh also changes `dist/`, because the bundle inlines the core counts. Master
+accepts a push only when the commit already carries the `check` status, and a commit created on a
+runner carries none, so `scripts/publish-data.ts` publishes the commit in two steps: it pushes to
+`automation/tag-popularity` (or `automation/tag-vocabulary`), dispatches `ci.yml` against that
+branch — `workflow_dispatch` is the only event the token recursion guard lets through — waits for
+the run, and pushes the same commit to master only after it is green. The scratch branch keeps
+whatever the last attempt pushed; each run force-pushes over it. Rerun a failed refresh from the
+Actions tab, or `gh workflow run update-tag-counts.yml`.
+
 ## Settings & Debugging
 
 - Settings are stored as one versioned `eh:settings:v2` value. An absent or outdated record starts
