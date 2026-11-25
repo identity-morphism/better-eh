@@ -87,6 +87,13 @@ changes behaviour commits the rebuilt bundle and leaves `version` in `package.js
 `bun run check:pr-version` fails a pull request that moves it. Managers only update on a version
 change, so the rebuilt bundle reaches installed copies at the next release, not at merge.
 
+`bun run check:release-tag` closes the other half: the newest merged `vX.Y.Z` tag must equal
+`package.json`'s version, and the committed bundle header must match both. Because `bun run release`
+bumps, builds, commits and tags in one step and `--push` sends commit and tag atomically, a version
+only ever exists on its release commit. If a version is committed on its own, the check fails and
+the release script refuses to start until the version is tagged or reverted; never hand-edit
+`version` as part of a feature change.
+
 A dependency that generates the bundle changes it: a Tailwind bump rewrites the CSS inside `dist/`.
 A dependency pull request cannot rebuild it, so land that bump with a commit that runs
 `bun run build`, or CI's dist check fails on the pull request. Dependabot is told to leave the `bun`

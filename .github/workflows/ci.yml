@@ -41,6 +41,10 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: bun run check:pr-version "$BASE_SHA"
+      - name: A version only exists with its release tag
+        # `bun run release` bumps, builds, commits and tags in one atomic push. A hand-committed
+        # version bump leaves master advertising a release that does not exist.
+        run: bun run check:release-tag
       - run: bunx playwright install --with-deps chromium
       - run: bun run test:browser
       - uses: actions/upload-artifact@v7
