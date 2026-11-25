@@ -40,19 +40,13 @@ function lastFocus(): string | null {
 }
 
 describe("topbar chip focus", () => {
-  test("removing a chip focuses the chip that takes its place", () => {
+  test("removal moves focus to the next chip, then the previous, then the field", () => {
     chips()[0]?.click();
     expect(lastFocus()).toBe("two");
-  });
 
-  test("removing the last chip focuses the previous one", () => {
-    chips()[2]?.click();
+    chips()[1]?.click();
     expect(lastFocus()).toBe("two");
-  });
 
-  test("only an empty row falls back to the search field", () => {
-    chips()[0]?.click();
-    chips()[0]?.click();
     chips()[0]?.click();
     expect(focused.at(-1)?.tagName).toBe("INPUT");
   });

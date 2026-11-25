@@ -4,12 +4,8 @@ import { saveListFilters } from "../../src/data/list-filters";
 import { ParseMismatchError } from "../../src/fetch/errors";
 import type { DocumentOptions, ViewerPageOptions } from "../../src/fetch/loader";
 import { priorityOf } from "../../src/net/priority";
-import { parseArchivePage } from "../../src/parse/archive";
 import { parseGalleryPage } from "../../src/parse/gallery";
-import { parseGalleryTorrents } from "../../src/parse/gallery-torrents";
-import { parseListPage } from "../../src/parse/list";
 import { emptySearchQuery, parseSearchQuery } from "../../src/parse/query";
-import { parseTorrents } from "../../src/parse/torrents";
 import { parseViewer } from "../../src/parse/viewer";
 import type { Route } from "../../src/router";
 import { parseRoute } from "../../src/router";
@@ -172,7 +168,7 @@ describe("createRouteViews routing", () => {
 });
 
 describe("home route", () => {
-  test("loads the account overview and titles it", async () => {
+  test("loads the account overview through the injected loader and titles it", async () => {
     const { views, docCalls } = harness();
     const signal = new AbortController().signal;
 
@@ -197,10 +193,11 @@ describe("settings route", () => {
     } satisfies RouteOf<"settings">;
     const { views, docCalls } = harness();
 
-    await views.routeView(route).load(route, new AbortController().signal);
+    const data = await views.routeView(route).load(route, new AbortController().signal);
 
     expect(docCalls).toHaveLength(1);
     expect(docCalls[0]?.options.fresh).toBe(true);
+    expect(views.routeView(route).title(data)).toBe("Settings - E-Hentai");
   });
 });
 
@@ -231,7 +228,7 @@ describe("viewer route", () => {
     ).rejects.toThrow(ParseMismatchError);
   });
 
-  test("parses the initial document with the viewer parser and seeds the page cache", () => {
+  test("parses the initial document, seeds the page cache and titles the page", () => {
     const { views, seedCalls } = harness();
 
     const data = views.routeView(viewerRoute).parse(viewerDoc, viewerRoute);
@@ -241,14 +238,7 @@ describe("viewer route", () => {
     expect(seedCalls).toHaveLength(1);
     expect(seedCalls[0]?.url).toBe(VIEWER_URL);
     expect(seedCalls[0]?.data).toBe(data);
-  });
-
-  test("titles the page with the gallery title and counter", () => {
-    const { views } = harness();
-
-    expect(views.routeView(viewerRoute).title(viewerData)).toBe(
-      "A Viewer Title - 2 / 3 - E-Hentai",
-    );
+    expect(views.routeView(viewerRoute).title(data)).toBe("A Viewer Title - 2 / 3 - E-Hentai");
   });
 });
 
@@ -287,17 +277,12 @@ describe("gallery route", () => {
     expect(data.gid).toBe("999999");
   });
 
-  test("titles the page with the primary title", () => {
-    const { views } = harness();
-    const data = parseGalleryPage(galleryDoc, GALLERY_URL);
-
-    expect(views.routeView(galleryRoute).title(data)).toBe("The Great Work - E-Hentai");
-  });
-
-  test("exposes a page source that shares page one's loader and parser", async () => {
+  test("titles the page and shares page one's loader and parser with the append feed", async () => {
     const { views, docCalls } = harness();
     const signal = new AbortController().signal;
     const parsed = parseGalleryPage(galleryDoc, GALLERY_URL);
+
+    expect(views.routeView(galleryRoute).title(parsed)).toBe("The Great Work - E-Hentai");
 
     await expectPageSource(views.routeView(galleryRoute).feed?.(galleryRoute), {
       page: { items: parsed.thumbs, next: parsed.nextHref },
@@ -337,7 +322,7 @@ describe("route address policy", () => {
     }
   });
 
-  test("a date range starts a cold listing at the site's seek cursor", () => {
+  test("a date range starts a cold listing at the site's seek cursor and loads from it", async () => {
     const url = "https://e-hentai.org/?eh_since=2024-01-01&eh_until=2024-12-31";
     const route = {
       kind: "list",
@@ -345,16 +330,25 @@ describe("route address policy", () => {
       query: parseSearchQuery(new URL(url)),
       scope: "search",
     } satisfies RouteOf<"list">;
-    const { views } = harness();
+    const docCalls: DocCall[] = [];
+    const views = createRouteViews({
+      document: (requestUrl, options) => {
+        docCalls.push({ url: requestUrl, options: options ?? {} });
+        return Promise.resolve({ doc: listDoc, url: requestUrl });
+      },
+      viewerPage: () => Promise.reject(new Error("unexpected viewer load")),
+      seedViewerPage: () => undefined,
+    });
 
     const prepared = views.routeView(route).prepare(route, {
       previous: null,
       replace: true,
       previousState: {},
     });
-
-    expect(prepared.bootUrl).not.toBeNull();
     expect(new URL(prepared.bootUrl ?? "").searchParams.get("seek")).toBe("2024-12-31");
+
+    await views.routeView(route).load(route, new AbortController().signal);
+    expect(new URL(docCalls[0]?.url ?? "").searchParams.get("seek")).toBe("2024-12-31");
   });
 
   test("the viewer carries the gallery-return marker through its own replace-navigations", () => {
@@ -393,8 +387,6 @@ describe("route address policy", () => {
     expect(prepared.route).toBe(galleryRoute);
     expect(prepared.bootUrl).toBeNull();
     expect(prepared.state).toEqual({});
-    expect(views.routeView(galleryRoute).feed?.(galleryRoute)).toBeDefined();
-    expect(views.routeView(torrentsRoute).feed?.(torrentsRoute)).toBeUndefined();
   });
 });
 
@@ -417,85 +409,36 @@ describe("list route", () => {
     });
   });
 
-  test("titles a search with its text", () => {
+  test("titles a listing by its search text, category or tag path", () => {
     const { views } = harness();
-    const route = {
+
+    const search = {
       kind: "list",
       url: LIST_URL,
       query: parseSearchQuery(new URL(LIST_URL)),
       scope: "search",
     } satisfies RouteOf<"list">;
+    const searchData = views.routeView(search).parse(listDoc, search);
+    expect(views.routeView(search).title(searchData)).toBe("test - E-Hentai");
 
-    const data = views.routeView(route).parse(listDoc, route);
-
-    expect(views.routeView(route).title(data)).toBe("test - E-Hentai");
-  });
-
-  test("titles a category listing without search text", () => {
-    const { views } = harness();
-    const route = parseRoute("https://e-hentai.org/doujinshi");
-    if (route.kind !== "list") {
+    const category = parseRoute("https://e-hentai.org/doujinshi");
+    if (category.kind !== "list") {
       throw new Error("expected a list route");
     }
+    const categoryData = views.routeView(category).parse(listDoc, category);
+    expect(views.routeView(category).title(categoryData)).toBe("Doujinshi - E-Hentai");
 
-    const data = views.routeView(route).parse(listDoc, route);
-
-    expect(views.routeView(route).title(data)).toBe("Doujinshi - E-Hentai");
-  });
-
-  test("titles a tag landing with the alias token from its path", () => {
-    const { views } = harness();
-    const route = parseRoute("https://e-hentai.org/tag/language:chinese");
-    if (route.kind !== "list") {
+    const tag = parseRoute("https://e-hentai.org/tag/language:chinese");
+    if (tag.kind !== "list") {
       throw new Error("expected a list route");
     }
-
-    const data = views.routeView(route).parse(listDoc, route);
-
-    expect(views.routeView(route).title(data)).toBe("l:chinese$ - E-Hentai");
-  });
-
-  test("exposes a page source that shares page one's loader and parser", async () => {
-    const { views, docCalls } = harness();
-    const signal = new AbortController().signal;
-    const parsed = parseListPage(listDoc, LIST_URL);
-
-    await expectPageSource(views.routeView(listRoute).feed?.(listRoute), {
-      page: { items: parsed.items, next: parsed.nextHref },
-      url: LIST_URL,
-      signal,
-      tag: "list",
-      calls: docCalls,
-    });
-  });
-
-  test("translates the app's date range into the site's seek cursor before loading", async () => {
-    const url = "https://e-hentai.org/?eh_until=2024-12-31";
-    const route = {
-      kind: "list",
-      url,
-      query: parseSearchQuery(new URL(url)),
-      scope: "search",
-    } satisfies RouteOf<"list">;
-    const docCalls: DocCall[] = [];
-    const views = createRouteViews({
-      document: (requestUrl, options) => {
-        docCalls.push({ url: requestUrl, options: options ?? {} });
-        return Promise.resolve({ doc: listDoc, url: requestUrl });
-      },
-      viewerPage: () => Promise.reject(new Error("unexpected viewer load")),
-      seedViewerPage: () => undefined,
-    });
-
-    await views.routeView(route).load(route, new AbortController().signal);
-
-    expect(docCalls).toHaveLength(1);
-    expect(new URL(docCalls[0]?.url ?? "").searchParams.get("seek")).toBe("2024-12-31");
+    const tagData = views.routeView(tag).parse(listDoc, tag);
+    expect(views.routeView(tag).title(tagData)).toBe("l:chinese$ - E-Hentai");
   });
 });
 
 describe("torrents route", () => {
-  test("loads through the injected document loader as a torrent index", async () => {
+  test("loads the torrent index, parses its rows and titles the page", async () => {
     const { views, docCalls, viewerCalls } = harness();
     const signal = new AbortController().signal;
 
@@ -510,18 +453,12 @@ describe("torrents route", () => {
       priority: "navigation",
       tag: "torrents",
     });
-  });
-
-  test("titles the page as the torrent index", () => {
-    const { views } = harness();
-    const data = parseTorrents(torrentsDoc, TORRENTS_URL);
-
     expect(views.routeView(torrentsRoute).title(data)).toBe("Torrents - E-Hentai");
   });
 });
 
 describe("gallery torrents route", () => {
-  test("loads and parses the gallery's torrent popup", async () => {
+  test("loads the gallery's torrent popup and titles the page with the gallery name", async () => {
     const { views, docCalls, viewerCalls } = harness();
     const signal = new AbortController().signal;
 
@@ -536,12 +473,6 @@ describe("gallery torrents route", () => {
       priority: "navigation",
       tag: "gallery-torrents",
     });
-  });
-
-  test("titles the page with the gallery name", () => {
-    const { views } = harness();
-    const data = parseGalleryTorrents(galleryTorrentsDoc, GALLERY_TORRENTS_URL);
-
     expect(views.routeView(galleryTorrentsRoute).title(data)).toBe(
       "Torrents for Test Gallery - E-Hentai",
     );
@@ -549,7 +480,7 @@ describe("gallery torrents route", () => {
 });
 
 describe("archive route", () => {
-  test("loads the chooser through the injected document loader", async () => {
+  test("loads the chooser fresh and titles the page", async () => {
     const { views, docCalls, viewerCalls } = harness();
     const signal = new AbortController().signal;
 
@@ -566,52 +497,28 @@ describe("archive route", () => {
       tag: "archive",
     });
     expect(docCalls[0]?.options.fresh).toBe(true);
-  });
-
-  test("titles the page as the archive chooser", () => {
-    const { views } = harness();
-    const data = parseArchivePage(archiveDoc, ARCHIVE_URL);
-
     expect(views.routeView(archiveRoute).title(data)).toBe("Archive Download - E-Hentai");
   });
 });
 
 describe("account and ranking pages", () => {
-  test("settings parse the live form and title the page", () => {
-    const { views, docCalls } = harness();
-    const route = {
-      kind: "settings",
-      url: "https://e-hentai.org/uconfig.php",
-    } satisfies RouteOf<"settings">;
-
-    const data = views.routeView(route).parse(uconfigDoc, route);
-
-    expect(data.length).toBeGreaterThan(0);
-    expect(views.routeView(route).title(data)).toBe("Settings - E-Hentai");
-    expect(docCalls).toHaveLength(0);
-  });
-
-  test("titles the active favorite folder", () => {
+  test("titles the active favorite folder and ranking", () => {
     const { views } = harness();
-    const route = {
+
+    const favorites = {
       kind: "favorites",
       url: "https://e-hentai.org/favorites.php",
     } satisfies RouteOf<"favorites">;
+    const favoritesData = views.routeView(favorites).parse(favoritesDoc, favorites);
+    expect(views.routeView(favorites).title(favoritesData)).toBe(
+      "Plan to Read - Favorites - E-Hentai",
+    );
 
-    const data = views.routeView(route).parse(favoritesDoc, route);
-
-    expect(views.routeView(route).title(data)).toBe("Plan to Read - Favorites - E-Hentai");
-  });
-
-  test("toplists title the active ranking", () => {
-    const { views } = harness();
-    const route = {
+    const toplist = {
       kind: "toplist",
       url: "https://e-hentai.org/toplist.php",
     } satisfies RouteOf<"toplist">;
-
-    const data = views.routeView(route).parse(toplistDoc, route);
-
-    expect(views.routeView(route).title(data)).toBe("Toplists - E-Hentai");
+    const toplistData = views.routeView(toplist).parse(toplistDoc, toplist);
+    expect(views.routeView(toplist).title(toplistData)).toBe("Toplists - E-Hentai");
   });
 });

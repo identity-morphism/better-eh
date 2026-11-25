@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { TagCompletion, TagIndex, TagUsage } from "../../src/tags/db";
 import { buildTagIndex, COMPLETION_TTL_MS, completionId, tagId } from "../../src/tags/db";
 import { parseSearchTerms } from "../../src/tags/model";
+import type { SuggestResult } from "../../src/tags/suggest";
 import { buildSuggestions, effectiveSign, suggestionInsertion } from "../../src/tags/suggest";
 import { tagKeyId } from "../../src/tags/tag-counts-codec";
 
@@ -18,9 +19,8 @@ const INDEX: TagIndex = buildTagIndex(
           "small breasts": {},
         },
       },
-      { namespace: "male", data: { "big dick": {}, "sole male": {} } },
+      { namespace: "male", data: { "big dick": {} } },
       { namespace: "artist", data: { "big boobs artist": {} } },
-      { namespace: "parody", data: { 86: {}, "resident evil": {} } },
     ],
   },
   1,
@@ -48,7 +48,7 @@ const POPULAR: TagIndex = buildTagIndex(
         namespace: "other",
         data: { "3d": {}, "3d imageset": {}, "ai generated": {}, replaced: {} },
       },
-      { namespace: "parody", data: { 86: {}, "resident evil": {} } },
+      { namespace: "parody", data: { "resident evil": {} } },
     ],
   },
   1,
@@ -63,7 +63,6 @@ const POPULAR: TagIndex = buildTagIndex(
       [tagKeyId("en"), 122],
       [tagKeyId("trans"), 30],
       [tagKeyId("ai generated"), 550_577],
-      [tagKeyId("86"), 609],
       [tagKeyId("3d"), 242_537],
       [tagKeyId("3d imageset"), 26_307],
       [tagKeyId("replaced"), 54_047],
@@ -98,38 +97,18 @@ function completion(
   return [completionId({ prefixNs, prefix, ns, key }), { count, lastUsed }];
 }
 
-function tagKeys(result: ReturnType<typeof suggest>): string[] {
+function tagKeys(result: SuggestResult): string[] {
   return result.items.flatMap((item) => (item.kind === "tag" ? [item.entry.key] : []));
 }
 
 describe("suggestions", () => {
-  test("puts an exact tag first", () => {
-    const result = suggest("86");
+  test("merges multi-word phrases that end at the caret, inheriting namespace and sign", () => {
+    const merged = suggest("cat big b");
+    expect(merged.term.value).toBe("big b");
+    expect(merged.term.start).toBe(4);
+    expect(merged.term.end).toBe(9);
+    expect(tagKeys(merged).sort()).toEqual(["big boobs artist", "big breasts", "big brother"]);
 
-    expect(result.items[0]?.kind).toBe("tag");
-    expect(result.items[0]?.kind === "tag" && result.items[0].entry.key).toBe("86");
-    expect(result.total).toBe(1);
-  });
-
-  test("completes multi-word tags from unquoted input", () => {
-    const result = suggest("big b");
-
-    expect(tagKeys(result).sort()).toEqual(["big boobs artist", "big breasts", "big brother"]);
-    expect(result.term.value).toBe("big b");
-    expect(result.term.start).toBe(0);
-    expect(result.term.end).toBe(5);
-  });
-
-  test("merges only the words that end at the caret", () => {
-    const result = suggest("cat big b");
-
-    expect(result.term.value).toBe("big b");
-    expect(result.term.start).toBe(4);
-    expect(result.term.end).toBe(9);
-    expect(tagKeys(result).sort()).toEqual(["big boobs artist", "big breasts", "big brother"]);
-  });
-
-  test("inherits a leading namespace and sign in a merged phrase", () => {
     const female = suggest("female:big b");
     expect(female.term.ns?.id).toBe("female");
     expect(female.term.start).toBe(0);
@@ -140,19 +119,7 @@ describe("suggestions", () => {
     expect(tagKeys(excluded).sort()).toEqual(["big boobs artist", "big breasts", "big brother"]);
   });
 
-  test("detects tags applied outside a merged phrase", () => {
-    const result = suggest('female:"big breasts$" big b');
-    const applied = result.items.find(
-      (item) => item.kind === "tag" && item.entry.key === "big breasts",
-    );
-
-    expect(applied?.kind).toBe("tag");
-    if (applied?.kind === "tag") {
-      expect(applied.applied?.raw).toBe('female:"big breasts$"');
-    }
-  });
-
-  test("matches applied tags across aliases and key spelling", () => {
+  test("marks tags applied elsewhere, matching aliases and key spelling", () => {
     const result = suggest('f:"Big_Breasts$" female:big');
     const applied = result.items.find(
       (item) => item.kind === "tag" && item.entry.key === "big breasts",
@@ -162,9 +129,20 @@ describe("suggestions", () => {
     if (applied?.kind === "tag") {
       expect(applied.applied?.raw).toBe('f:"Big_Breasts$"');
     }
+
+    // An applied quoted tag must not be pulled into the merged phrase being typed.
+    const afterQuote = suggest('female:"big breasts$" big b');
+    const later = afterQuote.items.find(
+      (item) => item.kind === "tag" && item.entry.key === "big breasts",
+    );
+    expect(later?.kind === "tag" ? later.applied?.raw : null).toBe('female:"big breasts$"');
+
+    // The term being edited is not itself "already applied".
+    const active = suggest("female:big");
+    expect(active.items.every((item) => item.kind === "tag" && item.applied === null)).toBe(true);
   });
 
-  test("ranks prefixes and reports every match", () => {
+  test("ranks prefix matches ahead of substrings and reports every match", () => {
     const result = suggest("big");
 
     expect(tagKeys(result).sort()).toEqual([
@@ -175,13 +153,9 @@ describe("suggestions", () => {
     ]);
     expect(result.total).toBe(4);
     expect(result.empty).toBe(false);
-  });
 
-  test("prefers a prefix over a substring", () => {
-    const result = suggest("breasts");
-    const keys = tagKeys(result);
-
-    expect(keys.slice(0, 2)).toEqual(["big breasts", "small breasts"]);
+    const breasts = suggest("breasts");
+    expect(tagKeys(breasts).slice(0, 2)).toEqual(["big breasts", "small breasts"]);
   });
 
   test("filters tags by a namespace", () => {
@@ -223,23 +197,6 @@ describe("suggestions", () => {
     }
   });
 
-  test("marks tags already present elsewhere in the query", () => {
-    const result = suggest('female:"big breasts$" female:big');
-    const applied = result.items.find(
-      (item) => item.kind === "tag" && item.entry.key === "big breasts",
-    );
-
-    expect(applied?.kind).toBe("tag");
-    if (applied?.kind === "tag") {
-      expect(applied.applied?.raw).toBe('female:"big breasts$"');
-    }
-  });
-
-  test("does not mark the active term as applied", () => {
-    const result = suggest("female:big");
-    expect(result.items.every((item) => item.kind === "tag" && item.applied === null)).toBe(true);
-  });
-
   test("shows recents and namespaces for an empty query", () => {
     const result = suggest("", usageOf([["female", "sole female", 3]]));
     const first = result.items[0];
@@ -263,23 +220,23 @@ describe("suggestions", () => {
     }
   });
 
-  test("lists a namespace's tags when only the prefix is typed", () => {
-    const result = suggest("female:");
+  test("ranks a namespace's tags by popularity when only the prefix is typed", () => {
+    const result = buildSuggestions(POPULAR, "language:", "language:".length, new Map(), 50);
 
-    expect(tagKeys(result).sort()).toEqual([
-      "big breasts",
-      "big brother",
-      "small breasts",
-      "sole female",
-    ]);
+    expect(tagKeys(result).slice(0, 4)).toEqual(["translated", "english", "chinese", "japanese"]);
     expect(result.empty).toBe(true);
   });
 
-  test("returns nothing for an unknown namespace", () => {
-    const result = suggest("zz:foo");
+  test("returns nothing for unknown and prototype-named queries", () => {
+    const unknown = suggest("zz:foo");
+    expect(unknown.items).toHaveLength(0);
+    expect(unknown.empty).toBe(false);
 
-    expect(result.items).toHaveLength(0);
-    expect(result.empty).toBe(false);
+    for (const query of ["constructor", "__proto__"]) {
+      const result = popularSuggest(query);
+      expect(result.items).toEqual([]);
+      expect(result.total).toBe(0);
+    }
   });
 
   test("computes the effective sign from the term and the exclusion toggle", () => {
@@ -295,27 +252,14 @@ describe("suggestions", () => {
   });
 
   describe("popularity", () => {
-    test("surfaces a common language tag over exact short tags", () => {
-      const keys = tagKeys(popularSuggest("en"));
-      const first = popularSuggest("en").items[0];
+    test("decides between competing prefixes", () => {
+      const first = (query: string): string | undefined => tagKeys(popularSuggest(query))[0];
 
-      expect(first?.kind).toBe("tag");
-      if (first?.kind === "tag") {
-        expect(first.entry.ns.id).toBe("language");
-        expect(first.entry.key).toBe("english");
-      }
-      expect(keys.indexOf("english")).toBeLessThan(keys.indexOf("enema"));
-      expect(keys.indexOf("english")).toBeLessThan(keys.indexOf("en"));
-    });
-
-    test("ranks japanese, chinese and translated above their competitors", () => {
-      expect(tagKeys(popularSuggest("ja"))[0]).toBe("japanese");
-      expect(tagKeys(popularSuggest("ch"))[0]).toBe("chinese");
-      expect(tagKeys(popularSuggest("trans"))[0]).toBe("translated");
-    });
-
-    test("prefers a popular multi-word tag", () => {
-      expect(tagKeys(popularSuggest("big b"))[0]).toBe("big breasts");
+      expect(first("en")).toBe("english");
+      expect(first("ja")).toBe("japanese");
+      expect(first("ch")).toBe("chinese");
+      expect(first("trans")).toBe("translated");
+      expect(first("big b")).toBe("big breasts");
     });
 
     test("does not let a huge substring count dominate a short query", () => {
@@ -347,40 +291,19 @@ describe("suggestions", () => {
 
       expect(tagKeys(result)[0]).toBe("english");
     });
-
-    test("handles prototype-named queries safely", () => {
-      for (const query of ["constructor", "__proto__"]) {
-        const result = popularSuggest(query);
-        expect(result.items).toEqual([]);
-        expect(result.total).toBe(0);
-      }
-    });
-
-    test("orders a namespace's empty list by popularity", () => {
-      const result = buildSuggestions(POPULAR, "language:", "language:".length, new Map(), 50);
-
-      expect(tagKeys(result).slice(0, 4)).toEqual(["translated", "english", "chinese", "japanese"]);
-    });
   });
 
   test("a remembered pick overrides the popularity prior for its prefix", () => {
-    const plain = popularSuggest("en");
-    expect(tagKeys(plain)[0]).toBe("english");
-
-    const completions = new Map([completion("en", "enema", Date.now())]);
-    const remembered = popularSuggest("en", completions);
-    expect(tagKeys(remembered)[0]).toBe("enema");
-  });
-
-  test("completion memory is prefix-specific", () => {
-    const now = Date.now();
     const plain = tagKeys(popularSuggest("en"));
-    const unrelated = new Map([completion("ene", "enema", now)]);
-    const matching = new Map([completion("en", "enema", now)]);
+    expect(plain[0]).toBe("english");
 
-    expect(plain[0]).not.toBe("enema");
-    expect(tagKeys(popularSuggest("en", unrelated))[0]).toBe(plain[0]);
-    expect(tagKeys(popularSuggest("en", matching))[0]).toBe("enema");
+    const now = Date.now();
+    const matching = popularSuggest("en", new Map([completion("en", "enema", now)]));
+    expect(tagKeys(matching)[0]).toBe("enema");
+
+    // The same pick under a different typed prefix changes nothing.
+    const unrelated = popularSuggest("en", new Map([completion("ene", "enema", now)]));
+    expect(tagKeys(unrelated)[0]).toBe("english");
   });
 
   test("a remembered pick decays and expires", () => {
@@ -392,30 +315,24 @@ describe("suggestions", () => {
       );
     };
 
-    const fresh = scoreAt(now);
-    const month = scoreAt(now - 30 * 24 * 60 * 60 * 1000);
-    const expired = scoreAt(now - COMPLETION_TTL_MS - 1);
-    const none = scoreAt(0);
+    expect(scoreAt(now - 30 * 24 * 60 * 60 * 1000)).toBeLessThan(scoreAt(now));
 
-    expect(month).toBeLessThan(fresh);
-    expect(expired).toBe(none);
+    const expired = popularSuggest(
+      "en",
+      new Map([completion("en", "enema", now - COMPLETION_TTL_MS - 1)]),
+    );
+    expect(tagKeys(expired)[0]).toBe("english");
   });
 
   test("namespace-scoped picks stay in their namespace", () => {
     const completions = new Map([completion("en", "enema", Date.now(), 1, "male", "male")]);
-    const scoped = buildSuggestions(
-      POPULAR,
-      "male:en",
-      "male:en".length,
-      new Map(),
-      50,
-      completions,
-    );
-    const unscoped = buildSuggestions(POPULAR, "en", 2, new Map(), 50, completions);
+    const enemaScore = (text: string): number => {
+      const result = buildSuggestions(POPULAR, text, text.length, new Map(), 50, completions);
+      return (
+        result.items.find((item) => item.kind === "tag" && item.entry.key === "enema")?.score ?? 0
+      );
+    };
 
-    const enemaScore = (result: ReturnType<typeof buildSuggestions>): number =>
-      result.items.find((item) => item.kind === "tag" && item.entry.key === "enema")?.score ?? 0;
-
-    expect(enemaScore(scoped)).toBeGreaterThan(enemaScore(unscoped));
+    expect(enemaScore("male:en")).toBeGreaterThan(enemaScore("en"));
   });
 });

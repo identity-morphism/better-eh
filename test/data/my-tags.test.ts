@@ -92,14 +92,11 @@ describe("My Tags parsing", () => {
 });
 
 describe("normalizeWeight", () => {
-  test("rounds to whole numbers and clamps to the site's range", () => {
+  test("rounds, clamps and defaults missing or malformed weights", () => {
     expect(normalizeWeight(12.6)).toBe(13);
     expect(normalizeWeight(150)).toBe(99);
     expect(normalizeWeight(-150)).toBe(-99);
     expect(normalizeWeight(0)).toBe(0);
-  });
-
-  test("defaults missing or malformed weights to 10", () => {
     expect(normalizeWeight(undefined)).toBe(10);
     expect(normalizeWeight(null)).toBe(10);
     expect(normalizeWeight(Number.NaN)).toBe(10);
@@ -108,18 +105,17 @@ describe("normalizeWeight", () => {
 });
 
 describe("My Tags mutations", () => {
-  test("updates an existing tag through setusertag and preserves other fields", async () => {
+  test("posts one setusertag body per edit and preserves the untouched fields", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
-    await applyMyTag(
-      "Female:Enema",
-      { watched: true },
-      deps({
-        post: (url: string, body: unknown) => {
-          calls.push({ url, body });
-          return Promise.resolve({ tagid: 42 });
-        },
-      }),
-    );
+    const post = (url: string, body: unknown) => {
+      calls.push({ url, body });
+      return Promise.resolve({});
+    };
+
+    await applyMyTag("Female:Enema", { watched: true }, deps({ post }));
+    await applyMyTag("language:english", { weight: 30 }, deps({ post }));
+    await applyMyTag("language:english", { color: "#00ff00" }, deps({ post }));
+    await applyMyTag("female:enema", { hidden: true }, deps({ post }));
 
     expect(calls).toEqual([
       {
@@ -135,32 +131,47 @@ describe("My Tags mutations", () => {
           tagweight: 15,
         },
       },
-    ]);
-  });
-
-  test("updates the weight through setusertag and keeps watch/hide/colour", async () => {
-    let body: Record<string, unknown> = {};
-    await applyMyTag(
-      "language:english",
-      { weight: 30 },
-      deps({
-        post: (_url: string, payload: unknown) => {
-          body = payload as Record<string, unknown>;
-          return Promise.resolve({ tagid: 43 });
+      {
+        url: CONFIG.apiUrl,
+        body: {
+          method: "setusertag",
+          apiuid: CONFIG.apiUid,
+          apikey: CONFIG.apiKey,
+          tagid: 43,
+          tagwatch: 0,
+          taghide: 1,
+          tagcolor: "",
+          tagweight: 30,
         },
-      }),
-    );
-
-    expect(body).toEqual({
-      method: "setusertag",
-      apiuid: CONFIG.apiUid,
-      apikey: CONFIG.apiKey,
-      tagid: 43,
-      tagwatch: 0,
-      taghide: 1,
-      tagcolor: "",
-      tagweight: 30,
-    });
+      },
+      {
+        url: CONFIG.apiUrl,
+        body: {
+          method: "setusertag",
+          apiuid: CONFIG.apiUid,
+          apikey: CONFIG.apiKey,
+          tagid: 43,
+          tagwatch: 0,
+          taghide: 1,
+          tagcolor: "#00ff00",
+          tagweight: 10,
+        },
+      },
+      {
+        // Hiding a watched tag clears the watch flag.
+        url: CONFIG.apiUrl,
+        body: {
+          method: "setusertag",
+          apiuid: CONFIG.apiUid,
+          apikey: CONFIG.apiKey,
+          tagid: 42,
+          tagwatch: 0,
+          taghide: 1,
+          tagcolor: "#ff8800",
+          tagweight: 15,
+        },
+      },
+    ]);
   });
 
   test("uses injected existing state without fetching My Tags", async () => {
@@ -198,79 +209,45 @@ describe("My Tags mutations", () => {
     expect(body.tagweight).toBe(25);
   });
 
-  test("changing colour keeps watch/hide state", async () => {
-    let body: Record<string, unknown> = {};
-    await applyMyTag(
-      "language:english",
-      { color: "#00ff00" },
-      deps({
-        post: (_url: string, payload: unknown) => {
-          body = payload as Record<string, unknown>;
-          return Promise.resolve({ tagid: 43 });
-        },
-      }),
-    );
-
-    expect(body.tagwatch).toBe(0);
-    expect(body.taghide).toBe(1);
-    expect(body.tagcolor).toBe("#00ff00");
-  });
-
   test("adds a tag missing from My Tags through the native form", async () => {
     const calls: Array<{ url: string; body: URLSearchParams }> = [];
-    const result = await applyMyTag(
-      "female:enema",
-      { hidden: true },
-      deps({
-        loadDocument: () =>
-          Promise.resolve({
-            doc: parseDocument('<div id="usertags_outer"></div>'),
-            url: MYTAGS_URL,
-          }),
-        addTag: (url: string, body: URLSearchParams) => {
-          calls.push({ url, body });
-          return Promise.resolve();
-        },
-      }),
-    );
+    const addTag = (url: string, body: URLSearchParams) => {
+      calls.push({ url, body });
+      return Promise.resolve();
+    };
+    const emptyList = () =>
+      Promise.resolve({
+        doc: parseDocument('<div id="usertags_outer"></div>'),
+        url: MYTAGS_URL,
+      });
 
-    expect(result).toBe("added");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe(MYTAGS_URL);
-    expect(Object.fromEntries(calls[0]?.body ?? [])).toEqual({
-      usertag_action: "add",
-      tagname_new: "female:enema",
-      tagweight_new: "10",
-      usertag_target: "0",
-      taghide_new: "on",
-    });
-  });
+    const results = [
+      await applyMyTag("female:enema", { hidden: true }, deps({ loadDocument: emptyList, addTag })),
+      await applyMyTag(
+        "artist:someone",
+        { weight: 42, watched: true },
+        deps({ loadDocument: emptyList, addTag }),
+      ),
+    ];
 
-  test("sends the chosen weight when adding a tag", async () => {
-    const calls: Array<{ url: string; body: URLSearchParams }> = [];
-    await applyMyTag(
-      "artist:someone",
-      { weight: 42, watched: true },
-      deps({
-        loadDocument: () =>
-          Promise.resolve({
-            doc: parseDocument('<div id="usertags_outer"></div>'),
-            url: MYTAGS_URL,
-          }),
-        addTag: (url: string, body: URLSearchParams) => {
-          calls.push({ url, body });
-          return Promise.resolve();
-        },
-      }),
-    );
-
-    expect(Object.fromEntries(calls[0]?.body ?? [])).toEqual({
-      usertag_action: "add",
-      tagname_new: "artist:someone",
-      tagweight_new: "42",
-      usertag_target: "0",
-      tagwatch_new: "on",
-    });
+    expect(results).toEqual(["added", "added"]);
+    expect(calls.map((call) => call.url)).toEqual([MYTAGS_URL, MYTAGS_URL]);
+    expect(calls.map((call) => Object.fromEntries(call.body))).toEqual([
+      {
+        usertag_action: "add",
+        tagname_new: "female:enema",
+        tagweight_new: "10",
+        usertag_target: "0",
+        taghide_new: "on",
+      },
+      {
+        usertag_action: "add",
+        tagname_new: "artist:someone",
+        tagweight_new: "42",
+        usertag_target: "0",
+        tagwatch_new: "on",
+      },
+    ]);
   });
 
   test("reports an API error", async () => {
@@ -283,22 +260,6 @@ describe("My Tags mutations", () => {
         }),
       ),
     ).rejects.toThrow("Could not save tag: Not gold star");
-  });
-
-  test("hiding a watched tag clears the watch flag", async () => {
-    let body: Record<string, unknown> = {};
-    await applyMyTag(
-      "female:enema",
-      { hidden: true },
-      deps({
-        post: (_url: string, payload: unknown) => {
-          body = payload as Record<string, unknown>;
-          return Promise.resolve({ tagid: 42 });
-        },
-      }),
-    );
-    expect(body.taghide).toBe(1);
-    expect(body.tagwatch).toBe(0);
   });
 });
 

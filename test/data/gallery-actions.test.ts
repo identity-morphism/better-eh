@@ -53,18 +53,13 @@ function config(apiUrl: string): GalleryApiConfig {
 }
 
 describe("gallery action endpoints", () => {
-  test("the site's API subdomain is accepted", async () => {
+  test("the site's API subdomain and a relative endpoint are accepted", async () => {
     await rateGallery(config("https://api.e-hentai.org/api.php"), 5);
-
-    expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("https://api.e-hentai.org/api.php");
     expect(calls[0]?.body).toMatchObject({ apikey: "secret", method: "rategallery" });
-  });
 
-  test("a relative endpoint resolves against the page", async () => {
     await rateGallery(config("/api.php"), 5);
-
-    expect(calls[0]?.url).toBe("https://e-hentai.org/api.php");
+    expect(calls[1]?.url).toBe("https://e-hentai.org/api.php");
   });
 
   test("an off-site endpoint never receives the API key", async () => {

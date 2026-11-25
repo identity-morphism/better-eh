@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "bun:test";
 
 import type { FavoriteMark } from "../../src/types";
 import { closeFavoriteMenu, createStatusRegion, openFavoriteMenu } from "../../src/ui/favmenu";
+import type { FavoriteState } from "../../src/ui/favorite-state";
 import { createFavoriteState } from "../../src/ui/favorite-state";
 import { closePopovers } from "../../src/ui/popover";
 import { flushMicrotasks } from "./async";
@@ -23,7 +24,7 @@ beforeEach(() => {
 });
 
 describe("favorite menu status region", () => {
-  test("keeps one role=status node across status updates", () => {
+  test("keeps one role=status node and re-announces a repeated message", () => {
     const status = createStatusRegion();
     document.body.append(status.node);
     const node = status.node;
@@ -32,78 +33,51 @@ describe("favorite menu status region", () => {
     expect(node.getAttribute("aria-live")).toBe("polite");
 
     status.announce("Loading folders…");
-    expect(node.textContent).toBe("Loading folders…");
-
     status.announce("Saving…");
     expect(document.querySelector("[role='status']")).toBe(node);
     expect(node.textContent).toBe("Saving…");
-  });
 
-  test("re-announces a repeated message by blanking it first", () => {
     vi.useFakeTimers();
     try {
-      const status = createStatusRegion();
-      document.body.append(status.node);
-
       status.announce("Favorite update failed");
       status.announce("Favorite update failed");
 
-      expect(status.node.textContent).toBe("");
-      expect(status.node.hidden).toBe(true);
+      expect(node.textContent).toBe("");
+      expect(node.hidden).toBe(true);
 
       // The blank frame is restored on the next tick so assistive tech re-reads the message.
       vi.advanceTimersByTime(16);
 
-      expect(status.node.textContent).toBe("Favorite update failed");
-      expect(status.node.hidden).toBe(false);
+      expect(node.textContent).toBe("Favorite update failed");
+      expect(node.hidden).toBe(false);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  test("marks the current folder by slot", async () => {
+  test("marks the current folder by slot, or by name when no slot is known", async () => {
     document.cookie = "ipb_member_id=1";
-    const anchor = document.createElement("button");
-    document.body.append(anchor);
+    const folders = [
+      { slot: 1, name: "Good Stuff", color: "#c8c8c8" },
+      { slot: 2, name: "Plan to Read", color: "#ff7b7b" },
+    ];
+    const openWith = async (state: FavoriteState) => {
+      const anchor = document.createElement("button");
+      document.body.append(anchor);
+      openFavoriteMenu({ anchor, state, loadFolders: () => Promise.resolve(folders) });
+      await flushMicrotasks(2);
+      return document.querySelector<HTMLElement>(".fav-item.is-current");
+    };
 
-    openFavoriteMenu({
-      anchor,
-      state: favoriteState({ folder: "Good Stuff", slot: 1 }),
-      loadFolders: () =>
-        Promise.resolve([
-          { slot: 1, name: "Good Stuff", color: "#c8c8c8" },
-          { slot: 2, name: "Plan to Read", color: "#ff7b7b" },
-        ]),
-    });
-
-    await flushMicrotasks(2);
-
-    const current = document.querySelector<HTMLElement>(".fav-item.is-current");
-    expect(current?.textContent).toContain("Good Stuff");
-    expect(current?.getAttribute("aria-current")).toBe("true");
+    const bySlot = await openWith(favoriteState({ folder: "Good Stuff", slot: 1 }));
+    expect(bySlot?.textContent).toContain("Good Stuff");
+    expect(bySlot?.getAttribute("aria-current")).toBe("true");
     expect(document.querySelectorAll(".fav-item.is-current")).toHaveLength(1);
-    expect(current?.querySelector(".fav-check")?.textContent).toBe("✓");
-  });
+    expect(bySlot?.querySelector(".fav-check")?.textContent).toBe("✓");
 
-  test("falls back to the folder name when no slot is known", async () => {
-    document.cookie = "ipb_member_id=1";
-    const anchor = document.createElement("button");
-    document.body.append(anchor);
-
-    openFavoriteMenu({
-      anchor,
-      state: favoriteState({ folder: "plan to read", slot: null }),
-      loadFolders: () =>
-        Promise.resolve([
-          { slot: 1, name: "Good Stuff", color: "#c8c8c8" },
-          { slot: 2, name: "Plan to Read", color: "#ff7b7b" },
-        ]),
-    });
-
-    await flushMicrotasks(2);
-
-    const current = document.querySelector<HTMLElement>(".fav-item.is-current");
-    expect(current?.textContent).toContain("Plan to Read");
+    closeFavoriteMenu();
+    const byName = await openWith(favoriteState({ folder: "plan to read", slot: null }));
+    expect(byName?.textContent).toContain("Plan to Read");
   });
 
   test("does not mark a folder for an unfavorited gallery", async () => {

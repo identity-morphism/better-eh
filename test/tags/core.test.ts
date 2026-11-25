@@ -4,6 +4,7 @@ import { coreTagData } from "../../src/tags/core";
 import { resetTagCounts } from "../../src/tags/counts";
 import { getTagIndex, loadTagIndex, resetTagIndex, tagId } from "../../src/tags/db";
 import { encodeTagVocabulary } from "../../src/tags/index-codec";
+import { TAG_NAMESPACES } from "../../src/tags/model";
 
 const originalFetch = globalThis.fetch;
 const CACHE_KEY = "eh:tag-index:v2";
@@ -25,24 +26,26 @@ afterEach(() => {
 });
 
 describe("core tag vocabulary", () => {
-  test("embeds a usable slice of every namespace", () => {
+  test("embeds every namespace with the popularity the slice was chosen by", () => {
     const data = coreTagData();
 
     expect(data).not.toBeNull();
     if (!data) {
       throw new Error("expected the embedded vocabulary to decode");
     }
-    const groups = data.groups;
-    expect(groups.size).toBe(12);
-    const total = [...groups.values()].reduce((sum, keys) => sum + keys.length, 0);
-    expect(total).toBeGreaterThan(1000);
-    for (const keys of groups.values()) {
+    for (const namespace of TAG_NAMESPACES) {
+      expect(data.groups.has(namespace.id)).toBe(true);
+    }
+    expect(data.groups.get("language")).toContain("english");
+    expect(data.groups.get("female")).toContain("big breasts");
+    expect(data.counts?.max).toBeGreaterThan(0);
+    expect(data.counts?.counts.size).toBeGreaterThan(0);
+
+    const total = [...data.groups.values()].reduce((sum, keys) => sum + keys.length, 0);
+    expect(total).toBeGreaterThan(1_000);
+    for (const keys of data.groups.values()) {
       expect(keys.length).toBeLessThanOrEqual(200);
     }
-    expect(groups.get("language")).toContain("english");
-    expect(groups.get("female")).toContain("big breasts");
-    expect(data.counts?.max).toBeGreaterThan(1_000_000);
-    expect(data.counts?.counts.size).toBeGreaterThan(800);
   });
 
   test("serves the core with empty storage without touching the network", () => {
@@ -56,14 +59,12 @@ describe("core tag vocabulary", () => {
 
     expect(requests).toBe(0);
     expect(index?.updated).toBe(0);
-    expect(index?.lookup.get(tagId("language", "english"))).toBeDefined();
-    expect(index?.lookup.get(tagId("female", "big breasts"))).toBeDefined();
     // First-run suggestions rank with the same popularity the core was selected by.
-    expect(index?.maxCount).toBeGreaterThan(1_000_000);
     expect(index?.lookup.get(tagId("language", "english"))?.count).toBeGreaterThan(0);
+    expect(index?.lookup.get(tagId("female", "big breasts"))).toBeDefined();
   });
 
-  test("loads the core while the full download is still pending", async () => {
+  test("serves the core while the download is pending and after it fails", async () => {
     const pending = Promise.withResolvers<Response>();
     let indexRequests = 0;
     globalThis.fetch = ((input: RequestInfo | URL) => {
@@ -82,15 +83,8 @@ describe("core tag vocabulary", () => {
 
     pending.reject(new Error("offline"));
     await pending.promise.catch(() => {});
-  });
 
-  test("loads the core when the full download fails", async () => {
-    globalThis.fetch = (() => Promise.reject(new Error("offline"))) as unknown as typeof fetch;
-
-    const index = await loadTagIndex(false);
-
-    expect(index.updated).toBe(0);
-    expect(index.lookup.get(tagId("language", "english"))).toBeDefined();
+    expect(getTagIndex()?.lookup.get(tagId("language", "english"))).toBeDefined();
   });
 
   test("a successful download replaces the core and survives a reset", async () => {

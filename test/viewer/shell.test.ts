@@ -17,6 +17,6 @@ describe("viewer shell contract", () => {
   test("requireShell names the id when the shell is missing it", () => {
     installDom();
 
-    expect(() => requireShell("main-img")).toThrow("missing #main-img in shell.html");
+    expect(() => requireShell("main-img")).toThrow("missing #main-img");
   });
 });

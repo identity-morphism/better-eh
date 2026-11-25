@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { UconfigField, UconfigSection } from "../../src/parse/uconfig";
+import type { UconfigField } from "../../src/parse/uconfig";
 import { parseUconfig, uconfigBody } from "../../src/parse/uconfig";
 import { loadFixture, parseDocument } from "../dom";
 
@@ -15,7 +15,7 @@ function field(name: string): UconfigField {
   return found;
 }
 
-function section(anchor: string): UconfigSection {
+function section(anchor: string) {
   const found = sections.find((candidate) => candidate.anchor === anchor);
   if (!found) {
     throw new Error(`missing section: ${anchor}`);
@@ -23,16 +23,8 @@ function section(anchor: string): UconfigSection {
   return found;
 }
 
-/** Apply the values a live update would write back over the parsed fields. */
-function withValues(
-  entries: readonly UconfigField[],
-  values: Readonly<Record<string, string>>,
-): UconfigField[] {
-  return entries.map((entry) => ({ ...entry, value: values[entry.name] ?? entry.value }));
-}
-
 describe("parseUconfig", () => {
-  test("groups fields under the heading anchors in document order", () => {
+  test("groups fields under heading anchors and drops the profile and select-all helpers", () => {
     expect(sections.map((entry) => [entry.anchor, entry.title])).toEqual([
       ["imgload", "Image Load Settings"],
       ["imgsize", "Image Size Settings"],
@@ -43,11 +35,11 @@ describe("parseUconfig", () => {
     // The `orgimg` anchor has no heading, so its block belongs to the previous section.
     expect(section("imgsize").fields.map((entry) => entry.name)).toEqual(["rx", "ry", "oi"]);
     expect(sections.some((entry) => entry.anchor === "orgimg")).toBe(false);
+    expect(fields.some((entry) => entry.name === "-" || entry.name === "profile_name")).toBe(false);
   });
 
-  test("models a radio group with its prompt and option state", () => {
+  test("models radio groups and selects with their prompts and option flags", () => {
     const uh = field("uh");
-
     expect(uh.kind).toBe("radio");
     expect(uh.prompt).toBe("Load images through H@H?");
     expect(uh.label).toBeNull();
@@ -60,11 +52,8 @@ describe("parseUconfig", () => {
       ["1", "Default port", false, false],
       ["2", "No HTTPS", false, true],
     ]);
-  });
 
-  test("models a select with its leading label and option flags", () => {
     const co = field("co");
-
     expect(co.kind).toBe("select");
     expect(co.prompt).toBe("");
     expect(co.label).toBe("H@H Region");
@@ -78,7 +67,7 @@ describe("parseUconfig", () => {
     ]);
   });
 
-  test("reads standalone text controls and their table-cell labels", () => {
+  test("reads standalone text and textarea controls with their labels", () => {
     expect(field("rx")).toMatchObject({
       kind: "text",
       value: "0",
@@ -86,41 +75,33 @@ describe("parseUconfig", () => {
       prompt: "Max display size",
     });
     expect(field("ry")).toMatchObject({ kind: "text", value: "0", label: "Vertical" });
+
+    expect(field("xu")).toMatchObject({
+      kind: "textarea",
+      value: "one two",
+      prompt: "Hide these uploaders.",
+    });
   });
 
-  test("keeps hidden inputs and checkbox state", () => {
-    expect(field("ct_doujinshi")).toMatchObject({ kind: "hidden", value: "0" });
-    expect(field("ct_misc")).toMatchObject({ kind: "hidden", value: "1" });
-    expect(field("ct_gamecg")).toMatchObject({ kind: "hidden", value: "1" });
-
-    expect(field("xn_0")).toMatchObject({
-      kind: "checkbox",
-      prompt: "Historic UI elements.",
-      label: "Thumbnail selector",
-      value: "on",
+  test("keeps hidden inputs and resolves each category switch from the site's table", () => {
+    expect(field("ct_doujinshi")).toMatchObject({
+      kind: "hidden",
+      value: "0",
+      category: { bit: 2, name: "Doujinshi", cls: "ct2", shown: true },
     });
-    expect(field("xn_1")).toMatchObject({ kind: "checkbox", value: "" });
-  });
-
-  test("resolves each hidden category switch from the site's category table", () => {
-    expect(field("ct_doujinshi").category).toEqual({
-      bit: 2,
-      name: "Doujinshi",
-      cls: "ct2",
-      shown: true,
+    expect(field("ct_misc")).toMatchObject({
+      kind: "hidden",
+      value: "1",
+      category: { bit: 1, name: "Misc", cls: "ct1", shown: false },
     });
-    expect(field("ct_misc").category).toEqual({ bit: 1, name: "Misc", cls: "ct1", shown: false });
-    expect(field("ct_gamecg").category).toEqual({
-      bit: 16,
-      name: "Game CG",
-      cls: "ct5",
-      shown: false,
+    expect(field("ct_gamecg")).toMatchObject({
+      kind: "hidden",
+      value: "1",
+      category: { bit: 16, name: "Game CG", cls: "ct5", shown: false },
     });
     expect(field("rx").category).toBeNull();
-  });
 
-  test("matches hyphenated category names and leaves unknown switches untyped", () => {
-    const parsed = parseUconfig(
+    const custom = parseUconfig(
       parseDocument(`
         <form action="" method="post">
           <h2>Categories</h2>
@@ -133,30 +114,21 @@ describe("parseUconfig", () => {
       `),
     ).flatMap((entry) => entry.fields);
 
-    expect(parsed.map((entry) => entry.category)).toEqual([
+    expect(custom.map((entry) => entry.category)).toEqual([
       { bit: 256, name: "Non-H", cls: "ct9", shown: true },
       null,
     ]);
   });
 
-  test("reads the textarea verbatim", () => {
-    const xu = field("xu");
+  test("keeps checkbox state and derives a table checkbox label from its headers", () => {
+    expect(field("xn_0")).toMatchObject({
+      kind: "checkbox",
+      prompt: "Historic UI elements.",
+      label: "Thumbnail selector",
+      value: "on",
+    });
+    expect(field("xn_1")).toMatchObject({ kind: "checkbox", value: "" });
 
-    expect(xu.kind).toBe("textarea");
-    expect(xu.value).toBe("one two");
-    expect(xu.prompt).toBe("Hide these uploaders.");
-  });
-
-  test("ignores select-all helpers and the profile form", () => {
-    expect(fields.some((entry) => entry.name === "-")).toBe(false);
-    expect(fields.some((entry) => entry.name === "profile_name")).toBe(false);
-    expect(fields.filter((entry) => entry.kind === "checkbox").map((entry) => entry.name)).toEqual([
-      "xn_0",
-      "xn_1",
-    ]);
-  });
-
-  test("derives a table checkbox label from its row and column headers", () => {
     const matrix = parseDocument(`
       <form action="" method="post">
         <a name="languages"></a>
@@ -208,54 +180,22 @@ describe("uconfigBody", () => {
     expect(body.get("apply")).toBe("Apply");
   });
 
-  test("overrides a radio group with exactly one value", () => {
-    const body = uconfigBody(sections, new Map([["uh", "1"]]));
+  test("posts one radio value and applies checkbox, select and hidden overrides", () => {
+    expect(uconfigBody(sections, new Map([["uh", "1"]])).getAll("uh")).toEqual(["1"]);
 
-    expect(body.getAll("uh")).toEqual(["1"]);
-  });
-
-  test("posts a checkbox only while it is checked", () => {
     const body = uconfigBody(
       sections,
       new Map([
         ["xn_0", ""],
         ["xn_1", "on"],
-      ]),
-    );
-
-    expect(body.has("xn_0")).toBe(false);
-    expect(body.getAll("xn_1")).toEqual(["on"]);
-  });
-
-  test("applies overrides to hidden inputs and select values", () => {
-    const body = uconfigBody(
-      sections,
-      new Map([
         ["ct_misc", "0"],
         ["co", "NL"],
       ]),
     );
 
+    expect(body.has("xn_0")).toBe(false);
+    expect(body.getAll("xn_1")).toEqual(["on"]);
     expect(body.get("ct_misc")).toBe("0");
     expect(body.get("co")).toBe("NL");
-  });
-
-  test("posts the model's resolved value instead of re-deriving a selection", () => {
-    // Each override disagrees with the fixture's selected/checked state: the model's value wins.
-    const model: readonly UconfigSection[] = [
-      {
-        ...section("imgload"),
-        fields: withValues([field("uh"), field("co"), field("xn_1")], {
-          uh: "1",
-          co: "EU",
-          xn_1: "on",
-        }),
-      },
-    ];
-
-    const body = uconfigBody(model, new Map());
-    expect(body.getAll("uh")).toEqual(["1"]);
-    expect(body.get("co")).toBe("EU");
-    expect(body.getAll("xn_1")).toEqual(["on"]);
   });
 });

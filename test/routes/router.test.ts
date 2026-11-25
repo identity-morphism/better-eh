@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
 import { parseRoute } from "../../src/router";
+import type { ListScope } from "../../src/routes/types";
 
 const ORIGIN = "https://e-hentai.org";
 
@@ -18,13 +19,27 @@ describe("parseRoute", () => {
     installLocation(ORIGIN);
   });
 
-  test("keeps the front page and category paths in the search scope", () => {
-    for (const path of ["/", "/doujinshi", "/misc", "/tag/language:chinese"]) {
+  test("classifies listing addresses into scoped lists", () => {
+    const cases: readonly [path: string, scope: ListScope][] = [
+      ["/", "search"],
+      ["/doujinshi", "search"],
+      ["/tag/language:chinese", "search"],
+      ["/popular", "popular"],
+      ["/watched", "watched"],
+    ];
+
+    for (const [path, scope] of cases) {
       const route = parseRoute(`${ORIGIN}${path}`);
-      expect(route.kind).toBe("list");
+      expect(route.kind, path).toBe("list");
       if (route.kind === "list") {
-        expect(route.scope).toBe("search");
+        expect(route.scope, path).toBe(scope);
       }
+    }
+
+    const searched = parseRoute(`${ORIGIN}/popular?f_search=test`);
+    if (searched.kind === "list") {
+      expect(searched.scope).toBe("popular");
+      expect(searched.query.text).toBe("test");
     }
   });
 
@@ -38,28 +53,6 @@ describe("parseRoute", () => {
       // All bits set except Doujinshi: the same set the site's `f_cats` filter describes.
       expect(doujinshi.query.cats).toBe(1021);
       expect(front.query.cats).toBe(0);
-    }
-  });
-
-  test("routes the site's own listing tabs as scoped lists", () => {
-    const popular = parseRoute(`${ORIGIN}/popular`);
-    const watched = parseRoute(`${ORIGIN}/watched`);
-
-    expect(popular.kind).toBe("list");
-    expect(watched.kind).toBe("list");
-    if (popular.kind === "list" && watched.kind === "list") {
-      expect(popular.scope).toBe("popular");
-      expect(watched.scope).toBe("watched");
-    }
-  });
-
-  test("keeps query text on a scoped list", () => {
-    const route = parseRoute(`${ORIGIN}/popular?f_search=test`);
-
-    expect(route.kind).toBe("list");
-    if (route.kind === "list") {
-      expect(route.scope).toBe("popular");
-      expect(route.query.text).toBe("test");
     }
   });
 
@@ -80,9 +73,8 @@ describe("parseRoute", () => {
     if (spaced.kind === "list") {
       expect(spaced.query.text).toBe('uploader:"Zero Angel$"');
     }
-  });
 
-  test("keeps the bare uploader index and deeper paths native", () => {
+    // The bare index is a directory, and deeper paths are not a single uploader.
     expect(parseRoute(`${ORIGIN}/uploader/`).kind).toBe("native");
     expect(parseRoute(`${ORIGIN}/uploader/a/b`).kind).toBe("native");
   });

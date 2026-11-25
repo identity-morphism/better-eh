@@ -46,8 +46,8 @@ describe("loadSettings", () => {
     expect(loaded.keymap).toEqual(DEFAULT_KEYMAP);
   });
 
-  test("merges a stored keymap over DEFAULT_KEYMAP", () => {
-    const loaded = loadSettings(
+  test("merges a stored keymap over DEFAULT_KEYMAP and ignores a malformed one", () => {
+    const merged = loadSettings(
       readFrom({
         [STORAGE_KEY]: {
           version: 2,
@@ -56,20 +56,18 @@ describe("loadSettings", () => {
       }),
     );
 
-    expect(loaded.keymap.next).toEqual(["N"]);
-    expect(loaded.keymap.fit).toEqual([]);
-    expect(loaded.keymap.prev).toEqual(DEFAULT_KEYMAP.prev);
-    expect(loaded.keymap.down).toEqual(DEFAULT_KEYMAP.down);
-  });
+    expect(merged.keymap.next).toEqual(["N"]);
+    expect(merged.keymap.fit).toEqual([]);
+    expect(merged.keymap.prev).toEqual(DEFAULT_KEYMAP.prev);
+    expect(merged.keymap.down).toEqual(DEFAULT_KEYMAP.down);
 
-  test("ignores a malformed stored keymap", () => {
-    const loaded = loadSettings(
+    const malformed = loadSettings(
       readFrom({
         [STORAGE_KEY]: { version: 2, values: { keymap: { next: 5 } } },
       }),
     );
 
-    expect(loaded.keymap).toEqual(DEFAULT_KEYMAP);
+    expect(malformed.keymap).toEqual(DEFAULT_KEYMAP);
   });
 
   test("normalizes stored v2 values through the schema", () => {
@@ -88,14 +86,11 @@ describe("loadSettings", () => {
 });
 
 describe("the settings schema", () => {
-  test("keeps number defaults inside their bounds", () => {
+  test("keeps every default inside its declared bounds or options", () => {
     for (const field of NUMBER_FIELDS) {
       expect(field.default).toBeGreaterThanOrEqual(field.min);
       expect(field.default).toBeLessThanOrEqual(field.max);
     }
-  });
-
-  test("keeps every select default among its options", () => {
     for (const field of SELECT_FIELDS) {
       expect(field.options.some((option) => option.value === field.default)).toBe(true);
     }
@@ -169,21 +164,7 @@ describe("the settings store", () => {
     expect(getSettings().scrollStep).toBe(444);
   });
 
-  test("snapshots and their keymaps are frozen", () => {
-    const snapshot = getSettings();
-    const gap = snapshot.gap;
-
-    expect(Object.isFrozen(snapshot)).toBe(true);
-    expect(Object.isFrozen(snapshot.keymap)).toBe(true);
-    expect(Object.isFrozen(snapshot.keymap.next)).toBe(true);
-    expect(Reflect.set(snapshot, "gap", 999)).toBe(false);
-    expect(() => snapshot.keymap.next.push("Z")).toThrow();
-
-    expect(getSettings().gap).toBe(gap);
-    expect(getSettings().keymap.next).not.toContain("Z");
-  });
-
-  test("updateSetting does not share the caller's keymap", () => {
+  test("snapshots are frozen and never alias the caller's keymap", () => {
     const custom: KeyMap = {
       next: ["N"],
       prev: ["P"],
@@ -196,8 +177,14 @@ describe("the settings store", () => {
     updateSetting("keymap", custom);
     custom.next.push("M");
 
-    expect(getSettings().keymap.next).toEqual(["N"]);
-    expect(Object.isFrozen(getSettings().keymap.next)).toBe(true);
+    const snapshot = getSettings();
+    expect(snapshot.keymap.next).toEqual(["N"]);
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.keymap)).toBe(true);
+    expect(Object.isFrozen(snapshot.keymap.next)).toBe(true);
+    expect(Reflect.set(snapshot, "gap", 999)).toBe(false);
+    expect(() => snapshot.keymap.next.push("Z")).toThrow();
+    expect(getSettings().keymap.next).not.toContain("Z");
   });
 });
 

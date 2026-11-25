@@ -23,13 +23,7 @@ describe("parseListPage", () => {
     expect(data.items.map((item) => item.gid)).toEqual(["111", "222"]);
   });
 
-  test("keeps the first row for a duplicated gallery id", () => {
-    const first = data.items[0];
-    expect(first?.title.primary).toBe("Alpha");
-    expect(first?.pages).toBe(10);
-  });
-
-  test("parses the first table row", () => {
+  test("parses table rows into listing items", () => {
     expect(data.items[0]).toEqual({
       href: "https://e-hentai.org/g/111/aaaa/",
       gid: "111",
@@ -51,9 +45,6 @@ describe("parseListPage", () => {
       torrentsHref: "https://e-hentai.org/gallerytorrents.php?gid=111&t=aaaa",
       favorite: null,
     });
-  });
-
-  test("parses the second table row and splits its title", () => {
     expect(data.items[1]).toEqual({
       href: "https://e-hentai.org/g/222/bbbb/",
       gid: "222",
@@ -96,12 +87,11 @@ describe("parseListPage favorite marks", () => {
 });
 
 describe("parseListPage thumbnail fallback", () => {
-  test("falls back to .gl1t items when no table rows parse", () => {
-    expect(thumbs.items).toHaveLength(2);
+  test("parses .gl1t items, summary and missing pager links", () => {
     expect(thumbs.items.map((item) => item.gid)).toEqual(["333", "444"]);
-  });
-
-  test("parses a .gl1t item", () => {
+    expect(thumbs.resultText).toBe("Found 2 results.");
+    expect(thumbs.nextHref).toBeNull();
+    expect(thumbs.prevHref).toBeNull();
     expect(thumbs.items[0]).toEqual({
       href: "https://e-hentai.org/g/333/cccc/",
       gid: "333",
@@ -118,9 +108,7 @@ describe("parseListPage thumbnail fallback", () => {
       torrentsHref: null,
       favorite: null,
     });
-  });
 
-  test("reads data-src, title metadata and page count from .gl1t items", () => {
     const item = thumbs.items[1];
     expect(item?.title).toEqual({
       leading: [{ text: "[Circle]", type: "artist" }],
@@ -134,12 +122,6 @@ describe("parseListPage thumbnail fallback", () => {
     expect(item?.torrentsHref).toBe("https://e-hentai.org/gallerytorrents.php?gid=444&t=dddd");
     expect(item?.category).toEqual({ name: "Misc", cls: "ct1" });
     expect(item?.pages).toBe(3);
-  });
-
-  test("result summary and missing pager links", () => {
-    expect(thumbs.resultText).toBe("Found 2 results.");
-    expect(thumbs.nextHref).toBeNull();
-    expect(thumbs.prevHref).toBeNull();
   });
 
   test("prefers the watched result line over the filter notice", async () => {

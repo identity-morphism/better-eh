@@ -13,7 +13,7 @@ beforeEach(() => {
 });
 
 describe("quick tags", () => {
-  test("filters empty fields, normalizes, and removes by name", () => {
+  test("replaces the whole list, normalizing rows and dropping blanks", () => {
     replaceQuickTags([
       { name: "", query: "english", savedAt: 1 },
       { name: "Faves", query: "", savedAt: 2 },
@@ -25,6 +25,15 @@ describe("quick tags", () => {
 
     removeQuickTag("FAVES");
     expect(quickTags()).toEqual([]);
+
+    replaceQuickTags(
+      Array.from({ length: QUICK_TAG_LIMIT + 5 }, (_, index) => ({
+        name: `n${index}`,
+        query: `q${index}`,
+        savedAt: index,
+      })),
+    );
+    expect(quickTags()).toHaveLength(QUICK_TAG_LIMIT);
   });
 
   test("reads old records that still carry mode and pinned", () => {
@@ -37,23 +46,6 @@ describe("quick tags", () => {
       { name: "Old run", query: "f:artbook$", savedAt: 2 },
       { name: "Old tag", query: "f:lolicon$", savedAt: 1 },
     ]);
-  });
-
-  test("replaces the whole list and caps it", () => {
-    replaceQuickTags([
-      { name: "A", query: "a", savedAt: 1 },
-      { name: "", query: "dropped", savedAt: 2 },
-    ]);
-    expect(quickTags().map((entry) => entry.name)).toEqual(["A"]);
-
-    replaceQuickTags(
-      Array.from({ length: QUICK_TAG_LIMIT + 5 }, (_, index) => ({
-        name: `n${index}`,
-        query: `q${index}`,
-        savedAt: index,
-      })),
-    );
-    expect(quickTags()).toHaveLength(QUICK_TAG_LIMIT);
   });
 
   test("treats corrupt storage as empty", () => {

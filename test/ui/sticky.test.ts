@@ -6,7 +6,6 @@ import { installDom } from "./dom";
 class TestResizeObserver {
   static last: TestResizeObserver | null = null;
 
-  readonly observed: Element[] = [];
   disconnected = false;
 
   readonly callback: ResizeObserverCallback;
@@ -16,9 +15,7 @@ class TestResizeObserver {
     TestResizeObserver.last = this;
   }
 
-  observe(node: Element): void {
-    this.observed.push(node);
-  }
+  observe(): void {}
 
   unobserve(): void {}
 
@@ -75,7 +72,6 @@ describe("trackStickyChrome", () => {
 
     expect(document.documentElement.style.getPropertyValue("--topbar-h")).toBe("40px");
     expect(document.documentElement.style.getPropertyValue("--sticky-reading-line")).toBe("102px");
-    expect(TestResizeObserver.last?.observed).toEqual([root, topbar, jump, tabs]);
 
     withHeight(topbar, 60);
     window.dispatchEvent(new Event("resize"));

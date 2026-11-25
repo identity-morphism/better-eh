@@ -97,17 +97,6 @@ describe("view lifecycle", () => {
     expect(doc.title).toBe("Second");
   });
 
-  test("defers a numeric scroll restore until after layout", () => {
-    const h = harness(() => host);
-    h.lifecycle.mount({ route: ROUTE, title: "Restored", scrollY: 480, render: () => undefined });
-
-    expect(h.scrolls).toEqual([]);
-    expect(h.scheduled).toHaveLength(1);
-
-    h.scheduled[0]?.();
-    expect(h.scrolls).toEqual([480]);
-  });
-
   test("uses the retrying restore for a saved position and stops it on the next mount", () => {
     const restored: number[] = [];
     const stopped: number[] = [];
@@ -129,7 +118,7 @@ describe("view lifecycle", () => {
     expect(stopped).toEqual([4000]);
   });
 
-  test("keeps the single-frame restore for the top of the page", () => {
+  test("schedules the top, scrolls immediately for null and leaves the position alone when omitted", () => {
     const restored: number[] = [];
     const h = harness(() => host, {
       restoreScroll: (y) => {
@@ -139,24 +128,21 @@ describe("view lifecycle", () => {
     });
 
     h.lifecycle.mount({ route: ROUTE, title: "Top", scrollY: 0, render: () => undefined });
-
     expect(restored).toEqual([]);
+    expect(h.scheduled).toHaveLength(1);
+
+    h.scheduled[0]?.();
+    expect(h.scrolls).toEqual([0]);
+
+    h.lifecycle.mount({ route: ROUTE, title: "Null", scrollY: null, render: () => undefined });
+    expect(h.scrolls).toEqual([0, 0]);
+
+    h.lifecycle.mount({ route: ROUTE, title: "Omitted", render: () => undefined });
+    expect(h.scrolls).toEqual([0, 0]);
     expect(h.scheduled).toHaveLength(1);
   });
 
-  test("focuses the host on a user navigation", () => {
-    const h = harness(() => host);
-    let focused = 0;
-    host.focus = () => {
-      focused += 1;
-    };
-
-    h.lifecycle.mount({ route: ROUTE, title: "Focused", focus: true, render: () => undefined });
-
-    expect(focused).toBe(1);
-  });
-
-  test("leaves focus alone on the cold load", () => {
+  test("moves focus to the host only on a user navigation", () => {
     const h = harness(() => host);
     let focused = 0;
     host.focus = () => {
@@ -164,27 +150,13 @@ describe("view lifecycle", () => {
     };
 
     h.lifecycle.mount({ route: ROUTE, title: "Cold", render: () => undefined });
-
     expect(focused).toBe(0);
+
+    h.lifecycle.mount({ route: ROUTE, title: "Focused", focus: true, render: () => undefined });
+    expect(focused).toBe(1);
   });
 
-  test("scrolls to the top immediately when scrollY is null", () => {
-    const h = harness(() => host);
-    h.lifecycle.mount({ route: ROUTE, title: "Top", scrollY: null, render: () => undefined });
-
-    expect(h.scrolls).toEqual([0]);
-    expect(h.scheduled).toHaveLength(0);
-  });
-
-  test("leaves the scroll position alone when scrollY is omitted", () => {
-    const h = harness(() => host);
-    h.lifecycle.mount({ route: ROUTE, title: "Untouched", render: () => undefined });
-
-    expect(h.scrolls).toEqual([]);
-    expect(h.scheduled).toHaveLength(0);
-  });
-
-  test("runs the registered leave guard and clears it", () => {
+  test("runs the registered leave guard and clears it on the next mount", () => {
     const h = harness(() => host);
     expect(h.lifecycle.guard()).toBe(true);
 
@@ -200,23 +172,15 @@ describe("view lifecycle", () => {
     expect(h.lifecycle.guard()).toBe(true);
     expect(runs).toBe(1);
 
+    h.lifecycle.setLeaveGuard(() => false);
     h.lifecycle.setLeaveGuard(null);
     expect(h.lifecycle.guard()).toBe(true);
-    expect(runs).toBe(1);
-  });
 
-  test("a mount clears the leave guard without running it", () => {
-    const h = harness(() => host);
-    let runs = 0;
-    h.lifecycle.setLeaveGuard(() => {
-      runs += 1;
-      return false;
-    });
-
+    h.lifecycle.setLeaveGuard(() => false);
     h.lifecycle.mount({ route: ROUTE, title: "Next", render: () => undefined });
 
     expect(h.lifecycle.guard()).toBe(true);
-    expect(runs).toBe(0);
+    expect(runs).toBe(1);
   });
 
   test("renders nothing and returns null when the host is gone", () => {

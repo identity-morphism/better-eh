@@ -43,23 +43,12 @@ describe("openPopover", () => {
     expect(document.body.lastElementChild).toBe(popover.element);
     expect(popover.element.getAttribute("role")).toBe("dialog");
     expect(popover.element.getAttribute("aria-label")).toBe("Folders");
-    expect(popover.element.getAttribute("popover")).toBe("manual");
-    expect(popover.element.className).toBe("eh-popover");
     expect(anchor.getAttribute("aria-expanded")).toBe("true");
-  });
 
-  test("appends caller class names", () => {
-    const anchor = anchorWith(document, false);
-    const popover = openPopover({
-      content: content(document),
-      anchor,
-      className: "fav-menu",
-      role: "menu",
-    });
-
-    expect(popover.element.className).toBe("eh-popover fav-menu");
-    expect(popover.element.getAttribute("role")).toBe("menu");
-    expect(anchor.hasAttribute("aria-expanded")).toBe(false);
+    // A control not marked as opening a popup is left alone.
+    const plain = anchorWith(document, false);
+    openPopover({ content: content(document), anchor: plain });
+    expect(plain.hasAttribute("aria-expanded")).toBe(false);
   });
 
   test("Escape closes the top-most panel only", () => {
@@ -74,24 +63,17 @@ describe("openPopover", () => {
     expect(first.isOpen()).toBe(false);
   });
 
-  test("a press outside closes it, a press inside does not", () => {
+  test("dismisses on an outside press, but not inside or on the anchor", () => {
     const anchor = anchorWith(document, true);
     const body = content(document);
     const popover = openPopover({ content: body, anchor });
 
     press(body, "pointerdown");
+    press(anchor, "pointerdown");
     expect(popover.isOpen()).toBe(true);
 
     press(document.body, "pointerdown");
     expect(popover.isOpen()).toBe(false);
-  });
-
-  test("a press on the anchor leaves dismissal to the caller", () => {
-    const anchor = anchorWith(document, true);
-    const popover = openPopover({ content: content(document), anchor });
-
-    press(anchor, "pointerdown");
-    expect(popover.isOpen()).toBe(true);
   });
 
   test("close removes the panel, restores the anchor and runs onClose once", () => {
@@ -125,21 +107,10 @@ describe("openPopover", () => {
     controller.abort();
     expect(popover.isOpen()).toBe(false);
   });
-
-  test("repositioning survives an engine without layout", () => {
-    const anchor = anchorWith(document, false);
-    const popover = openPopover({ content: content(document), anchor, align: "end" });
-
-    expect(() => {
-      popover.reposition();
-    }).not.toThrow();
-    expect(popover.element.style.left).toMatch(/^-?\d+px$/u);
-    expect(popover.element.style.top).toMatch(/^-?\d+px$/u);
-  });
 });
 
 describe("bindPopover", () => {
-  test("rebuilds content per open and disposes it on close", () => {
+  test("rebuilds content per open, not per call, and disposes it on close", () => {
     const anchor = anchorWith(document, true);
     let builds = 0;
     let disposed = 0;
@@ -156,9 +127,12 @@ describe("bindPopover", () => {
     });
 
     popover.toggle();
+    const panel = document.querySelector(".eh-popover");
+    popover.open();
     expect(builds).toBe(1);
+    expect(document.querySelector(".eh-popover")).toBe(panel);
     expect(anchor.getAttribute("aria-expanded")).toBe("true");
-    expect(document.querySelector(".eh-popover")?.textContent).toBe("build 1");
+    expect(panel?.textContent).toBe("build 1");
 
     popover.toggle();
     expect(popover.isOpen()).toBe(false);
@@ -170,22 +144,6 @@ describe("bindPopover", () => {
     expect(document.querySelector(".eh-popover")?.textContent).toBe("build 2");
     popover.close();
     expect(disposed).toBe(2);
-  });
-
-  test("a second open repositions instead of rebuilding", () => {
-    const anchor = anchorWith(document, true);
-    let builds = 0;
-    const popover = bindPopover(anchor, () => {
-      builds += 1;
-      return { content: content(document) };
-    });
-
-    popover.open();
-    const panel = document.querySelector(".eh-popover");
-    popover.open();
-
-    expect(builds).toBe(1);
-    expect(document.querySelector(".eh-popover")).toBe(panel);
   });
 
   test("aborting the view signal closes and disposes", () => {

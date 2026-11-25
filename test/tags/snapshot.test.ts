@@ -3,28 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createSnapshot } from "../../src/tags/snapshot";
 
 describe("cached snapshots", () => {
-  test("reads the cache once and serves it synchronously", () => {
-    let reads = 0;
-    const snapshot = createSnapshot<number>({
-      label: "test",
-      ttlMs: 60_000,
-      retryMs: 60_000,
-      load: () => Promise.reject(new Error("unexpected download")),
-      readCache: () => {
-        reads++;
-        return { value: 7, updated: 1_000 };
-      },
-      writeCache: () => undefined,
-      onError: "throw",
-    });
-
-    expect(snapshot.get()).toBe(7);
-    expect(snapshot.get()).toBe(7);
-    expect(snapshot.updated()).toBe(1_000);
-    expect(reads).toBe(1);
-  });
-
-  test("reads storage again when nothing was cached yet", () => {
+  test("serves storage synchronously and re-reads until something is cached", () => {
     let stored: number | null = null;
     let reads = 0;
     const snapshot = createSnapshot<number>({
@@ -40,8 +19,10 @@ describe("cached snapshots", () => {
       onError: "throw",
     });
 
+    // No cache yet: every read consults storage rather than memoizing the miss.
     expect(snapshot.get()).toBeNull();
     stored = 7;
+    expect(snapshot.get()).toBe(7);
     expect(snapshot.get()).toBe(7);
     expect(snapshot.updated()).toBe(1_000);
     expect(reads).toBe(2);
@@ -101,7 +82,8 @@ describe("cached snapshots", () => {
     let downloads = 0;
     const snapshot = createSnapshot<number>({
       label: "test",
-      ttlMs: 0,
+      // Always stale, so only the retry window can suppress the second attempt.
+      ttlMs: -1,
       retryMs: 60_000,
       load: () => {
         downloads++;
@@ -181,7 +163,7 @@ describe("cached snapshots", () => {
     expect(writes).toEqual([2]);
   });
 
-  test("attempts again after a failed download when nothing is cached", async () => {
+  test("retries after a failed download when nothing is cached", async () => {
     let downloads = 0;
     const snapshot = createSnapshot<number>({
       label: "test",
@@ -199,25 +181,11 @@ describe("cached snapshots", () => {
     await expect(snapshot.load()).rejects.toThrow("mirrors down");
     await expect(snapshot.load()).rejects.toThrow("mirrors down");
     expect(downloads).toBe(2);
-  });
-
-  test("rejects with the download error when nothing is cached", async () => {
-    const snapshot = createSnapshot<number>({
-      label: "test",
-      ttlMs: 1_000,
-      retryMs: 1_000,
-      load: () => Promise.reject(new Error("mirrors down")),
-      readCache: () => null,
-      writeCache: () => undefined,
-      onError: "throw",
-    });
-
-    await expect(snapshot.load()).rejects.toThrow("mirrors down");
     expect(snapshot.get()).toBeNull();
   });
 
-  test("falls back to the cached value when the download fails", async () => {
-    const snapshot = createSnapshot<number>({
+  test("honours the cached-error policy with and without a cache", async () => {
+    const cached = createSnapshot<number>({
       label: "test",
       ttlMs: 1_000,
       retryMs: 1_000,
@@ -226,13 +194,10 @@ describe("cached snapshots", () => {
       writeCache: () => undefined,
       onError: "cached",
     });
+    await expect(cached.load(true)).resolves.toBe(4);
+    expect(cached.get()).toBe(4);
 
-    await expect(snapshot.load(true)).resolves.toBe(4);
-    expect(snapshot.get()).toBe(4);
-  });
-
-  test("resolves null for a cached-policy failure with nothing cached", async () => {
-    const snapshot = createSnapshot<number>({
+    const empty = createSnapshot<number>({
       label: "test",
       ttlMs: 1_000,
       retryMs: 1_000,
@@ -241,8 +206,7 @@ describe("cached snapshots", () => {
       writeCache: () => undefined,
       onError: "cached",
     });
-
-    await expect(snapshot.load()).resolves.toBeNull();
+    await expect(empty.load()).resolves.toBeNull();
   });
 
   test("publishes a rebound value and notifies listeners once", () => {

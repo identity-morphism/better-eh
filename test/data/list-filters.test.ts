@@ -23,7 +23,7 @@ beforeEach(() => {
 });
 
 describe("remembered listing filters", () => {
-  test("adds categories and advanced filters to a bare listing", () => {
+  test("adds remembered filters to a bare listing", () => {
     saveListFilters({
       ...emptySearchQuery(),
       cats: 6,
@@ -41,20 +41,18 @@ describe("remembered listing filters", () => {
     expect(search(url, "f_spf")).toBe("10");
     expect(search(url, "f_sft")).toBe("on");
     expect(search(url, "advsearch")).toBe("1");
-  });
 
-  test("adds a remembered posted-date range to a bare listing", () => {
     saveListFilters({
       ...emptySearchQuery(),
       since: "2024-01-01",
       until: "2024-12-31",
     });
 
-    const url = applyPersistedListFilters(listing()).url;
+    const ranged = applyPersistedListFilters(listing()).url;
 
-    expect(search(url, "eh_since")).toBe("2024-01-01");
-    expect(search(url, "eh_until")).toBe("2024-12-31");
-    expect(search(url, "advsearch")).toBe("1");
+    expect(search(ranged, "eh_since")).toBe("2024-01-01");
+    expect(search(ranged, "eh_until")).toBe("2024-12-31");
+    expect(search(ranged, "advsearch")).toBe("1");
   });
 
   test("keeps an address that already chose its own posted-date range", () => {

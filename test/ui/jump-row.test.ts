@@ -31,7 +31,6 @@ describe("jump row scroll edges", () => {
 
   test("leaves a row that does not overflow unmarked", () => {
     const row = rowWith(400, 400);
-    row.scrollLeft = 0;
 
     syncScrollEdges(row);
 

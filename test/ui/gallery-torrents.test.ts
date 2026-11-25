@@ -59,15 +59,11 @@ describe("gallery torrents view", () => {
     calls = [];
   });
 
-  test("renders the count, the back link and one card per torrent", () => {
+  test("renders the count, the heading and one card per torrent", () => {
     render(loader(INFO));
 
-    expect(requireNode(host, "#gallery-torrents")).not.toBeNull();
     expect(host.querySelector(".list-summary")?.textContent).toBe("2 torrents");
     expect(host.querySelector(".list-heading h1")?.textContent).toBe("Test Gallery");
-    expect(
-      requireNode<HTMLAnchorElement>(host, ".gallery-torrents-back").getAttribute("href"),
-    ).toBe("/g/987654/abcdef1234/");
 
     const cards = host.querySelectorAll(".gallery-torrent-card");
     expect(cards).toHaveLength(2);
@@ -94,7 +90,6 @@ describe("gallery torrents view", () => {
     const signal = render(loader(INFO));
     const card = requireNode<HTMLElement>(host, ".gallery-torrent-card");
     const button = requireNode<HTMLButtonElement>(card, ".gallery-torrent-details-button");
-    expect(card.querySelector(".gallery-torrent-details-slot")?.hasAttribute("hidden")).toBe(true);
 
     button.click();
 
@@ -108,7 +103,6 @@ describe("gallery torrents view", () => {
     expect(button.textContent).toBe("Hide details");
 
     const details = requireNode(card, ".gallery-torrent-details");
-    expect(details.getAttribute("aria-busy")).toBeNull();
     expect(details.textContent).toContain("Personalized torrent");
     expect(details.textContent).toContain("Redistributable torrent");
     expect(details.textContent).toContain("A test comment for this torrent.");

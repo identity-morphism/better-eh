@@ -3,16 +3,11 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { nativeZoomLimit, ZoomController } from "../../src/zoom";
 import { installDom } from "./dom";
 
-describe("nativeZoomLimit", () => {
-  test("reports how far a source can be zoomed before it runs out of pixels", () => {
-    expect(nativeZoomLimit(500, 1000)).toBe(2);
-    expect(nativeZoomLimit(1000, 500)).toBe(0.5);
-  });
-
-  test("never blocks zoom while the source or the layout is unknown", () => {
-    expect(nativeZoomLimit(0, 1000)).toBe(Number.POSITIVE_INFINITY);
-    expect(nativeZoomLimit(500, 0)).toBe(Number.POSITIVE_INFINITY);
-  });
+test("nativeZoomLimit reports the pixels a source runs out at and never blocks an unknown size", () => {
+  expect(nativeZoomLimit(500, 1000)).toBe(2);
+  expect(nativeZoomLimit(1000, 500)).toBe(0.5);
+  expect(nativeZoomLimit(0, 1000)).toBe(Number.POSITIVE_INFINITY);
+  expect(nativeZoomLimit(500, 0)).toBe(Number.POSITIVE_INFINITY);
 });
 
 let document: Document;
@@ -39,26 +34,19 @@ function controller(fitHeight = true): ZoomController {
 }
 
 describe("ZoomController pinch level", () => {
-  test("sets a continuous level and clears the transform at fit", () => {
+  test("clamps a pinch between fit and five times and clears the transform at fit", () => {
     const zoom = controller();
 
     zoom.setZoom(2, true);
     expect(zoom.getZoomLevel()).toBe(2);
     expect(surface.style.transform).toContain("scale(2)");
 
-    zoom.setZoom(1, true);
-    expect(zoom.getZoomLevel()).toBe(1);
-    expect(surface.style.transform).toBe("");
-  });
-
-  test("clamps a pinch between fit and five times", () => {
-    const zoom = controller();
-
     zoom.setZoom(9, true);
     expect(zoom.getZoomLevel()).toBe(5);
 
     zoom.setZoom(0.2, true);
     expect(zoom.getZoomLevel()).toBe(1);
+    expect(surface.style.transform).toBe("");
   });
 
   test("pans a zoomed surface within the viewport limits", () => {

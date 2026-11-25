@@ -91,26 +91,20 @@ describe("showPageImage", () => {
     expect(retry).not.toHaveBeenCalled();
   });
 
-  test("retries after the first error and renders the returned page", async () => {
+  test("retries after the first error and keeps retrying from the returned page", async () => {
     const img = fakeImage();
     const first = page();
-    const second = page({ imgSrc: SECOND_SRC });
+    const second = page({ imgSrc: SECOND_SRC, viewerUrl: "https://e-hentai.org/s/hash/987654-2" });
     const retry = mock(() => Promise.resolve(second));
     const onLoaded = mock(() => {});
 
-    showPageImage({
-      img,
-      page: first,
-      retry,
-      maxRetries: 2,
-      onGiveUp: () => {},
-      onLoaded,
-    });
+    showPageImage({ img, page: first, retry, maxRetries: 3, onGiveUp: () => {}, onLoaded });
 
     expect(img.src).toBe(FIRST_SRC);
-    expect(typeof img.onerror).toBe("function");
+    const firstError = img.onerror;
+    expect(typeof firstError).toBe("function");
 
-    img.onerror?.(errorEvent);
+    firstError?.(errorEvent);
 
     expect(retry).toHaveBeenCalledTimes(1);
     expect(retry).toHaveBeenCalledWith(first);
@@ -120,32 +114,16 @@ describe("showPageImage", () => {
     await Promise.resolve();
 
     expect(img.src).toBe(SECOND_SRC);
+    expect(img.onerror).not.toBe(firstError);
     expect(typeof img.onload).toBe("function");
-    expect(typeof img.onerror).toBe("function");
 
     img.onload?.(loadEvent);
 
     expect(onLoaded).toHaveBeenCalledTimes(1);
     expect(onLoaded).toHaveBeenCalledWith(second);
-  });
 
-  test("switches subsequent retries to the returned page", async () => {
-    const img = fakeImage();
-    const first = page();
-    const second = page({ imgSrc: SECOND_SRC, viewerUrl: "https://e-hentai.org/s/hash/987654-2" });
-    const retry = mock((data: PageData) => Promise.resolve(data === first ? second : null));
-
-    showPageImage({ img, page: first, retry, maxRetries: 3, onGiveUp: () => {} });
-
-    const firstError = img.onerror;
-    firstError?.(errorEvent);
-    await Promise.resolve();
-
-    expect(img.src).toBe(SECOND_SRC);
-    expect(img.onerror).not.toBe(firstError);
-
+    // The next failure retries from the page the loader returned, not the original one.
     img.onerror?.(errorEvent);
-
     expect(retry).toHaveBeenCalledTimes(2);
     expect(retry).toHaveBeenLastCalledWith(second);
   });
@@ -229,16 +207,17 @@ describe("showPageImage", () => {
     expect(onGiveUp).not.toHaveBeenCalled();
   });
 
-  test("does not give up when a retry resolves empty after the element moved on", async () => {
+  test("drops a stale retry that resolves to null without giving up", async () => {
     const img = fakeImage();
     const gate = Promise.withResolvers<PageData | null>();
+    const retry = mock(() => gate.promise);
     const onGiveUp = mock(() => {});
     let current = true;
 
     showPageImage({
       img,
       page: page(),
-      retry: () => gate.promise,
+      retry,
       maxRetries: 2,
       onGiveUp,
       isCurrent: () => current,
@@ -251,10 +230,9 @@ describe("showPageImage", () => {
     await Promise.resolve();
 
     expect(onGiveUp).not.toHaveBeenCalled();
-    expect(img.onerror).toBeNull();
   });
 
-  test("does nothing when the page is already stale", () => {
+  test("does nothing once the page is stale, even on an instant cache hit", () => {
     const previousSrc = "https://img.example/pages/previous.jpg";
     const img = fakeImage({ src: previousSrc });
     const retry = mock(() => Promise.resolve(page()));
@@ -281,26 +259,22 @@ describe("showPageImage", () => {
     expect(retry).not.toHaveBeenCalled();
     expect(onLoaded).not.toHaveBeenCalled();
     expect(onGiveUp).not.toHaveBeenCalled();
-  });
 
-  test("does not report a stale instant cache hit", () => {
-    const img = fakeImage({ src: FIRST_SRC, complete: true, naturalWidth: 800 });
-    const onLoaded = mock(() => {});
-    const onGiveUp = mock(() => {});
-
+    // The same source completing from cache must not report a load for the stale page.
+    const cached = fakeImage({ src: FIRST_SRC, complete: true, naturalWidth: 800 });
     showPageImage({
-      img,
+      img: cached,
       page: page(),
-      retry: () => Promise.resolve(null),
+      retry,
       maxRetries: 2,
       onGiveUp,
       onLoaded,
       isCurrent: () => false,
     });
 
-    expect(img.src).toBe(FIRST_SRC);
-    expect(img.onload).toBeNull();
-    expect(img.onerror).toBeNull();
+    expect(cached.src).toBe(FIRST_SRC);
+    expect(cached.onload).toBeNull();
+    expect(cached.onerror).toBeNull();
     expect(onLoaded).not.toHaveBeenCalled();
     expect(onGiveUp).not.toHaveBeenCalled();
   });
@@ -431,7 +405,7 @@ describe("createPageImageSlotFactory", () => {
     expect(img.src).toBe(FIRST_SRC);
   });
 
-  test("drops a probe that resolves after its element moved to another page", () => {
+  test("drops a probe that resolves after the element moved on or the view aborted", () => {
     let current = true;
     const img = fakeImage({
       src: FIRST_SRC,
@@ -447,27 +421,19 @@ describe("createPageImageSlotFactory", () => {
     probe.onload?.(loadEvent);
 
     expect(img.src).toBe(FIRST_SRC);
-  });
 
-  test("the factory drops work after its view aborts", () => {
     const controller = new AbortController();
-    const img = fakeImage({
-      src: FIRST_SRC,
-      naturalWidth: 800,
-      naturalHeight: 1200,
-      clientHeight: 400,
-    });
-    const probe = fakeImage({ naturalWidth: 1600, naturalHeight: 2400 });
-    const pageSlot = createPageImageSlotFactory({
+    const abortedProbe = fakeImage({ naturalWidth: 1600, naturalHeight: 2400 });
+    const abortedSlot = createPageImageSlotFactory({
       retry: () => Promise.resolve(null),
       maxRetries: () => 2,
       signal: controller.signal,
-      probe: () => probe,
+      probe: () => abortedProbe,
     }).create(img, page({ originalHref: ORIGINAL_SRC }));
 
-    pageSlot.upgrade(4);
+    abortedSlot.upgrade(4);
     controller.abort();
-    probe.onload?.(loadEvent);
+    abortedProbe.onload?.(loadEvent);
 
     expect(img.src).toBe(FIRST_SRC);
   });

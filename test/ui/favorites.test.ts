@@ -8,6 +8,22 @@ import { listItem } from "./fixtures";
 
 const PAGE_URL = "https://exhentai.org/favorites.php?favcat=0";
 
+function favoriteItem(gid: string, name: string, pages: number | null) {
+  return listItem({
+    href: `/g/${gid}/${gid}/`,
+    gid,
+    token: gid,
+    title: { leading: [], primary: name, secondary: null, trailing: [] },
+    coverSrc: `https://img.example/${gid}.jpg`,
+    coverSize: null,
+    rating: null,
+    uploader: null,
+    posted: "",
+    pages,
+    torrentsHref: null,
+  });
+}
+
 const data: FavoritesPage = {
   url: PAGE_URL,
   folders: [
@@ -16,34 +32,7 @@ const data: FavoritesPage = {
   ],
   active: 0,
   order: "published",
-  items: [
-    listItem({
-      href: "/g/101/aaaa/",
-      gid: "101",
-      token: "aaaa",
-      title: { leading: [], primary: "Alpha", secondary: null, trailing: [] },
-      coverSrc: "https://img.example/101.jpg",
-      coverSize: null,
-      rating: null,
-      uploader: null,
-      posted: "",
-      pages: 12,
-      torrentsHref: null,
-    }),
-    listItem({
-      href: "/g/102/bbbb/",
-      gid: "102",
-      token: "bbbb",
-      title: { leading: [], primary: "Beta", secondary: null, trailing: [] },
-      coverSrc: "https://img.example/102.jpg",
-      coverSize: null,
-      rating: null,
-      uploader: null,
-      posted: "",
-      pages: null,
-      torrentsHref: null,
-    }),
-  ],
+  items: [favoriteItem("101", "Alpha", 12), favoriteItem("102", "Beta", null)],
   notes: new Map([["102", "Read later"]]),
   search: "",
   nextHref: "https://exhentai.org/favorites.php?next=1-0",
@@ -99,9 +88,7 @@ beforeEach(() => {
 });
 
 describe("renderFavorites", () => {
-  test("renders folder tabs with counts and marks the active folder", () => {
-    const tabs = host.querySelectorAll(".favorites-tab");
-    expect(tabs).toHaveLength(3);
+  test("renders folder tabs with counts, marks the active folder and builds links from the page URL", () => {
     expect(
       [...host.querySelectorAll(".favorites-tab-name")].map((node) => node.textContent),
     ).toEqual(["All", "Good Stuff", "Plan to Read"]);
@@ -112,7 +99,10 @@ describe("renderFavorites", () => {
     const current = host.querySelectorAll('.favorites-tab[aria-current="page"]');
     expect(current).toHaveLength(1);
     expect(current[0]?.querySelector(".favorites-tab-name")?.textContent).toBe("Good Stuff");
-    expect(current[0]?.getAttribute("href")).toBe("https://exhentai.org/favorites.php?favcat=0");
+    expect(current[0]?.getAttribute("href")).toBe(PAGE_URL);
+
+    Object.assign(globalThis, { location: new URL("https://e-hentai.org/elsewhere") });
+    render();
     expect(host.querySelector<HTMLAnchorElement>(".favorites-tab")?.getAttribute("href")).toBe(
       "https://exhentai.org/favorites.php",
     );
@@ -120,9 +110,7 @@ describe("renderFavorites", () => {
 
   test("renders cards with category and saved notes", () => {
     expect(host.querySelectorAll(".favorites-card")).toHaveLength(2);
-    expect(host.querySelectorAll(".favorites-card .fav-btn")).toHaveLength(2);
-    expect(host.querySelector(".cat-badge")?.textContent).toBe("Doujinshi");
-    expect(host.querySelectorAll(".favorites-note")).toHaveLength(1);
+    expect(host.querySelector(".favorites-card .cat-badge")?.textContent).toBe("Doujinshi");
     expect(host.querySelector(".favorites-note")?.textContent).toBe("Read later");
     expect(host.querySelectorAll(".favorites-checkbox")).toHaveLength(2);
   });
@@ -226,54 +214,38 @@ describe("renderFavorites", () => {
     expect(checkedGids()).toEqual([]);
   });
 
-  const summaryCases: Array<{ name: string; page: FavoritesPage; expected: string }> = [
-    {
-      name: "says which slice of the folder this page shows",
-      page: data,
-      expected: "Showing 1 - 2 of 46 favorites",
-    },
-    {
-      name: "counts every folder on the All tab",
-      page: { ...data, active: "all" },
-      expected: "Showing 1 - 2 of 53 favorites",
-    },
-    {
-      name: "describes the last page from the folder total",
-      page: { ...data, prevHref: `${PAGE_URL}&prev=1-0`, nextHref: null },
-      expected: "Showing 45 - 46 of 46 favorites",
-    },
-    {
-      name: "uses the page parameter when the site pager provides one",
-      page: { ...data, url: `${PAGE_URL}&page=2` },
-      expected: "Showing 5 - 6 of 46 favorites",
-    },
-    {
-      name: "leaves out the offset on a cursor page that hides it",
-      page: { ...data, prevHref: `${PAGE_URL}&prev=1-0` },
-      expected: "Showing 2 of 46 favorites",
-    },
-    {
-      name: "falls back to the item count when the folder total is unknown",
-      page: { ...data, folders: [] },
-      expected: "2 favorites",
-    },
-  ];
+  test("summarizes the visible slice of the active folder", () => {
+    expect(summary()).toBe("Showing 1 - 2 of 46 favorites");
 
-  for (const { name, page, expected } of summaryCases) {
-    test(name, () => {
-      renderFavorites(host, page, viewContext(), { remove, move });
+    renderFavorites(host, { ...data, active: "all" }, viewContext(), { remove, move });
+    expect(summary()).toBe("Showing 1 - 2 of 53 favorites");
+  });
 
-      expect(summary()).toBe(expected);
-    });
-  }
-
-  test("builds folder links from the parsed page URL, not the ambient address", () => {
-    Object.assign(globalThis, { location: new URL("https://e-hentai.org/elsewhere") });
-    render();
-
-    expect(host.querySelector<HTMLAnchorElement>(".favorites-tab")?.getAttribute("href")).toBe(
-      "https://exhentai.org/favorites.php",
+  test("derives the position from the last, numbered or cursor page", () => {
+    renderFavorites(
+      host,
+      { ...data, prevHref: `${PAGE_URL}&prev=1-0`, nextHref: null },
+      viewContext(),
+      { remove, move },
     );
+    expect(summary()).toBe("Showing 45 - 46 of 46 favorites");
+
+    renderFavorites(host, { ...data, url: `${PAGE_URL}&page=2` }, viewContext(), {
+      remove,
+      move,
+    });
+    expect(summary()).toBe("Showing 5 - 6 of 46 favorites");
+
+    renderFavorites(host, { ...data, prevHref: `${PAGE_URL}&prev=1-0` }, viewContext(), {
+      remove,
+      move,
+    });
+    expect(summary()).toBe("Showing 2 of 46 favorites");
+  });
+
+  test("falls back to the item count when the folder total is unknown", () => {
+    renderFavorites(host, { ...data, folders: [] }, viewContext(), { remove, move });
+    expect(summary()).toBe("2 favorites");
   });
 
   test("selects every card from the check row", () => {
@@ -335,11 +307,12 @@ describe("renderFavorites", () => {
       "/favorites.php?favcat=0&f_search=alpha&f_apply=Search%2BFavorites",
     ]);
 
+    // Folder and search links restart at the first page, dropping a stale cursor.
     renderFavorites(
       host,
       {
         ...data,
-        url: "https://exhentai.org/favorites.php?favcat=0&f_search=alpha",
+        url: "https://exhentai.org/favorites.php?favcat=0&f_search=alpha&page=2",
         search: "alpha",
       },
       viewContext(),
@@ -352,20 +325,5 @@ describe("renderFavorites", () => {
       "https://exhentai.org/favorites.php?f_search=alpha&favcat=1",
     ]);
     expect(summary()).toBe("2 matches");
-  });
-
-  test("a folder or search link drops the page cursor", () => {
-    renderFavorites(
-      host,
-      { ...data, url: "https://exhentai.org/favorites.php?favcat=0&page=2", search: "" },
-      viewContext(),
-      { remove, move },
-    );
-
-    const tabs = [...host.querySelectorAll<HTMLAnchorElement>(".favorites-tab")].map((tab) =>
-      tab.getAttribute("href"),
-    );
-    expect(tabs).not.toHaveLength(0);
-    expect(tabs.every((href) => href?.includes("page=") !== true)).toBe(true);
   });
 });

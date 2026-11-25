@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { DEFAULT_SETTINGS, getSettings, updateSetting } from "../../src/settings";
-import type { UserSettings } from "../../src/types";
+import { DEFAULT_SETTINGS, updateSetting } from "../../src/settings";
 import { bindViewScale } from "../../src/ui/view-scale";
 
 type ResizeListener = (event: Event) => void;
@@ -17,10 +16,10 @@ function replaceGlobal(key: string, value: unknown): () => void {
   const original = Object.getOwnPropertyDescriptor(globalThis, key);
   Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   return () => {
-    if (original) {
-      Object.defineProperty(globalThis, key, original);
+    if (original === undefined) {
+      delete (globalThis as Record<string, unknown>)[key];
     } else {
-      Reflect.deleteProperty(globalThis, key);
+      Object.defineProperty(globalThis, key, original);
     }
   };
 }
@@ -74,28 +73,17 @@ function flushFrame(): void {
 }
 
 describe("bindViewScale", () => {
-  test("applies once on mount", () => {
-    const seen: Readonly<UserSettings>[] = [];
-    const controller = new AbortController();
-
-    bindViewScale({ signal: controller.signal, apply: (settings) => seen.push(settings) });
-
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).toEqual(getSettings());
-    controller.abort();
-  });
-
-  test("applies again when settings change", () => {
+  test("applies on mount and again when settings change", () => {
     const gaps: number[] = [];
     const controller = new AbortController();
     bindViewScale({ signal: controller.signal, apply: (settings) => gaps.push(settings.gap) });
+
+    expect(gaps).toEqual([DEFAULT_SETTINGS.gap]);
 
     updateSetting("gap", 40);
     expect(gaps).toEqual([DEFAULT_SETTINGS.gap, 40]);
 
     controller.abort();
-    updateSetting("gap", 41);
-    expect(gaps).toEqual([DEFAULT_SETTINGS.gap, 40]);
   });
 
   test("stops listening after the signal aborts", () => {

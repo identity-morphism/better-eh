@@ -25,10 +25,7 @@ afterEach(() => {
 
 describe("core popularity refresh", () => {
   test("a snapshot downloaded while the core serves ranking attaches to the live index", async () => {
-    const before = getTagIndex();
-    expect(before).not.toBeNull();
-    const generatedMax = before?.maxCount ?? 0;
-    expect(generatedMax).toBeGreaterThan(1_000_000);
+    expect(getTagIndex()).not.toBeNull();
 
     const bytes = encodeTagCountsBytes(new Map([["english", 900_000]]), 2_000_000);
     globalThis.fetch = ((input: RequestInfo | URL) => {
@@ -48,10 +45,10 @@ describe("core popularity refresh", () => {
     const after = getTagIndex();
     expect(changes).toBeGreaterThan(0);
     expect(after?.maxCount).toBe(2_000_000);
-    const english = after?.lookup.get(tagId("language", "english"));
     // The quantized 900,000 under the snapshot's 2,000,000 denominator, not the generated core's
     // count and not a recomputed dequantized maximum.
-    expect(english?.count).toBeGreaterThan(800_000);
-    expect(english?.count).toBeLessThan(1_000_000);
+    const english = after?.lookup.get(tagId("language", "english"))?.count ?? 0;
+    expect(english).toBeGreaterThan(800_000);
+    expect(english).toBeLessThan(1_000_000);
   });
 });

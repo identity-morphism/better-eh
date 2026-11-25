@@ -45,58 +45,38 @@ function expectMismatch(route: string, run: () => void): void {
 }
 
 describe("sanity checks on the site's pages", () => {
-  test("accepts the viewer fixtures", async () => {
+  test("accepts every supported fixture", async () => {
     for (const name of ["viewer.html", "viewer-last.html", "viewer-next-fallback.html"]) {
-      const doc = await loadFixture(name);
-      expect(() => assertViewerPage(parseViewer(doc, VIEWER_URL))).not.toThrow();
+      assertViewerPage(parseViewer(await loadFixture(name), VIEWER_URL));
     }
-  });
 
-  test("accepts the gallery fixture", async () => {
-    const doc = await loadFixture("gallery.html");
-    expect(() => assertGalleryPage(parseGalleryPage(doc, GALLERY_URL))).not.toThrow();
-  });
+    assertGalleryPage(parseGalleryPage(await loadFixture("gallery.html"), GALLERY_URL));
 
-  test("accepts the list fixtures", async () => {
-    const names = [
+    for (const name of [
       "list.html",
       "list-thumbs.html",
       "list-uploader.html",
       "list-watched.html",
       "list-favorite.html",
-    ];
-    for (const name of names) {
+    ]) {
       const doc = await loadFixture(name);
-      expect(() => assertListPage(parseListPage(doc, LIST_URL), doc)).not.toThrow();
+      assertListPage(parseListPage(doc, LIST_URL), doc);
     }
-  });
 
-  test("accepts the torrent index fixture", async () => {
-    const doc = await loadFixture("torrents.html");
-    expect(() => assertTorrentsPage(parseTorrents(doc, TORRENTS_URL), doc)).not.toThrow();
-  });
+    const torrentDoc = await loadFixture("torrents.html");
+    assertTorrentsPage(parseTorrents(torrentDoc, TORRENTS_URL), torrentDoc);
 
-  test("accepts the favorites fixture", async () => {
-    const doc = await loadFixture("favorites.html");
-    expect(() => assertFavoritesPage(parseFavorites(doc, FAVORITES_URL))).not.toThrow();
-  });
+    assertFavoritesPage(parseFavorites(await loadFixture("favorites.html"), FAVORITES_URL));
 
-  test("accepts the toplist fixtures", async () => {
-    const overview = parseToplist(await loadFixture("toplist.html"), TOPLIST_URL);
-    expect(() => assertToplistPage(overview)).not.toThrow();
+    assertToplistPage(parseToplist(await loadFixture("toplist.html"), TOPLIST_URL));
+    assertToplistPage(
+      parseToplist(await loadFixture("toplist-category.html"), `${TOPLIST_URL}?tl=11`),
+    );
+    assertToplistPage(
+      parseToplist(await loadFixture("toplist-category-users.html"), `${TOPLIST_URL}?tl=21`),
+    );
 
-    const categoryDoc = await loadFixture("toplist-category.html");
-    const category = parseToplist(categoryDoc, `${TOPLIST_URL}?tl=11`);
-    expect(() => assertToplistPage(category)).not.toThrow();
-
-    const usersDoc = await loadFixture("toplist-category-users.html");
-    const users = parseToplist(usersDoc, `${TOPLIST_URL}?tl=21`);
-    expect(() => assertToplistPage(users)).not.toThrow();
-  });
-
-  test("accepts the settings fixture", async () => {
-    const doc = await loadFixture("uconfig.html");
-    expect(() => assertSettingsPage(parseUconfig(doc))).not.toThrow();
+    assertSettingsPage(parseUconfig(await loadFixture("uconfig.html")));
   });
 });
 
@@ -107,22 +87,15 @@ describe("sanity checks on broken pages", () => {
     expectMismatch("viewer", () => assertViewerPage(parseViewer(doc, VIEWER_URL)));
   });
 
-  test("rejects a gallery page with neither a title nor thumbnails", () => {
-    const doc = parseDocument("<html><body></body></html>");
+  test("rejects a gallery page without thumbnails or a title", async () => {
+    expectMismatch("gallery", () =>
+      parseGalleryPage(parseDocument("<html><body></body></html>"), GALLERY_URL),
+    );
 
-    expectMismatch("gallery", () => parseGalleryPage(doc, GALLERY_URL));
-  });
+    const titleOnly = parseDocument('<html><body><div id="gn">Broken</div></body></html>');
+    expectMismatch("gallery", () => assertGalleryPage(parseGalleryPage(titleOnly, GALLERY_URL)));
 
-  test("rejects a gallery page that kept its title but lost its thumbnails", () => {
-    const doc = parseDocument('<html><body><div id="gn">Broken</div></body></html>');
-
-    expectMismatch("gallery", () => assertGalleryPage(parseGalleryPage(doc, GALLERY_URL)));
-  });
-
-  test("rejects a gallery page with an empty primary title", async () => {
-    const doc = await loadFixture("gallery.html");
-    const data = parseGalleryPage(doc, GALLERY_URL);
-
+    const data = parseGalleryPage(await loadFixture("gallery.html"), GALLERY_URL);
     expectMismatch("gallery", () =>
       assertGalleryPage({ ...data, title: { ...data.title, primary: "" } }),
     );
@@ -146,16 +119,18 @@ describe("sanity checks on broken pages", () => {
     expectMismatch("favorites", () => assertFavoritesPage(parseFavorites(doc, FAVORITES_URL)));
   });
 
-  test("rejects a toplist overview without sections", () => {
-    const doc = parseDocument("<html><body></body></html>");
-
-    expectMismatch("toplist", () => assertToplistPage(parseToplist(doc, TOPLIST_URL)));
-  });
-
-  test("rejects a category toplist without entries", () => {
-    const doc = parseDocument('<html><body><table class="itg"></table></body></html>');
-
-    expectMismatch("toplist", () => assertToplistPage(parseToplist(doc, `${TOPLIST_URL}?tl=11`)));
+  test("rejects toplist pages without sections or ranked entries", () => {
+    expectMismatch("toplist", () =>
+      assertToplistPage(parseToplist(parseDocument("<html><body></body></html>"), TOPLIST_URL)),
+    );
+    expectMismatch("toplist", () =>
+      assertToplistPage(
+        parseToplist(
+          parseDocument('<html><body><table class="itg"></table></body></html>'),
+          `${TOPLIST_URL}?tl=11`,
+        ),
+      ),
+    );
   });
 
   test("rejects a settings page without a form", () => {
@@ -166,25 +141,21 @@ describe("sanity checks on broken pages", () => {
 });
 
 describe("sanity checks on empty result pages", () => {
-  test("accepts a list page with no items and a no-hits notice", () => {
-    const doc = parseDocument(
+  test("accepts empty listings and torrent indexes that carry the site's notices", () => {
+    const listDoc = parseDocument(
       '<html><body><div class="searchtext"><p>No hits found.</p></div></body></html>',
     );
-    const data = parseListPage(doc, LIST_URL);
+    const list = parseListPage(listDoc, LIST_URL);
+    expect(list.items).toHaveLength(0);
+    expect(list.resultText).toBe("No hits found.");
+    assertListPage(list, listDoc);
 
-    expect(data.items).toHaveLength(0);
-    expect(data.resultText).toBe("No hits found.");
-    expect(() => assertListPage(data, doc)).not.toThrow();
-  });
-
-  test("accepts a torrent index with no rows and a no-results notice", () => {
-    const doc = parseDocument(
+    const torrentDoc = parseDocument(
       '<html><body><table class="itg"></table><p class="ip">No torrents found.</p></body></html>',
     );
-    const data = parseTorrents(doc, TORRENTS_URL);
-
-    expect(data.rows).toHaveLength(0);
-    expect(() => assertTorrentsPage(data, doc)).not.toThrow();
+    const torrents = parseTorrents(torrentDoc, TORRENTS_URL);
+    expect(torrents.rows).toHaveLength(0);
+    assertTorrentsPage(torrents, torrentDoc);
   });
 });
 

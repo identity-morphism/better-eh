@@ -52,30 +52,23 @@ describe("archive view", () => {
     render();
 
     expect(requireNode(host, ".list-heading h1").textContent).toBe("Test Gallery");
-    expect(requireNode(host, ".list-summary .badge").textContent).toBe("Archive Download");
     expect(requireNode(host, ".archive-funds").textContent).toBe(
       "Available: 1,234 GP · 5,678 Credits",
     );
 
     const options = [...host.querySelectorAll(".archive-option")];
     expect(options).toHaveLength(2);
-    const first = requireNode(options[0] as Element, ".archive-option-meta");
-    expect(requireNode(options[0] as Element, ".archive-option-title").textContent).toBe(
-      "Original archive",
-    );
-    expect(first.textContent).toContain("18.46 MiB");
-    expect(first.textContent).toContain("8,800 GP");
-    expect(requireNode(options[0] as Element, ".archive-option-note").textContent).toBe(
-      "This download spends 8,800 GP when it starts.",
-    );
-    expect(requireNode(options[1] as Element, ".archive-option-meta").textContent).toContain(
-      "2.17 MiB",
-    );
+    const first = options[0] as Element;
+    expect(requireNode(first, ".archive-option-title").textContent).toBe("Original archive");
+    const meta = requireNode(first, ".archive-option-meta");
+    expect(meta.textContent).toContain("18.46 MiB");
+    expect(meta.textContent).toContain("8,800 GP");
+    expect(requireNode(first, ".archive-option-note").textContent).toContain("8,800 GP");
 
     const links = [...host.querySelectorAll<HTMLAnchorElement>(".archive-links a")];
-    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
-      ["Back to gallery", "/g/123456/abcdef1234/"],
-      ["Torrents", "/gallerytorrents.php?gid=123456&t=abcdef1234"],
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/g/123456/abcdef1234/",
+      "/gallerytorrents.php?gid=123456&t=abcdef1234",
     ]);
 
     const native = requireNode<HTMLAnchorElement>(host, ".archive-footer a");

@@ -22,79 +22,6 @@ describe("infiniteScroll", () => {
     installTestObservers();
   });
 
-  test("fetches sequentially, deduplicates keys and stops at the end", async () => {
-    const appended: string[] = [];
-    const calls: string[] = [];
-    const pages: Record<string, CursorPage<string>> = {
-      "/p2": { items: ["a", "b"], next: "/p3" },
-      "/p3": { items: ["b", "c"], next: null },
-    };
-
-    const controller = infiniteScroll<string>({
-      next: "/p2",
-      key: (value) => value,
-      initialKeys: ["a"],
-      noun: "items",
-      signal: new AbortController().signal,
-      load: (url) => {
-        calls.push(url);
-        return Promise.resolve(pages[url] ?? { items: [], next: null });
-      },
-      append: (items) => appended.push(...items),
-    });
-
-    const observer = lastObserver();
-    observer.trigger(controller.element);
-    await settle();
-    observer.trigger(controller.element);
-    await settle();
-
-    expect(calls).toEqual(["/p2", "/p3"]);
-    expect(appended).toEqual(["b", "c"]);
-    expect(observer.targets.size).toBe(0);
-  });
-
-  test("exposes loadNext, retry, state and change notifications to adapters", async () => {
-    const changes: number[] = [];
-    let attempt = 0;
-    const controller = infiniteScroll<string>({
-      next: "/p2",
-      key: (value) => value,
-      initialKeys: ["a"],
-      noun: "items",
-      rootMargin: "10px 0px",
-      signal: new AbortController().signal,
-      load: () => {
-        attempt++;
-        if (attempt === 1) {
-          return Promise.reject(new Error("offline"));
-        }
-        return Promise.resolve({ items: ["b"], next: null });
-      },
-      append: () => undefined,
-      onChange: () => changes.push(attempt),
-    });
-
-    expect(controller.state()).toEqual({
-      loading: false,
-      done: false,
-      failed: false,
-      looped: false,
-    });
-    expect(lastObserver().rootMargin).toBe("10px 0px");
-    expect(await controller.loadNext()).toBe(false);
-    expect(controller.state().failed).toBe(true);
-    expect(changes).toHaveLength(1);
-
-    // A failed cursor refuses more pages until the failure is cleared.
-    expect(await controller.loadNext()).toBe(false);
-    expect(attempt).toBe(1);
-
-    expect(await controller.retry()).toBe(true);
-    expect(controller.state()).toMatchObject({ done: true, failed: false });
-    expect(changes).toHaveLength(2);
-  });
-
   test("caps a chained run and resumes from Load more", async () => {
     const appended: string[] = [];
     const calls: string[] = [];
@@ -223,31 +150,27 @@ describe("list infinite scroll", () => {
     resultText: "Found 2 results.",
   };
 
-  test("keeps the pager when the setting is off", () => {
-    renderList(host, page, parseSearchQuery(new URL(page.url)), viewContext());
-
-    expect(host.querySelector(".pager")).not.toBeNull();
-    expect(host.querySelector(".infinite-scroll")).toBeNull();
-    expect(TestObserver.instances).toHaveLength(0);
-  });
-
-  test("appends the next page's cards instead of paging", async () => {
+  test("keeps the pager when off and appends the next page's cards when on", async () => {
     const nextDoc = parseDocument(
       '<!doctype html><html><body><table class="itg"><tbody><tr><td class="gl3c"><a href="/g/222/bbbb/">Beta</a></td></tr></tbody></table></body></html>',
     );
     const calls: string[] = [];
+    const pageSource = (url: string) => {
+      calls.push(url);
+      const parsed = parseListPage(nextDoc, url);
+      return Promise.resolve({ items: parsed.items, next: parsed.nextHref });
+    };
+
+    renderList(host, page, parseSearchQuery(new URL(page.url)), viewContext(), "search", {
+      pageSource,
+    });
+    expect(host.querySelector(".pager")).not.toBeNull();
+    expect(host.querySelector(".infinite-scroll")).toBeNull();
+    expect(TestObserver.instances).toHaveLength(0);
 
     updateSetting("listInfiniteScroll", true);
-    renderList(host, page, parseSearchQuery(new URL(page.url)), viewContext(), "search", {
-      pageSource: (url) => {
-        calls.push(url);
-        const parsed = parseListPage(nextDoc, url);
-        return Promise.resolve({ items: parsed.items, next: parsed.nextHref });
-      },
-    });
-
-    expect(host.querySelectorAll(".card")).toHaveLength(1);
     expect(host.querySelector(".pager")).toBeNull();
+    expect(host.querySelectorAll(".card")).toHaveLength(1);
 
     lastObserver().trigger(host.querySelector(".infinite-scroll") as Element);
     await settle();

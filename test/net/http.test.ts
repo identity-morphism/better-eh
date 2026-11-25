@@ -49,12 +49,9 @@ afterEach(() => {
 });
 
 describe("login wall detection", () => {
-  test("recognises the site's login form", () => {
+  test("recognises the login form but not a page that merely links to login", () => {
     expect(isLoginWall(LOGIN_PAGE)).toBe(true);
     expect(isLoginWall('<input name="PassWord" type=password>')).toBe(true);
-  });
-
-  test("leaves a real page alone, even when it links to login", () => {
     expect(isLoginWall(GALLERY_PAGE)).toBe(false);
     expect(isLoginWall("<p>Login to post comments.</p>")).toBe(false);
     expect(isLoginWall('{"error":"not signed in"}')).toBe(false);
@@ -62,19 +59,7 @@ describe("login wall detection", () => {
 });
 
 describe("form posts", () => {
-  test("a mutation that meets the login wall fails instead of reporting success", async () => {
-    reply.body = LOGIN_PAGE;
-
-    await expect(
-      postForm(
-        "https://e-hentai.org/uconfig.php",
-        new URLSearchParams({ apply: "Apply" }),
-        OPTIONS,
-      ),
-    ).rejects.toBeInstanceOf(LoginRequiredError);
-  });
-
-  test("a real response still resolves, and the caller can read its body", async () => {
+  test("resolves a real response and rejects the login wall", async () => {
     reply.body = GALLERY_PAGE;
 
     const response = await postForm(
@@ -82,7 +67,15 @@ describe("form posts", () => {
       new URLSearchParams({ apply: "Apply" }),
       OPTIONS,
     );
-
     expect(await response.text()).toContain("gdt");
+
+    reply.body = LOGIN_PAGE;
+    await expect(
+      postForm(
+        "https://e-hentai.org/uconfig.php",
+        new URLSearchParams({ apply: "Apply" }),
+        OPTIONS,
+      ),
+    ).rejects.toBeInstanceOf(LoginRequiredError);
   });
 });

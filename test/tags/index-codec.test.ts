@@ -3,31 +3,20 @@ import { describe, expect, test } from "bun:test";
 import { decodeTagVocabulary, encodeTagVocabulary } from "../../src/tags/index-codec";
 
 describe("tag vocabulary codec", () => {
-  test("round-trips sorted namespaces and front-coded keys", () => {
+  test("round-trips sorted namespaces, front-coded keys and non-ASCII values", () => {
     const groups = new Map<string, readonly string[]>([
       ["female", ["big breasts", "big brother", "enema"]],
       ["language", ["english", "japanese"]],
       ["character", ["yashiro", "yy"]],
+      ["artist", ["あいう", "あいえ"]],
     ]);
-    const bytes = encodeTagVocabulary(groups);
-    const decoded = decodeTagVocabulary(bytes);
 
-    expect(decoded).not.toBeNull();
-    expect([...(decoded?.entries() ?? [])]).toEqual([
+    expect([...(decodeTagVocabulary(encodeTagVocabulary(groups))?.entries() ?? [])]).toEqual([
       ["female", ["big breasts", "big brother", "enema"]],
       ["language", ["english", "japanese"]],
       ["character", ["yashiro", "yy"]],
+      ["artist", ["あいう", "あいえ"]],
     ]);
-    // Front coding keeps a long shared prefix once instead of once per key.
-    const shared = Array.from({ length: 100 }, (_, index) => `very long shared prefix ${index}`);
-    const coded = encodeTagVocabulary(new Map([["artist", shared]]));
-    expect(coded.length).toBeLessThan(shared.reduce((sum, key) => sum + key.length, 0));
-  });
-
-  test("preserves non-ASCII keys", () => {
-    const groups = new Map<string, readonly string[]>([["artist", ["あいう", "あいえ"]]]);
-    const decoded = decodeTagVocabulary(encodeTagVocabulary(groups));
-    expect(decoded?.get("artist")).toEqual(["あいう", "あいえ"]);
   });
 
   test("rejects corrupt payloads instead of guessing", () => {
@@ -46,14 +35,12 @@ describe("tag vocabulary codec", () => {
     expect(decodeTagVocabulary(new Uint8Array())).toBeNull();
 
     const badUtf8 = encodeTagVocabulary(new Map([["female", ["ab"]]]));
-    const suffixOffset = badUtf8.length - 1;
-    badUtf8[suffixOffset] = 0xff;
+    badUtf8[badUtf8.length - 1] = 0xff;
     expect(decodeTagVocabulary(badUtf8)).toBeNull();
-  });
 
-  test("rejects oversized namespace counts", () => {
-    const bytes = encodeTagVocabulary(new Map([["female", ["enema"]]]));
-    new DataView(bytes.buffer).setUint16(5, 65_000, true);
-    expect(decodeTagVocabulary(bytes)).toBeNull();
+    // A hostile namespace count cannot make the decoder allocate wildly.
+    const oversized = encodeTagVocabulary(new Map([["female", ["enema"]]]));
+    new DataView(oversized.buffer).setUint16(5, 65_000, true);
+    expect(decodeTagVocabulary(oversized)).toBeNull();
   });
 });

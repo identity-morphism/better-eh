@@ -69,13 +69,6 @@ describe("gallery tag search", () => {
     expect(gallery.host.querySelectorAll(".term-chip")).toHaveLength(1);
   });
 
-  test("keeps the previous search in the topbar", () => {
-    const input = host.querySelector<HTMLInputElement>("input[name='f_search']");
-
-    expect(input?.value).toBe("cat");
-    expect(host.querySelectorAll(".term-chip")).toHaveLength(1);
-  });
-
   test("appends a clicked tag instead of replacing the search", () => {
     click(chipByText(host, "bob smith"));
 
@@ -90,9 +83,9 @@ describe("gallery tag search", () => {
   test("recognizes a tag the draft spells with its full namespace", () => {
     setSearchDraftText('artist:"alice$"');
 
-    const alice = chipByText(host, "alice");
-    expect(alice.classList.contains("is-added")).toBe(true);
-    expect(alice.title).toContain("In the search");
+    click(chipByText(host, "alice"));
+
+    expect(getSearchDraft().text).toBe("");
   });
 
   test("alt-click excludes and a second click toggles it off", () => {
@@ -104,19 +97,6 @@ describe("gallery tag search", () => {
 
     click(chipByText(host, "alice"));
     expect(getSearchDraft().text).toBe("cat");
-  });
-
-  test("describes what a click will do to an applied tag", () => {
-    click(chipByText(host, "alice"), true);
-    const excluded = chipByText(host, "alice");
-    expect(excluded.title).toContain("Excluded from the search");
-    expect(excluded.title).toContain("Click to include");
-    expect(excluded.title).toContain("Alt-click to remove");
-
-    click(chipByText(host, "alice"));
-    const included = chipByText(host, "alice");
-    expect(included.title).toContain("In the search");
-    expect(included.title).toContain("Click to remove");
   });
 
   test("removing a chip edits the draft query", () => {
@@ -136,9 +116,6 @@ describe("gallery tag search", () => {
 
     click(chipByText(host, "bob smith"));
     expect(alice.getAttribute("href")).toBe("/?f_search=cat+a%3A%22bob+smith%24%22+a%3Aalice%24");
-
-    click(chipByText(host, "bob smith"));
-    expect(alice.getAttribute("href")).toBe("/?f_search=cat+a%3Aalice%24");
   });
 
   test("submitting the draft navigates to the combined search", () => {

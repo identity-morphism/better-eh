@@ -42,9 +42,8 @@ describe("search terms", () => {
     expect(terms[0]?.ns?.id).toBe("female");
     expect(terms[1]).toMatchObject({ sign: "~", nsRaw: "parody", value: "86", exact: false });
     expect(terms[2]).toMatchObject({ sign: "", nsRaw: null, value: "cat" });
-  });
 
-  test("keeps exact markers outside the quote working", () => {
+    // The exact marker also works outside the quotes, or on a plain word.
     expect(parseSearchTerms('artist:"foo bar"$')[0]).toMatchObject({
       nsRaw: "artist",
       value: "foo bar",
@@ -64,11 +63,8 @@ describe("search terms", () => {
     });
   });
 
-  test("parses a lone sign as an empty term", () => {
+  test("handles a lone sign and colons inside quotes", () => {
     expect(parseSearchTerms("-")[0]).toMatchObject({ sign: "-", value: "", raw: "-" });
-  });
-
-  test("does not treat colons inside quotes as a namespace", () => {
     expect(parseSearchTerms('"foo:bar"')[0]).toMatchObject({
       nsRaw: null,
       value: "foo:bar",
@@ -77,13 +73,11 @@ describe("search terms", () => {
 });
 
 describe("termAt", () => {
-  test("finds the term under the caret", () => {
+  test("finds the term under the caret and the insertion point between terms", () => {
     const text = 'female:"big breasts"';
     expect(termAt(text, 12).value).toBe("big breasts");
     expect(termAt(text, text.length).value).toBe("big breasts");
-  });
 
-  test("returns an insertion point between terms", () => {
     expect(termAt("female:big  ", 11)).toMatchObject({ start: 11, end: 11, raw: "" });
     expect(termAt("", 0)).toMatchObject({ start: 0, end: 0, raw: "" });
   });
@@ -94,22 +88,18 @@ describe("termAt", () => {
 });
 
 describe("editing a query", () => {
-  test("replaces a term and keeps the rest of the query", () => {
+  test("replaces a term, keeps the rest, and keeps it open for namespace completion", () => {
     const text = "female:big cats";
     const term = termAt(text, 8);
     expect(replaceTerm(text, term, 'female:"big breasts$"')).toMatchObject({
       text: 'female:"big breasts$" cats',
       caret: 21,
     });
-  });
 
-  test("adds a trailing space after a term at the end", () => {
-    const edit = replaceTerm("big", termAt("big", 3), "female:big$");
-    expect(edit.text).toBe("female:big$ ");
-    expect(edit.caret).toBe(12);
-  });
-
-  test("keeps the term open for namespace completion", () => {
+    expect(replaceTerm("big", termAt("big", 3), "female:big$")).toMatchObject({
+      text: "female:big$ ",
+      caret: 12,
+    });
     expect(replaceTerm("fem", termAt("fem", 3), "female:", true).text).toBe("female:");
   });
 
@@ -135,21 +125,14 @@ describe("editing a query", () => {
 describe("adding gallery tags to a search", () => {
   const TOKEN = 'artist:"bob smith$"';
 
-  test("appends the tag with a short namespace alias", () => {
+  test("appends, removes, and switches a tag's sign", () => {
     expect(toggleTagInSearch("", TOKEN)).toBe('a:"bob smith$"');
     expect(toggleTagInSearch("cat", TOKEN)).toBe('cat a:"bob smith$"');
-  });
-
-  test("toggles an already included tag off", () => {
     expect(toggleTagInSearch(`cat ${TOKEN} dog`, TOKEN)).toBe("cat dog");
-  });
 
-  test("switches between inclusion and exclusion", () => {
     expect(toggleTagInSearch(TOKEN, TOKEN, "-")).toBe(`-${TOKEN}`);
     expect(toggleTagInSearch(`-${TOKEN}`, TOKEN)).toBe(TOKEN);
-  });
 
-  test("sets an optional tag instead of dropping it", () => {
     expect(toggleTagInSearch(TOKEN, TOKEN, "~")).toBe(`~${TOKEN}`);
     expect(toggleTagInSearch(`-${TOKEN}`, TOKEN, "~")).toBe(`~${TOKEN}`);
     expect(toggleTagInSearch(`~${TOKEN}`, TOKEN, "~")).toBe("");
@@ -172,14 +155,11 @@ describe("adding gallery tags to a search", () => {
 describe("quick tag expressions", () => {
   const EXPRESSION = '~f:lolicon$ ~f:"small breasts$"';
 
-  test("adds every missing term and leaves existing terms alone", () => {
+  test("adds every missing term and removes the whole expression", () => {
     expect(toggleExpressionInSearch("cat ~f:lolicon$", EXPRESSION)).toBe(
       'cat ~f:lolicon$ ~f:"small breasts$"',
     );
     expect(toggleExpressionInSearch("", EXPRESSION)).toBe(EXPRESSION);
-  });
-
-  test("removes every term when the whole expression is present", () => {
     expect(toggleExpressionInSearch(`cat ${EXPRESSION} dog`, EXPRESSION)).toBe("cat dog");
   });
 
@@ -192,13 +172,11 @@ describe("quick tag expressions", () => {
 });
 
 describe("tag identity", () => {
-  test("ignores case, whitespace, underscores and accents", () => {
+  test("ignores case, whitespace, underscores and accents and canonicalizes aliases", () => {
     expect(tagIdentity("female", "Big_Breasts")).toBe("female\u0000big breasts");
     expect(tagIdentity("female", "  big   breasts ")).toBe("female\u0000big breasts");
     expect(tagIdentity("female", "Pokémon")).toBe("female\u0000pokemon");
-  });
 
-  test("canonicalizes namespace aliases and case", () => {
     expect(tagIdentity("f", "big breasts")).toBe(tagIdentity("Female", "big breasts"));
     expect(tagIdentity("artist", "foo")).toBe(tagIdentity("A", "foo"));
     expect(tagIdentity("anime", "foo")).toBe(tagIdentity("Anime", "foo"));
@@ -206,36 +184,33 @@ describe("tag identity", () => {
 });
 
 describe("term identity", () => {
-  const same = [
-    ['female:"big breasts$"', 'f:"Big_Breasts"'],
-    ['f:"big breasts"', 'female:"Big  Breasts"'],
-    ["artist:foo$", "a:foo"],
-    ["uploader:lasthm$", "uploader:Lasthm"],
-    ["anime:Pokemon$", "Anime:pokemon"],
-    ['-female:"big breasts"', '~f:"big breasts"'],
-    ["cat", "CAT$"],
-    [" cat ", '"cat"'],
-  ] as const;
-  const different = [
-    ['female:"big breasts"', 'female:"big brother"'],
-    ['female:"big breasts"', 'male:"big breasts"'],
-    ["uploader:lasthm", "lasthm"],
-    ["anime:foo", "foo"],
-    ["cat", "dog"],
-    ["f:cat", "g:cat"],
-  ] as const;
-
-  for (const [left, right] of same) {
-    test(`${left} and ${right} name the same term`, () => {
+  test("matches equivalent spellings and distinguishes different terms", () => {
+    const same = [
+      ['female:"big breasts$"', 'f:"Big_Breasts"'],
+      ['f:"big breasts"', 'female:"Big  Breasts"'],
+      ["artist:foo$", "a:foo"],
+      ["uploader:lasthm$", "uploader:Lasthm"],
+      ["anime:Pokemon$", "Anime:pokemon"],
+      ['-female:"big breasts"', '~f:"big breasts"'],
+      ["cat", "CAT$"],
+      [" cat ", '"cat"'],
+    ] as const;
+    for (const [left, right] of same) {
       expect(termIdentity(onlyTerm(left))).toBe(termIdentity(onlyTerm(right)));
-    });
-  }
+    }
 
-  for (const [left, right] of different) {
-    test(`${left} and ${right} name different terms`, () => {
+    const different = [
+      ['female:"big breasts"', 'female:"big brother"'],
+      ['female:"big breasts"', 'male:"big breasts"'],
+      ["uploader:lasthm", "lasthm"],
+      ["anime:foo", "foo"],
+      ["cat", "dog"],
+      ["f:cat", "g:cat"],
+    ] as const;
+    for (const [left, right] of different) {
       expect(termIdentity(onlyTerm(left))).not.toBe(termIdentity(onlyTerm(right)));
-    });
-  }
+    }
+  });
 
   test("reports tag identity only for namespaced terms", () => {
     expect(termTagIdentity(onlyTerm("uploader:lasthm$"))).toBe("uploader\u0000lasthm");
@@ -252,12 +227,9 @@ describe("term identity", () => {
 });
 
 describe("tag tokens", () => {
-  test("quotes multi-word tags and always marks them exact", () => {
+  test("quotes multi-word tags, marks them exact, and normalizes whitespace", () => {
     expect(formatTagToken("female", "big breasts", "-")).toBe('-f:"big breasts$"');
     expect(formatTagToken("parody", "86", "~")).toBe("~p:86$");
-  });
-
-  test("normalizes whitespace in values", () => {
     expect(formatTagToken("artist", "  foo   bar ")).toBe('a:"foo bar$"');
   });
 

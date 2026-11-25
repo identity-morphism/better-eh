@@ -14,7 +14,7 @@ const NOTE_PAGE = `
         <tr>
           <td class="tc">language:</td>
           <td>
-            <a href="/tag/language:japanese">japanese | definition revised please read the wiki</a>
+            <a href="/tag/language:japanese">japanese | see the wiki | and the forum</a>
             <a href="/tag/language:english">english</a>
           </td>
         </tr>
@@ -33,21 +33,10 @@ describe("parseGalleryPage tag notes", () => {
         {
           name: "japanese",
           href: "https://e-hentai.org/tag/language:japanese",
-          note: "definition revised please read the wiki",
+          note: "see the wiki | and the forum",
         },
         { name: "english", href: "https://e-hentai.org/tag/language:english", note: null },
       ],
-    });
-
-    const html = NOTE_PAGE.replace(
-      "japanese | definition revised please read the wiki",
-      "japanese | see the wiki | and the forum",
-    );
-    const [split] = parseGalleryPage(parseDocument(html), GALLERY_URL).tags;
-    expect(split?.tags[0]).toEqual({
-      name: "japanese",
-      href: "https://e-hentai.org/tag/language:japanese",
-      note: "see the wiki | and the forum",
     });
   });
 });

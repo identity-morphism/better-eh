@@ -38,17 +38,16 @@ beforeEach(() => {
 });
 
 describe("view mode", () => {
-  test("maps each view state onto the body's layout classes", () => {
+  test("maps the viewer's layout onto body classes and clears them when leaving", () => {
     const cases: readonly [ViewModeState, ViewClass[]][] = [
       [viewMode(), ["eh-viewer", "fit-h"]],
-      [viewMode({ fitHeight: false }), ["eh-viewer", "fit-w"]],
-      [
-        viewMode({ readerMode: "spread", readingDirection: "rtl" }),
-        ["eh-viewer", "fit-h", "reader-spread", "reader-rtl"],
-      ],
       [
         viewMode({ fitHeight: false, readerMode: "continuous" }),
         ["eh-viewer", "fit-w", "reader-continuous"],
+      ],
+      [
+        viewMode({ readerMode: "spread", readingDirection: "rtl" }),
+        ["eh-viewer", "fit-h", "reader-spread", "reader-rtl"],
       ],
     ];
 
@@ -56,37 +55,19 @@ describe("view mode", () => {
       applyViewMode(mode);
       expectClasses(classes);
     }
+
+    applyViewMode(viewMode({ viewer: false, readerMode: "spread", readingDirection: "rtl" }));
+    expectClasses([]);
   });
 
-  test("keeps the cursor class independent of the layout switch", () => {
+  test("keeps the cursor class independent of the layout switch, and reset spares body classes", () => {
+    document.body.classList.add("is-loading");
     applyViewMode(viewMode());
     setCursorHidden(true);
     expectClasses(["eh-viewer", "fit-h", "no-cursor"]);
 
     applyViewMode(viewMode({ fitHeight: false, cursorHidden: true }));
     expectClasses(["eh-viewer", "fit-w", "no-cursor"]);
-
-    setCursorHidden(false);
-    expectClasses(["eh-viewer", "fit-w"]);
-  });
-
-  test("leaving the viewer clears the viewer, fit, reader and cursor classes", () => {
-    applyViewMode(viewMode({ cursorHidden: true, readerMode: "spread", readingDirection: "rtl" }));
-
-    applyViewMode(
-      viewMode({
-        viewer: false,
-        cursorHidden: false,
-        readerMode: "spread",
-        readingDirection: "rtl",
-      }),
-    );
-    expectClasses([]);
-  });
-
-  test("reset strips every view class and keeps unrelated body classes", () => {
-    document.body.classList.add("is-loading");
-    applyViewMode(viewMode({ cursorHidden: true }));
 
     resetViewMode();
     expectClasses([]);

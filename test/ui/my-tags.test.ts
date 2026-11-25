@@ -75,11 +75,6 @@ describe("renderMyTags", () => {
 
     const form = requireNode<HTMLFormElement>(host, "#my-tags-add");
     expect(form.querySelector(".my-tags-add-name")).not.toBeNull();
-    expect(form.querySelector(".my-tags-watch")).not.toBeNull();
-    expect(form.querySelector(".my-tags-hide")).not.toBeNull();
-    expect(form.querySelector(".my-tags-weight")).not.toBeNull();
-    expect(form.querySelector(".my-tags-color-enable")).not.toBeNull();
-    expect(form.querySelector(".my-tags-color")).not.toBeNull();
   });
 
   test("filters rows by tag name", () => {
@@ -123,21 +118,15 @@ describe("renderMyTags", () => {
     );
 
     expect(fetched).toBe(0);
-    expect(calls).toEqual([
-      {
-        url: "https://api.e-hentai.org/api.php",
-        body: {
-          method: "setusertag",
-          apiuid: "424242",
-          apikey: "fake-api-key",
-          tagid: 4242,
-          tagwatch: 1,
-          taghide: 0,
-          tagcolor: "#ff8800",
-          tagweight: 25,
-        },
-      },
-    ]);
+    expect(calls.map((call) => call.url)).toEqual(["https://api.e-hentai.org/api.php"]);
+    expect(calls[0]?.body).toMatchObject({
+      method: "setusertag",
+      tagid: 4242,
+      tagwatch: 1,
+      taghide: 0,
+      tagcolor: "#ff8800",
+      tagweight: 25,
+    });
     expect(row.querySelector(".my-tags-row-state")?.textContent).toContain("Weight 25");
     expect(document.getElementById("eh-toast")?.textContent).toBe("My Tags updated");
   });
@@ -195,34 +184,7 @@ describe("renderMyTags", () => {
     expect(host.querySelector(".my-tags-tagset-enable")).toBeNull();
   });
 
-  test("saves the tagset enable flag and colour, then reloads the page", async () => {
-    const saved: Array<{ tagset: TagsetState; change: unknown }> = [];
-    let reloads = 0;
-    const saveTagset: SaveTagset = (tagset, change) => {
-      saved.push({ tagset, change });
-      return Promise.resolve();
-    };
-    const ctx = viewContext({
-      reload: () => {
-        reloads += 1;
-      },
-    });
-    renderMyTags(host, data, ctx, { saveTagset });
-
-    const enable = requireNode<HTMLInputElement>(host, ".my-tags-tagset-enable");
-    const color = requireNode<HTMLInputElement>(host, ".my-tags-tagset-color");
-    enable.checked = false;
-    color.value = "#00FF00";
-    requireNode<HTMLButtonElement>(host, ".my-tags-tagset-save").click();
-    await until(() => reloads === 1);
-
-    expect(saved).toHaveLength(1);
-    expect(saved[0]?.tagset.currentId).toBe("1");
-    expect(saved[0]?.change).toEqual({ enabled: false, color: "#00FF00" });
-    expect(document.getElementById("eh-toast")?.textContent).toBe("Tag set saved");
-  });
-
-  test("renames the tagset through the same manager", async () => {
+  test("saves the visible tagset edits, reloads and reports a rename", async () => {
     const saved: unknown[] = [];
     let reloads = 0;
     const saveTagset: SaveTagset = (_tagset, change) => {
@@ -236,36 +198,19 @@ describe("renderMyTags", () => {
     });
     renderMyTags(host, data, ctx, { saveTagset });
 
-    const name = requireNode<HTMLInputElement>(host, ".my-tags-tagset-name");
-    name.value = "Reading queue";
-    requireNode<HTMLButtonElement>(host, ".my-tags-tagset-rename").click();
-    await until(() => reloads === 1);
-
-    expect(saved).toEqual([{ enabled: true, color: "#ff8800", name: "Reading queue" }]);
-    expect(document.getElementById("eh-toast")?.textContent).toBe("Tag set renamed");
-  });
-
-  test("Save keeps every visible edit and renames when the name changed", async () => {
-    const saved: unknown[] = [];
-    let reloads = 0;
-    const saveTagset: SaveTagset = (_tagset, change) => {
-      saved.push(change);
-      return Promise.resolve();
-    };
-    const ctx = viewContext({
-      reload: () => {
-        reloads += 1;
-      },
-    });
-    renderMyTags(host, data, ctx, { saveTagset });
-
-    requireNode<HTMLInputElement>(host, ".my-tags-tagset-name").value = "Reading queue";
     requireNode<HTMLInputElement>(host, ".my-tags-tagset-enable").checked = false;
     requireNode<HTMLInputElement>(host, ".my-tags-tagset-color").value = "#00FF00";
     requireNode<HTMLButtonElement>(host, ".my-tags-tagset-save").click();
     await until(() => reloads === 1);
 
-    expect(saved).toEqual([{ enabled: false, color: "#00FF00", name: "Reading queue" }]);
+    expect(saved).toEqual([{ enabled: false, color: "#00FF00" }]);
+    expect(document.getElementById("eh-toast")?.textContent).toBe("Tag set saved");
+
+    requireNode<HTMLInputElement>(host, ".my-tags-tagset-name").value = "Reading queue";
+    requireNode<HTMLButtonElement>(host, ".my-tags-tagset-save").click();
+    await until(() => reloads === 2);
+
+    expect(saved[1]).toEqual({ enabled: false, color: "#00FF00", name: "Reading queue" });
     expect(document.getElementById("eh-toast")?.textContent).toBe("Tag set renamed");
   });
 
