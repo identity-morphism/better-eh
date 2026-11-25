@@ -4,10 +4,10 @@ import type { ArchiveCost, ArchiveOption, ArchivePage } from "../parse/archive";
 import { nativeUrl } from "../routes/identity";
 import { appendChildren, buttonEl, el } from "../ui/dom";
 import { factRow } from "../ui/fact-row";
-import { listHeader } from "../ui/list-header";
+import { galleryBackLink, pageScaffold } from "../ui/page-scaffold";
 import type { PendingAction } from "../ui/pending-action";
 import { createPendingAction } from "../ui/pending-action";
-import { siteNav } from "../ui/topbar";
+import { nativePageAction, statePanel } from "../ui/state-panel";
 import type { ViewContext } from "./context";
 
 export interface ArchiveViewDeps {
@@ -151,7 +151,7 @@ function optionCard(
 function galleryLinks(data: ArchivePage): HTMLElement | null {
   const links: HTMLElement[] = [];
   if (data.galleryHref !== null) {
-    links.push(el("a", { class: "meta-link", href: data.galleryHref, text: "Back to gallery" }));
+    links.push(galleryBackLink(data.galleryHref, "meta-link"));
   }
   if (data.torrentsHref !== null) {
     links.push(el("a", { class: "meta-link", href: data.torrentsHref, text: "Torrents" }));
@@ -186,7 +186,6 @@ export function renderArchive(
   ctx: ViewContext,
   deps: ArchiveViewDeps = {},
 ): void {
-  host.replaceChildren();
   const startDownload = deps.startDownload ?? startArchiveDownload;
   const openDownload =
     deps.openDownload ??
@@ -210,35 +209,26 @@ export function renderArchive(
 
   const empty =
     options.length === 0
-      ? el(
-          "div",
-          { class: "empty-state" },
-          el("p", { class: "state-title", text: "No archive options" }),
-          el("p", {
-            class: "state-text",
-            text: "The site did not offer an archive for this gallery.",
-          }),
-        )
+      ? statePanel({
+          title: "No archive options",
+          text: "The site did not offer an archive for this gallery.",
+        })
       : null;
 
+  const native = nativePageAction(nativeUrl(data.url));
+  pageScaffold(host, {
+    title: data.title === "" ? "Archive Download" : data.title,
+    summary: [el("span", { class: "badge", text: "Archive Download" })],
+    signal: ctx.signal,
+  });
   appendChildren(host, [
-    siteNav(ctx.signal),
-    listHeader({
-      title: data.title === "" ? "Archive Download" : data.title,
-      summary: [el("span", { class: "badge", text: "Archive Download" })],
-    }),
     fundsLine(data.funds) ?? null,
     empty ?? grid,
     galleryLinks(data) ?? null,
     el(
       "div",
       { class: "archive-footer" },
-      el("a", {
-        class: "btn btn-ghost",
-        href: nativeUrl(data.url),
-        "data-native": "",
-        text: "Open native page",
-      }),
+      el("a", { class: "btn btn-ghost", href: native.href, "data-native": "", text: native.label }),
     ),
   ]);
 }

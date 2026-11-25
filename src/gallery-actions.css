@@ -78,11 +78,13 @@
   @apply flex flex-wrap items-baseline gap-2;
 }
 
-.rating-label {
+.rating-label,
+.comment-status {
   @apply text-control text-muted;
 }
 
-.rating-count {
+.rating-count,
+.comment-posted {
   @apply text-meta text-muted;
 }
 
@@ -92,7 +94,8 @@
   @apply w-[240px] p-3;
 }
 
-.tag-menu {
+.tag-menu,
+.comment-list {
   @apply grid gap-2;
 }
 
@@ -136,7 +139,8 @@
 
 /* ------------------------------------------------------- tag section */
 
-.tag-title {
+.tag-title,
+.comments-title {
   @apply text-section font-semibold text-fg;
 }
 
@@ -166,14 +170,6 @@
   @apply mt-2 grid gap-3 border-t border-line pt-5 pb-10;
 }
 
-.comments-title {
-  @apply text-section font-semibold text-fg;
-}
-
-.comment-list {
-  @apply grid gap-2;
-}
-
 .comment {
   @apply rounded-control border border-line bg-surface p-3;
 }
@@ -192,10 +188,6 @@
 
 .comment-badge {
   @apply rounded-none border border-accent px-1.5 py-px text-micro text-star;
-}
-
-.comment-posted {
-  @apply text-meta text-muted;
 }
 
 .comment-score-wrap {
@@ -241,7 +233,8 @@
   @apply mt-2 text-meta text-muted;
 }
 
-.comment-composer {
+.comment-composer,
+.comment-edit-form {
   @apply mt-1 grid gap-2;
 }
 
@@ -254,10 +247,6 @@
   @apply flex items-center gap-2;
 }
 
-.comment-status {
-  @apply text-control text-muted;
-}
-
 /* Resume control in the gallery action row. */
 .gallery-resume-group {
   @apply inline-flex min-w-0 items-stretch;
@@ -268,10 +257,6 @@
 }
 
 /* --------------------------------------------------------- comment edit */
-
-.comment-edit-form {
-  @apply mt-1 grid gap-2;
-}
 
 .comment-edit-form .comment-input {
   @apply w-full;

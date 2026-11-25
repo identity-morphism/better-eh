@@ -3,11 +3,10 @@ import { loadTorrentInfo } from "../data/gallery-torrents";
 import type { GalleryTorrent, GalleryTorrentsPage } from "../parse/gallery-torrents";
 import { buttonEl, el } from "../ui/dom";
 import { factRow } from "../ui/fact-row";
-import { listHeader } from "../ui/list-header";
+import { galleryBackLink, pageScaffold } from "../ui/page-scaffold";
 import { createPendingAction } from "../ui/pending-action";
 import { nativeEmptyPanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
-import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
 
 /** Loader the Details button uses; tests inject a fake, production posts through the site form. */
@@ -158,17 +157,6 @@ function torrentCard(
   );
 }
 
-function backLink(page: GalleryTorrentsPage): HTMLElement | null {
-  if (page.galleryHref === null) {
-    return null;
-  }
-  return el("a", {
-    class: "gallery-torrents-back",
-    href: page.galleryHref,
-    text: "Back to gallery",
-  });
-}
-
 /**
  * Render the gallery's torrent list.
  *
@@ -182,24 +170,15 @@ export function renderGalleryTorrents(
   ctx: ViewContext,
   deps: GalleryTorrentsViewDeps = {},
 ): void {
-  host.replaceChildren();
-
   const loadInfo: LoadTorrentInfo = deps.loadInfo ?? loadTorrentInfo;
-  const root = el(
-    "div",
-    { id: "gallery-torrents", class: "gallery-torrents" },
-    siteNav(ctx.signal),
-  );
-  root.append(
-    listHeader({
-      title: data.title === "" ? "Gallery torrents" : data.title,
-      summary: [el("span", { text: countText(data.torrents.length, "torrent") })],
-    }),
-  );
+  const root = pageScaffold(el("div", { id: "gallery-torrents", class: "gallery-torrents" }), {
+    title: data.title === "" ? "Gallery torrents" : data.title,
+    summary: [el("span", { text: countText(data.torrents.length, "torrent") })],
+    signal: ctx.signal,
+  });
 
-  const back = backLink(data);
-  if (back !== null) {
-    root.append(back);
+  if (data.galleryHref !== null) {
+    root.append(galleryBackLink(data.galleryHref, "gallery-torrents-back"));
   }
 
   if (data.torrents.length === 0) {
@@ -212,5 +191,5 @@ export function renderGalleryTorrents(
     root.append(list);
   }
 
-  host.append(root);
+  host.replaceChildren(root);
 }

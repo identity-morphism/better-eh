@@ -7,7 +7,7 @@ import type { ListItem } from "../types";
 import { createCardGrid } from "../ui/card-grid";
 import { buttonEl, el } from "../ui/dom";
 import { trackScrollEdges } from "../ui/jump-row";
-import { listHeader } from "../ui/list-header";
+import { pageScaffold } from "../ui/page-scaffold";
 import { pager } from "../ui/pager";
 import { createPendingAction } from "../ui/pending-action";
 import type { Popover } from "../ui/popover";
@@ -16,7 +16,6 @@ import { resultCard } from "../ui/result-card";
 import { nativePageAction, statePanel } from "../ui/state-panel";
 import { plural } from "../ui/text";
 import { showToast } from "../ui/toast";
-import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
 import { createSelection } from "./favorites-selection";
 
@@ -179,8 +178,6 @@ export function renderFavorites(
   ctx: ViewContext,
   deps?: FavoritesViewDeps,
 ): void {
-  host.replaceChildren();
-
   const labels = favoritesLabels(data);
   const remove = deps?.remove ?? deleteFavorites;
   const move = deps?.move ?? moveFavorites;
@@ -451,11 +448,6 @@ export function renderFavorites(
       : null,
   );
 
-  const header = listHeader({
-    title: labels.heading,
-    summary: [el("span", { text: summaryText(data) })],
-  });
-
   const footer =
     data.items.length === 0
       ? statePanel({
@@ -505,7 +497,12 @@ export function renderFavorites(
     { signal: ctx.signal },
   );
 
-  host.append(siteNav(ctx.signal), header, search, tabs, order, toolbar);
+  pageScaffold(host, {
+    title: labels.heading,
+    summary: [el("span", { text: summaryText(data) })],
+    signal: ctx.signal,
+  });
+  host.append(search, tabs, order, toolbar);
   if (data.items.length > 0) {
     host.append(grid.element);
     grid.refresh();

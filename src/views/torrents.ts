@@ -2,11 +2,10 @@ import type { TorrentPage, TorrentRow, TorrentStatus } from "../parse/torrents";
 import { memberId } from "../session";
 import { SITE_PATHS } from "../site";
 import { buttonEl, el, searchInput } from "../ui/dom";
-import { listHeader } from "../ui/list-header";
+import { pageScaffold } from "../ui/page-scaffold";
 import { numberedPager } from "../ui/pager";
 import { nativePageAction, statePanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
-import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
 
 const STATUS_OPTIONS: readonly { status: TorrentStatus; label: string }[] = [
@@ -336,15 +335,14 @@ function torrentTable(data: TorrentPage): HTMLTableElement {
 
 /** Render the torrent index with its filters, table and numeric pager. */
 export function renderTorrents(host: HTMLElement, data: TorrentPage, ctx: ViewContext): void {
-  host.replaceChildren();
-
-  const header = listHeader({
+  pageScaffold(host, {
     title: "Torrents",
     summary: [
       el("span", {
         text: data.summary ?? countText(data.rows.length, "torrent"),
       }),
     ],
+    signal: ctx.signal,
   });
 
   const filtered = data.search !== "" || data.status !== "all" || data.uploaderFilter !== null;
@@ -363,7 +361,7 @@ export function renderTorrents(host: HTMLElement, data: TorrentPage, ctx: ViewCo
         })
       : el("div", { class: "torrent-table-wrap" }, torrentTable(data));
 
-  host.append(siteNav(ctx.signal), header, filterBar(data, ctx), body);
+  host.append(filterBar(data, ctx), body);
 
   // The site's own pager shows the first and last page, so its last number is the page count.
   const total = data.pages[data.pages.length - 1] ?? data.page;
