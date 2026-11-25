@@ -48,6 +48,15 @@ PORT=8081 bun run dev   # --port 8081 / --port=8081 also work when :8080 is take
 `build.ts` compiles `src/tailwind.css` into `.cache/app.css`, which is imported as text and
 injected with `GM_addStyle` together with the viewer stylesheet. `.cache/` is ignored by Git.
 
+**Two stylesheets, two cascade roles.** `.cache/app.css` is entirely inside Tailwind layers
+(`theme`, `base`, `components`, `utilities`); `src/style.css` is injected unlayered and outside the
+Tailwind pipeline. An unlayered declaration beats every layered one regardless of specificity, so
+the viewer sheet outranks the whole app — keep it that way, and keep every selector in it
+viewer-scoped (`#id`, `body.<state>`, or a `reader-`/`hud-`/`img-error-`/`page-nav-` class). One
+unscoped rule there silently outranks the app. The same rule cuts the other way: a page's own
+unlayered CSS outranks every layered app rule, so a reskin rule cannot be made to win by adding
+specificity; the fixture and smoke pages carry no site CSS, so no gate observes that contest.
+
 - **Local Server**: Serves the script at `http://localhost:8080/better-eh.user.js`.
 - **Live Updates**: Open that URL in the browser and click **Track external edits** (not
   "Install") in the Violentmonkey installer, then tick **Reload tab**. Keep the installer tab
