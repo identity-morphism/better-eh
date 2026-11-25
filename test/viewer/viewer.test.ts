@@ -530,6 +530,29 @@ describe("mountViewer", () => {
     expect(error.hidden).toBe(true);
   });
 
+  test("Retry re-attempts the image when no nl page comes back", async () => {
+    const data = page();
+    active = harness();
+    mountViewer(host, data, active.ctx);
+
+    const img = requireNode<HTMLImageElement>(host, "#main-img");
+    img.onerror?.(new Event("error"));
+    await flushMicrotasks(12);
+
+    const error = requireNode<HTMLElement>(host, "#img-error");
+    expect(error.hidden).toBe(false);
+
+    // The loader has nothing to offer (no token, or the refetch failed): Retry must still act.
+    state.retry = null;
+    click(requireNode(host, "#img-error-retry"));
+    await flushMicrotasks(12);
+
+    expect(error.hidden).toBe(true);
+    expect(state.retryCalls).toHaveLength(2);
+    expect(img.getAttribute("src")).toBe(data.imgSrc);
+    expect(typeof img.onerror).toBe("function");
+  });
+
   test("aborting the view flushes the reading position and tears down the shell", () => {
     const data = page();
     active = harness();

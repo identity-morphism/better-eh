@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better EH
 // @namespace    https://github.com/identity-morphism/better-eh
-// @version      1.0.5
+// @version      1.0.6
 // @description  A userscript that reskins E-Hentai and ExHentai into one consistent, image-first interface: galleries, listings, favorites, toplists, torrents and the reader, with tag autocomplete and prefetching.
 // @author       identity-morphism
 // @icon         https://api.iconify.design/ph/book-open-bold.svg
@@ -1649,13 +1649,20 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/parse/viewer.ts
+  var NL_TOKEN = /\bnl\(\s*(?:'([^']*)'|"([^"]*)"|([^'")\s]+))\s*\)/u;
+  function parseNlToken(doc) {
+    const anchor = doc.querySelector("#loadfail, a[onclick*='nl(']");
+    const match = NL_TOKEN.exec(anchor?.getAttribute("onclick") ?? "");
+    const token = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+    return token === "" ? null : token;
+  }
   function parseViewer(doc, viewerUrl) {
     const [, pageHash = "", galleryId = "", rawNum = "1"] = viewerUrl.match(/\/s\/([^/]+)\/(\d+)-(\d+)/) ?? [];
     const pageNum = parseInt(rawNum, 10);
     const imgEl = doc.querySelector("#i3 a img, iframe + a img, .sni > a img");
     const imgSrc = imgEl?.getAttribute("src") ?? "";
     const originalHref = anchorHref(doc.querySelector("a[href*='/fullimg/']"), viewerUrl);
-    const nlToken = doc.querySelector('a[onclick*="nl("]')?.getAttribute("onclick")?.match(/nl\((\d+)\)/)?.[1] ?? null;
+    const nlToken = parseNlToken(doc);
     const anchorHrefs = [...doc.querySelectorAll('a[href*="/s/"]')].map((anchor) => anchorHref(anchor, viewerUrl));
     const hrefMatching = (n) => anchorHrefs.find((href) => href?.match(new RegExp(`-(${n})(\\?|$)`))) ?? null;
     const nextHref = (() => {
@@ -1895,13 +1902,13 @@ ${defaultKeySummary()}`)) {
         cachePage(data, url);
       },
       async retryWithNl(page, { signal } = {}) {
-        if (!page.nlToken) {
+        if (page.nlToken === null || page.nlToken === "") {
           return null;
         }
         if (signal?.aborted) {
           return null;
         }
-        const retryUrl = `${page.viewerUrl.split("?")[0]}?nl=${page.nlToken}`;
+        const retryUrl = `${page.viewerUrl.split("?")[0]}?nl=${encodeURIComponent(page.nlToken)}`;
         log("nl retry →", retryUrl);
         try {
           const { doc } = await loadDocument(retryUrl, {
@@ -13454,6 +13461,20 @@ ${defaultKeySummary()}`)) {
       hideError();
       showToast("Reloading image");
     };
+    const retryPage = () => {
+      (async () => {
+        hideError();
+        const retried = await loader.retryWithNl(current, { signal: ctx.signal });
+        if (ctx.signal.aborted) {
+          return;
+        }
+        if (retried) {
+          render(retried);
+          return;
+        }
+        showMain(current);
+      })();
+    };
     const goEnd = (direction) => {
       const target = direction === "first" ? current.firstHref : current.lastHref;
       if (target) {
@@ -14007,20 +14028,7 @@ ${defaultKeySummary()}`)) {
       event.preventDefault();
       returnToGallery();
     }, { signal: ctx.signal });
-    ui.elErrorRetry.addEventListener("click", () => {
-      (async () => {
-        hideError();
-        const retried = await loader.retryWithNl(current, { signal: ctx.signal });
-        if (ctx.signal.aborted) {
-          return;
-        }
-        if (retried) {
-          render(retried);
-        } else {
-          showError();
-        }
-      })();
-    }, { signal: ctx.signal });
+    ui.elErrorRetry.addEventListener("click", retryPage, { signal: ctx.signal });
     document.addEventListener("keydown", (event) => {
       if (isEditableTarget(event.target)) {
         return;
@@ -19986,8 +19994,45 @@ body.fit-h.reader-continuous #reader {
     };
     apply();
   }
+  var stopNativeErrorGuard = null;
+  function guardAgainstNativeImageErrors() {
+    const guard = (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.localName === "img" && (target.getAttribute("onerror") ?? "").includes("nl(")) {
+        event.stopImmediatePropagation();
+      }
+    };
+    window.addEventListener("error", guard, true);
+    stopNativeErrorGuard = () => {
+      window.removeEventListener("error", guard, true);
+      stopNativeErrorGuard = null;
+    };
+  }
+  function isNativeHandler(handler, marker) {
+    return typeof handler === "function" && handler.toString().includes(marker);
+  }
+  function detachNativePage() {
+    if (isNativeHandler(window.onresize, "update_window_extents")) {
+      window.onresize = null;
+    }
+    if (isNativeHandler(window.onpopstate, "apply_json_state")) {
+      window.onpopstate = null;
+    }
+    if (isNativeHandler(document.onkeydown, "holdingOverrideKey")) {
+      document.onkeydown = null;
+    }
+    if (isNativeHandler(document.onkeyup, "holdingOverrideKey")) {
+      document.onkeyup = null;
+    }
+    for (const image of document.querySelectorAll("#i3 img, #img")) {
+      image.onload = null;
+      image.onerror = null;
+      image.removeAttribute("src");
+    }
+  }
   function revealDocument() {
     hiding = false;
+    stopNativeErrorGuard?.();
     const root = document.documentElement;
     if (!root) {
       return;
@@ -20005,6 +20050,8 @@ body.fit-h.reader-continuous #reader {
     if (!document.querySelector('meta[name="viewport"]')) {
       document.head.append(el("meta", { name: "viewport", content: "width=device-width, initial-scale=1" }));
     }
+    stopNativeErrorGuard?.();
+    detachNativePage();
     document.body.replaceChildren();
     document.body.className = "eh-body";
     document.body.removeAttribute("style");
@@ -20249,6 +20296,7 @@ body.fit-h.reader-continuous #reader {
     }
     blockSiteAds();
     hideDocument();
+    guardAgainstNativeImageErrors();
     const effective = applyPersistedListFilters(route);
     if (effective !== route) {
       location.replace(effective.url);

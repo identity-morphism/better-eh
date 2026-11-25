@@ -14,7 +14,7 @@ describe("parseViewer", () => {
     expect(data.imgSrc).toBe("https://img.example/pages/2.jpg");
     expect(data.originalHref).toBe("https://e-hentai.org/fullimg/987654/2/abc123/02.png");
     expect(data.counterText).toBe("2 / 3");
-    expect(data.nlToken).toBe("777");
+    expect(data.nlToken).toBe("777-abc");
     expect(data.fileInfo).toBe("1,234 KB :: 800 x 1200");
     expect(data.galleryHref).toBe("https://e-hentai.org/g/987654/abcdef1234/");
     expect(data.forumHref).toBe("https://e-hentai.org/forumtoken/987654-2/abc123/02.png");
