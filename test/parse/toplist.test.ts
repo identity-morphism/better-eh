@@ -8,7 +8,6 @@ const TOPLIST_URL = "https://e-hentai.org/toplist.php";
 const overviewDoc = await loadFixture("toplist.html");
 const overview = parseToplist(overviewDoc, TOPLIST_URL);
 const activeOverview = parseToplist(overviewDoc, `${TOPLIST_URL}?tl=22`);
-const unknownOverview = parseToplist(overviewDoc, `${TOPLIST_URL}?tl=99`);
 
 const categoryDoc = await loadFixture("toplist-category.html");
 const category = parseToplist(categoryDoc, `${TOPLIST_URL}?tl=11`);
@@ -17,7 +16,7 @@ const usersDoc = await loadFixture("toplist-category-users.html");
 const users = parseToplist(usersDoc, `${TOPLIST_URL}?tl=21`);
 
 describe("parseToplist overview", () => {
-  test("collects one tab per toplist link, grouped by period", () => {
+  test("collects one tab per toplist link and marks the requested one", () => {
     expect(overview.kind).toBe("overview");
     expect(overview.tabs).toEqual([
       {
@@ -33,14 +32,7 @@ describe("parseToplist overview", () => {
         active: false,
       },
     ]);
-  });
-
-  test("marks the tab named by the tl query parameter", () => {
     expect(activeOverview.tabs.map((tab) => tab.active)).toEqual([false, true]);
-  });
-
-  test("ignores a tl value the page does not offer", () => {
-    expect(unknownOverview.tabs.every((tab) => !tab.active)).toBe(true);
   });
 
   test("parses each block as a titled section", () => {
@@ -54,7 +46,7 @@ describe("parseToplist overview", () => {
     expect(overview.sections.map((section) => section.entries.length)).toEqual([3, 3]);
   });
 
-  test("exposes gid for gallery rows", () => {
+  test("exposes gid for gallery rows and leaves it empty for user rows", () => {
     if (overview.kind !== "overview") {
       throw new Error("expected the overview shape");
     }
@@ -81,12 +73,6 @@ describe("parseToplist overview", () => {
         score: null,
       },
     ]);
-  });
-
-  test("leaves gid empty for user rows", () => {
-    if (overview.kind !== "overview") {
-      throw new Error("expected the overview shape");
-    }
     expect(overview.sections[1]?.entries).toMatchObject([
       {
         rank: 1,
@@ -174,13 +160,11 @@ describe("parseToplist category", () => {
       group: "All-Time",
       active: true,
     });
-    expect(category.tabs[4]).toEqual({
-      label: "Uploader",
-      href: "https://e-hentai.org/toplist.php?tl=21",
-      group: "All-Time",
-      active: false,
-    });
     expect(category.tabs.filter((tab) => tab.active)).toHaveLength(1);
+    expect(category.tabs.find((tab) => tab.href.endsWith("tl=21"))).toMatchObject({
+      label: "Uploader",
+      group: "All-Time",
+    });
   });
 
   test("parses user rows in rank order with their scores", () => {

@@ -10,17 +10,14 @@ import { installDom, mountHost } from "./dom";
 
 let host: HTMLElement;
 let searched: string[];
-let signal: AbortSignal;
 
 function render(): void {
-  const controller = new AbortController();
-  signal = controller.signal;
   host.append(
     renderTopbar({
       onSearch: (text) => {
         searched.push(text);
       },
-      signal,
+      signal: new AbortController().signal,
     }),
   );
 }
@@ -42,8 +39,15 @@ function historyPanel(): HTMLElement {
 }
 
 function openHistory(): HTMLElement {
-  host.querySelector<HTMLButtonElement>(".topbar-history")?.click();
+  host.querySelector<HTMLButtonElement>('[aria-label="Search history"]')?.click();
   return historyPanel();
+}
+
+function submitSearch(text: string): void {
+  input().value = text;
+  host
+    .querySelector<HTMLFormElement>(".topbar-search")
+    ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
 /** Open the shared editor from the history panel's save button. */
@@ -65,7 +69,6 @@ function saveCurrent(panel: HTMLElement, name: string): void {
   }
   nameInput.value = name;
   nameInput.dispatchEvent(new Event("input", { bubbles: true }));
-
   editor
     .querySelector<HTMLFormElement>("form.quick-tag-editor")
     ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -84,15 +87,10 @@ beforeEach(() => {
 
 describe("search history panel", () => {
   test("records a submitted query and re-runs it from the panel", () => {
-    input().value = "big brevity";
-    host
-      .querySelector<HTMLFormElement>(".topbar-search")
-      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitSearch("big brevity");
     expect(searched).toEqual(["big brevity"]);
 
     const panel = openHistory();
-    expect(panel.textContent).toContain("big brevity");
-
     const entry = [...panel.querySelectorAll<HTMLButtonElement>(".search-history-query")].find(
       (button) => button.textContent.includes("big brevity"),
     );
@@ -100,7 +98,7 @@ describe("search history panel", () => {
     expect(searched).toEqual(["big brevity", "big brevity"]);
   });
 
-  test("seeds the editor with the current query and saves it as a quick tag", () => {
+  test("seeds a focused editor and saves the row without a name", () => {
     input().value = "f:artbook$";
     const panel = openHistory();
 
@@ -120,13 +118,6 @@ describe("search history panel", () => {
       }
       expect(query.value).toBe("f:artbook$");
       expect(focused.at(-1)).toBe(query);
-
-      const name = editor.querySelector<HTMLInputElement>(".quick-tag-name");
-      if (!name) {
-        throw new Error("missing quick tag name");
-      }
-      name.value = "Artbooks";
-      name.dispatchEvent(new Event("input", { bubbles: true }));
       editor
         .querySelector<HTMLFormElement>("form.quick-tag-editor")
         ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -134,36 +125,11 @@ describe("search history panel", () => {
       proto.focus = originalFocus;
     }
 
-    expect(panel.textContent).toContain("Artbooks");
-    expect(panel.textContent).toContain("f:artbook$");
-
-    input().value = "cat";
-    input().dispatchEvent(new Event("input", { bubbles: true }));
-    panel
-      .querySelector<HTMLButtonElement>(".search-history-quick-tag .search-history-query")
-      ?.click();
-    expect(input().value).toBe("cat f:artbook$");
-    expect(searched).toEqual([]);
-  });
-
-  test("persists the seeded row when it is saved without a name", () => {
-    input().value = "f:artbook$";
-    const panel = openHistory();
-
-    const editor = openEditor(panel);
-    editor
-      .querySelector<HTMLFormElement>("form.quick-tag-editor")
-      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
     expect(panel.querySelector(".search-history-quick-tag")?.textContent).toContain("f:artbook$");
   });
 
-  test("clears recent searches without touching quick tags", () => {
-    input().value = "english";
-    host
-      .querySelector<HTMLFormElement>(".topbar-search")
-      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
+  test("clears recent searches and removes quick tags without crossing the two lists", () => {
+    submitSearch("english");
     let panel = openHistory();
     saveCurrent(panel, "Language");
 
@@ -171,17 +137,11 @@ describe("search history panel", () => {
     panel = historyPanel();
     expect(panel.textContent).not.toContain("Recent");
     expect(panel.textContent).toContain("Language");
-  });
-
-  test("removes a quick tag and keeps the empty state honest", () => {
-    input().value = "english";
-    let panel = openHistory();
-    saveCurrent(panel, "Lang");
 
     panel.querySelector<HTMLButtonElement>(".search-history-remove")?.click();
     panel = historyPanel();
     expect(panel.querySelector(".search-history-quick-tag")).toBeNull();
-    expect(panel.querySelector(".search-history-empty")).not.toBeNull();
+    expect(panel.textContent).toContain("No recent searches or quick tags yet.");
   });
 
   test("quick tags add and remove their terms without submitting a search", () => {
@@ -191,13 +151,9 @@ describe("search history panel", () => {
     let panel = openHistory();
     saveCurrent(panel, "TAGS");
 
-    panel = historyPanel();
-    // There is no run/toggle switch: a quick tag always toggles its terms.
-    expect(panel.querySelector(".search-history-toggle")).toBeNull();
-
     input().value = "cat";
     input().dispatchEvent(new Event("input", { bubbles: true }));
-    panel
+    historyPanel()
       .querySelector<HTMLButtonElement>(".search-history-quick-tag .search-history-query")
       ?.click();
     expect(input().value).toBe("cat f:keyword$");

@@ -21,26 +21,22 @@ function input(overrides: Partial<TagCompletionInput> = {}): TagCompletionInput 
 }
 
 describe("tag completion memory", () => {
-  test("counts repeated picks and folds the typed prefix", () => {
+  test("counts repeated picks, folds the prefix, and keeps scopes independent", () => {
     recordTagCompletion(input({ prefix: "En" }));
     recordTagCompletion(input({ prefix: "en" }));
 
     const id = completionId(input());
     expect(tagCompletions().get(id)?.count).toBe(2);
-  });
 
-  test("keeps prefixes and namespace scopes independent", () => {
-    recordTagCompletion(input());
     recordTagCompletion(input({ prefix: "ene" }));
-    recordTagCompletion(input({ prefixNs: "female" }));
+    recordTagCompletion(input({ prefixNs: "male", prefix: "en", ns: "male" }));
     recordTagCompletion(input({ ns: "male" }));
 
     expect(tagCompletions().size).toBe(4);
-  });
 
-  test("ignores an empty prefix", () => {
+    // A pick with no typed prefix cannot be matched later.
     recordTagCompletion(input({ prefix: "  " }));
-    expect(tagCompletions().size).toBe(0);
+    expect(tagCompletions().size).toBe(4);
   });
 
   test("drops expired picks on read", () => {

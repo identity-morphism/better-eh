@@ -14955,9 +14955,6 @@ ${defaultKeySummary()}`)) {
   .table {
     display: table;
   }
-  .table-cell {
-    display: table-cell;
-  }
   .grow {
     flex-grow: 1;
   }

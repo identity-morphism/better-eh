@@ -75,7 +75,7 @@ function harness(respond: (url: string) => Response) {
 }
 
 describe("PageLoader.document", () => {
-  test("parses the HTML and caches it by requested URL", async () => {
+  test("parses the HTML and caches it by requested URL, fresh bypassing the cache", async () => {
     const html = await fixtureHtml("gallery.html");
     const h = harness(() => htmlResponse(html));
 
@@ -85,13 +85,7 @@ describe("PageLoader.document", () => {
     expect(first.url).toBe(GALLERY_URL);
     expect(second).toBe(first);
     expect(h.calls).toEqual([GALLERY_URL]);
-  });
 
-  test("fresh bypasses the cache but still stores the new document", async () => {
-    const html = await fixtureHtml("gallery.html");
-    const h = harness(() => htmlResponse(html));
-
-    await h.loader.document(GALLERY_URL);
     await h.loader.document(GALLERY_URL, { fresh: true });
     const cached = await h.loader.document(GALLERY_URL);
 
@@ -114,23 +108,18 @@ describe("PageLoader.document", () => {
     ]);
   });
 
-  test("rejects a non-HTML body with its text", async () => {
-    const h = harness(() => textResponse("Service unavailable"));
+  test("rejects unusable responses with their text or an HttpError", async () => {
+    const plain = harness(() => textResponse("Service unavailable"));
+    const textError = await failure(() => plain.loader.document(GALLERY_URL));
 
-    const error = await failure(() => h.loader.document(GALLERY_URL));
+    expect(textError.message).toBe("Service unavailable");
+    expect(plain.purges()).toBe(0);
 
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toBe("Service unavailable");
-    expect(h.purges()).toBe(0);
-  });
+    const missing = harness(() => textResponse("missing", 404));
+    const httpError = await failure(() => missing.loader.document(GALLERY_URL));
 
-  test("turns a non-2xx response into HttpError", async () => {
-    const h = harness(() => textResponse("missing", 404));
-
-    const error = await failure(() => h.loader.document(GALLERY_URL));
-
-    expect(error).toBeInstanceOf(HttpError);
-    expect(error).toMatchObject({ status: 404, url: GALLERY_URL });
+    expect(httpError).toBeInstanceOf(HttpError);
+    expect(httpError).toMatchObject({ status: 404, url: GALLERY_URL });
   });
 
   test("turns the login wall into LoginRequiredError", async () => {
@@ -314,19 +303,24 @@ describe("PageLoader.viewerPage cancellation", () => {
 });
 
 describe("PageLoader.retryWithNl", () => {
-  test("returns null without a token", async () => {
-    const h = harness(() => htmlResponse("unused"));
+  test("returns null without a token or when the retry itself fails", async () => {
+    const withoutToken = harness(() => htmlResponse("unused"));
 
-    expect(await h.loader.retryWithNl(page(VIEWER_URL))).toBeNull();
-    expect(h.calls).toEqual([]);
+    expect(await withoutToken.loader.retryWithNl(page(VIEWER_URL))).toBeNull();
+    expect(withoutToken.calls).toEqual([]);
+
+    const failing = harness(() => textResponse("gone", 404));
+
+    expect(await failing.loader.retryWithNl(page(VIEWER_URL, "777"))).toBeNull();
+    expect(failing.calls).toEqual([`${VIEWER_URL}?nl=777`]);
   });
 
-  test("refetches with ?nl= and caches the retried page", async () => {
+  test("refetches with an encoded ?nl= and caches the retried page", async () => {
     const html = await fixtureHtml("viewer.html");
-    const retryUrl = `${VIEWER_URL}?nl=777`;
+    const retryUrl = `${VIEWER_URL}?nl=12%2034%2656`;
     const h = harness(() => htmlResponse(html, retryUrl));
 
-    const retried = await h.loader.retryWithNl(page(VIEWER_URL, "777"));
+    const retried = await h.loader.retryWithNl(page(VIEWER_URL, "12 34&56"));
     if (!retried) {
       throw new Error("expected a retried page");
     }
@@ -339,49 +333,24 @@ describe("PageLoader.retryWithNl", () => {
     expect(h.calls).toHaveLength(1);
   });
 
-  test("encodes a token before appending it", async () => {
-    const html = await fixtureHtml("viewer.html");
-    const retryUrl = `${VIEWER_URL}?nl=12%2034%2656`;
-    const h = harness(() => htmlResponse(html, retryUrl));
-
-    const retried = await h.loader.retryWithNl(page(VIEWER_URL, "12 34&56"));
-
-    expect(retried).not.toBeNull();
-    expect(h.calls).toEqual([retryUrl]);
-  });
-
-  test("passes the retry signal to the transport", async () => {
+  test("honours the retry signal", async () => {
     const html = await fixtureHtml("viewer.html");
     const h = harness(() => htmlResponse(html));
-    const controller = new AbortController();
 
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(
+      await h.loader.retryWithNl(page(VIEWER_URL, "777"), { signal: aborted.signal }),
+    ).toBeNull();
+    expect(h.calls).toEqual([]);
+
+    const controller = new AbortController();
     const retried = await h.loader.retryWithNl(page(VIEWER_URL, "777"), {
       signal: controller.signal,
     });
 
     expect(retried?.viewerUrl).toBe(VIEWER_URL);
-    expect(h.calls).toEqual([`${VIEWER_URL}?nl=777`]);
     expect(h.requests).toHaveLength(1);
     expect(h.requests[0]?.signal).toBe(controller.signal);
-  });
-
-  test("returns null without a request when the signal is already aborted", async () => {
-    const h = harness(() => htmlResponse("unused"));
-    const controller = new AbortController();
-    controller.abort();
-
-    const retried = await h.loader.retryWithNl(page(VIEWER_URL, "777"), {
-      signal: controller.signal,
-    });
-
-    expect(retried).toBeNull();
-    expect(h.calls).toEqual([]);
-  });
-
-  test("returns null when the retry itself fails", async () => {
-    const h = harness(() => textResponse("gone", 404));
-
-    expect(await h.loader.retryWithNl(page(VIEWER_URL, "777"))).toBeNull();
-    expect(h.calls).toEqual([`${VIEWER_URL}?nl=777`]);
   });
 });

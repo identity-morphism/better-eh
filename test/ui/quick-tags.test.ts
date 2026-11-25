@@ -26,55 +26,56 @@ function submit(form: Element): void {
   form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
+function buttonText(root: ParentNode, text: string): HTMLButtonElement | undefined {
+  return [...root.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === text,
+  );
+}
+
 describe("quick tags", () => {
-  test("saves an edited quick tag and applies it to the draft", () => {
-    const applied: string[] = [];
+  test("adds and removes rows through the editor", () => {
     const handle = renderQuickTags({
-      getText: () => "cat",
-      apply: (text) => applied.push(text),
+      getText: () => "",
+      apply: () => undefined,
       signal: new AbortController().signal,
     });
 
-    handle.element.querySelector<HTMLButtonElement>(".quick-tag-edit")?.click();
-
+    buttonText(handle.element, "+ Quick tags")?.click();
     const panel = document.querySelector(".quick-tag-editor-panel");
     if (!panel) {
       throw new Error("editor did not open");
     }
-    // Quick tags only toggle, so the editor has no run/toggle or pin controls.
-    expect(panel.querySelector("select")).toBeNull();
-    expect(panel.querySelector("input[type='checkbox']")).toBeNull();
-
-    const add = [...panel.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "+ Add",
-    );
-    add?.click();
+    buttonText(panel, "+ Add")?.click();
 
     const name = panel.querySelector<HTMLInputElement>(".quick-tag-name");
     const query = panel.querySelector<HTMLInputElement>(".quick-tag-query");
-    if (!name || !query) {
+    const form = panel.querySelector("form");
+    if (!name || !query || !form) {
       throw new Error("editor row missing");
     }
     name.value = "TAGS";
     name.dispatchEvent(new Event("input", { bubbles: true }));
     query.value = "f:keyword$";
     query.dispatchEvent(new Event("input", { bubbles: true }));
-
-    const form = panel.querySelector("form");
-    if (!form) {
-      throw new Error("editor form missing");
-    }
     submit(form);
 
     expect(document.querySelector(".quick-tag-editor-panel")).toBeNull();
     expect(quickTags()).toMatchObject([{ name: "TAGS", query: "f:keyword$" }]);
-
     const pill = handle.element.querySelector<HTMLButtonElement>(".quick-tag");
     expect(pill?.textContent).toBe("TAGS");
     expect(pill?.getAttribute("aria-pressed")).toBe("false");
 
-    pill?.click();
-    expect(applied).toEqual(["cat f:keyword$"]);
+    buttonText(handle.element, "Edit tags")?.click();
+    const reopened = document.querySelector(".quick-tag-editor-panel");
+    reopened?.querySelector<HTMLButtonElement>(".quick-tag-remove")?.click();
+    const reopenedForm = reopened?.querySelector("form");
+    if (!reopenedForm) {
+      throw new Error("editor form missing");
+    }
+    submit(reopenedForm);
+
+    expect(quickTags()).toEqual([]);
+    expect(handle.element.querySelector(".quick-tag")).toBeNull();
   });
 
   test("a click toggles the terms in and back out", () => {
@@ -91,8 +92,6 @@ describe("quick tags", () => {
     });
 
     const pill = handle.element.querySelector<HTMLButtonElement>(".quick-tag");
-    expect(pill?.getAttribute("aria-pressed")).toBe("false");
-
     pill?.click();
     pill?.click();
 
@@ -146,26 +145,5 @@ describe("quick tags", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
-  });
-
-  test("removes a quick tag through the editor", () => {
-    replaceQuickTags([tag()]);
-    const handle = renderQuickTags({
-      getText: () => "",
-      apply: () => undefined,
-      signal: new AbortController().signal,
-    });
-
-    handle.element.querySelector<HTMLButtonElement>(".quick-tag-edit")?.click();
-    const panel = document.querySelector(".quick-tag-editor-panel");
-    panel?.querySelector<HTMLButtonElement>(".quick-tag-remove")?.click();
-    const form = panel?.querySelector("form");
-    if (!form) {
-      throw new Error("editor form missing");
-    }
-    submit(form);
-
-    expect(quickTags()).toEqual([]);
-    expect(handle.element.querySelector(".quick-tag")).toBeNull();
   });
 });

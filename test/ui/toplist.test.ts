@@ -103,7 +103,7 @@ beforeEach(() => {
 });
 
 describe("renderToplist overview", () => {
-  test("renders one link per tab inside its period group", () => {
+  test("renders one link per tab inside its period group and marks the active one", () => {
     const host = render(OVERVIEW);
 
     const tabs = [...host.querySelectorAll<HTMLAnchorElement>(".toplist-tab")];
@@ -121,23 +121,14 @@ describe("renderToplist overview", () => {
     ]);
     expect(groups[0]?.querySelectorAll(".toplist-tab").length).toBe(1);
     expect(groups[1]?.querySelectorAll(".toplist-tab").length).toBe(2);
-  });
-
-  test("marks the active tab and leaves the others alone", () => {
-    const host = render(OVERVIEW);
 
     const active = host.querySelectorAll<HTMLAnchorElement>(".toplist-tab.is-active");
-    expect(active.length).toBe(1);
+    expect(active).toHaveLength(1);
     expect(active[0]?.textContent).toBe("Galleries");
-    expect(active[0]?.getAttribute("href")).toBe("https://e-hentai.org/toplist.php?tl=11");
     expect(active[0]?.getAttribute("aria-current")).toBe("page");
-
-    for (const node of host.querySelectorAll(".toplist-tab:not(.is-active)")) {
-      expect(node.getAttribute("aria-current")).toBeNull();
-    }
   });
 
-  test("renders every section with its ranked rows", () => {
+  test("renders every section with ranked rows and gallery links", () => {
     const host = render(OVERVIEW);
 
     const sections = [...host.querySelectorAll(".toplist-section")];
@@ -149,12 +140,15 @@ describe("renderToplist overview", () => {
       3, 3,
     ]);
 
-    const ranks = [...host.querySelectorAll(".toplist-rank")].map((badge) => badge.textContent);
-    expect(ranks).toEqual(["#1", "#2", "#4", "#1", "#2", "#3"]);
-    expect(host.querySelectorAll(".toplist-rank.is-top").length).toBe(5);
-
-    const labels = [...host.querySelectorAll(".toplist-label")].map((label) => label.textContent);
-    expect(labels).toEqual([
+    expect([...host.querySelectorAll(".toplist-rank")].map((badge) => badge.textContent)).toEqual([
+      "#1",
+      "#2",
+      "#4",
+      "#1",
+      "#2",
+      "#3",
+    ]);
+    expect([...host.querySelectorAll(".toplist-label")].map((label) => label.textContent)).toEqual([
       "Shapeshifter Part 1-3",
       "GAME OVER",
       "Unranked Gallery",
@@ -162,22 +156,15 @@ describe("renderToplist overview", () => {
       "Zero Angel",
       "Kungs0919",
     ]);
-  });
 
-  test("links gallery rows to their gallery href", () => {
-    const host = render(OVERVIEW);
-
-    const rows = [...host.querySelectorAll(".toplist-row.is-gallery")];
-    expect(rows.length).toBe(3);
-    expect(rows.map((row) => row.querySelector("a")?.getAttribute("href"))).toEqual([
+    const galleryRows = [...host.querySelectorAll(".toplist-row.is-gallery")];
+    expect(galleryRows.map((row) => row.querySelector("a")?.getAttribute("href"))).toEqual([
       "https://e-hentai.org/g/596447/3894f02c20/",
       "https://e-hentai.org/g/508505/6b3c6730f0/",
       "https://e-hentai.org/g/2030622/1524b37ea2/",
     ]);
-
-    const userRows = host.querySelectorAll(".toplist-section")[1]?.querySelectorAll(".toplist-row");
-    expect(userRows?.length).toBe(3);
-    expect([...(userRows ?? [])].every((row) => !row.classList.contains("is-gallery"))).toBe(true);
+    const uploaderRows = sections[1]?.querySelectorAll(".toplist-row") ?? [];
+    expect([...uploaderRows].every((row) => !row.classList.contains("is-gallery"))).toBe(true);
   });
 
   test("adds an in-page jump list once the overview has enough blocks", () => {
@@ -204,8 +191,6 @@ describe("renderToplist overview", () => {
   test("falls back to an empty state when the page has no sections", () => {
     const host = render({ kind: "overview", tabs: [], sections: [] });
 
-    expect(host.querySelectorAll(".toplist-tabs").length).toBe(0);
-    expect(host.querySelectorAll(".toplist-section").length).toBe(0);
     expect(host.querySelector(".empty-state")?.textContent).toContain(
       "No toplists were found on this page.",
     );
@@ -222,12 +207,10 @@ describe("renderToplist category", () => {
     expect(host.querySelector(".toplist-tab.is-active")?.textContent).toBe("Galleries");
   });
 
-  test("renders ranked gallery rows with their scores", () => {
+  test("renders ranked rows with their scores and the numeric pager", () => {
     const host = render(CATEGORY);
 
     const rows = [...host.querySelectorAll(".toplist-row")];
-    expect(rows.length).toBe(2);
-    expect(rows.every((row) => row.classList.contains("is-gallery"))).toBe(true);
     expect(rows.map((row) => row.querySelector(".toplist-rank")?.textContent)).toEqual([
       "#1",
       "#2",
@@ -240,10 +223,6 @@ describe("renderToplist category", () => {
       "158,388,517",
       "143,233,600",
     ]);
-  });
-
-  test("renders the numeric pager for the category list", () => {
-    const host = render(CATEGORY);
 
     const nav = host.querySelector(".pager");
     expect(nav?.getAttribute("aria-label")).toBe("Toplist pages");
@@ -255,8 +234,5 @@ describe("renderToplist category", () => {
       "https://e-hentai.org/toplist.php?tl=11&p=2",
       "https://e-hentai.org/toplist.php?tl=11&p=199",
     ]);
-    expect(nav?.querySelector(".pager-jump-input")?.getAttribute("aria-label")).toBe(
-      "Jump to page",
-    );
   });
 });

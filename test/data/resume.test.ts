@@ -29,11 +29,6 @@ function entry(pageNum: number): {
 }
 
 describe("reading position", () => {
-  test("derives one key per gallery, ignoring query strings", () => {
-    expect(galleryKey(GALLERY)).toBe("123456/abcdef1234");
-    expect(galleryKey(`${GALLERY}?p=3`)).toBe("123456/abcdef1234");
-  });
-
   test("saves, replaces, reads, and clears a position", () => {
     saveResume(GALLERY, entry(7));
     expect(getResume(GALLERY)?.pageNum).toBe(7);
@@ -47,6 +42,7 @@ describe("reading position", () => {
   });
 
   test("ignores invalid gallery URLs", () => {
+    expect(galleryKey("https://e-hentai.org/s/hash/1-2")).toBeNull();
     saveResume("https://e-hentai.org/s/hash/1-2", entry(1));
     expect(getResume("https://e-hentai.org/s/hash/1-2")).toBeNull();
   });

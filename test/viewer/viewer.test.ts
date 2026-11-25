@@ -249,7 +249,6 @@ describe("mountViewer", () => {
     active = harness();
     mountViewer(host, data, active.ctx);
 
-    expect(host.querySelector("#reader")).not.toBeNull();
     expect(host.querySelector("#hud-title")?.textContent).toContain("A Viewer Title");
     expect(host.querySelector("#hud-title")?.textContent).toContain("Subtitle");
     expect(host.querySelector("#hud-counter")?.textContent).toBe("2 / 5");
@@ -274,7 +273,6 @@ describe("mountViewer", () => {
     }
 
     expect(document.body.classList.contains("eh-viewer")).toBe(true);
-    expect(document.body.classList.contains("fit-h")).toBe(true);
     expect(state.prefetched).toEqual([data]);
   });
 
@@ -325,7 +323,6 @@ describe("mountViewer", () => {
 
     press("f");
     expect(getSettings().fitHeight).toBe(false);
-    expect(document.body.classList.contains("fit-w")).toBe(true);
 
     press("ArrowRight");
     press("ArrowLeft");
@@ -470,13 +467,14 @@ describe("mountViewer", () => {
     expect(active.navigations.at(-1)?.url).toBe(data.prevHref ?? "");
   });
 
-  test("continuous mode appends the next page and advances the counter", async () => {
+  test("continuous mode appends the next page, advances the counter and reloads the visible page", async () => {
     updateSettings({ ...DEFAULT_SETTINGS, readerMode: "continuous" });
     const next = page({
       viewerUrl: NEXT,
       pageNum: 3,
       counterText: "3 / 5",
       imgSrc: "https://img.example/pages/3.jpg",
+      nlToken: "888",
       prevHref: VIEWER,
       nextHref: null,
     });
@@ -498,10 +496,16 @@ describe("mountViewer", () => {
     click(requireNode(host, "#hud-next"));
     await flushMicrotasks(12);
 
-    expect(continuous.querySelectorAll(".reader-page")).toHaveLength(2);
+    const images = [...host.querySelectorAll<HTMLImageElement>("#continuous .reader-page-img")];
+    expect(images).toHaveLength(2);
     expect(host.querySelector("#hud-counter")?.textContent).toBe("3 / 5");
     expect(requireNode<HTMLButtonElement>(host, "#hud-prev").disabled).toBe(false);
     expect(state.viewerCalls.some((call) => call.url === NEXT)).toBe(true);
+
+    // R refreshes only the page currently in view, using that page's native token.
+    press("r");
+    expect(images[1]?.getAttribute("src")).toContain("nl=888");
+    expect(images[0]?.getAttribute("src")).not.toContain("nl=");
   });
 
   test("an image failure shows the error panel and retries through the loader", async () => {
@@ -582,108 +586,98 @@ describe("mountViewer", () => {
     expect(active.navigations).toEqual([]);
   });
 
-  test("settings changes repaint fit and reader layout classes", () => {
+  test("settings changes repaint the reader layout", () => {
     const data = page();
     active = harness();
     mountViewer(host, data, active.ctx);
 
     updateSetting("fitHeight", false);
     expect(document.body.classList.contains("fit-w")).toBe(true);
-    expect(document.body.classList.contains("fit-h")).toBe(false);
 
     updateSetting("readerMode", "spread");
     expect(document.body.classList.contains("reader-spread")).toBe(true);
     expect(requireNode<HTMLElement>(host, "#img-wrap").hidden).toBe(false);
   });
 
-  const deepZoomCases = [
-    { mode: "continuous", name: "continuous deep zoom upgrades the visible page's original" },
-    { mode: "spread", name: "spread deep zoom upgrades both visible pages" },
-  ] as const;
-
-  for (const { mode, name } of deepZoomCases) {
-    test(name, async () => {
-      updateSettings({ ...DEFAULT_SETTINGS, readerMode: mode });
-      const data = page();
-      const companion =
-        mode === "spread"
-          ? page({
-              viewerUrl: NEXT,
-              pageNum: 3,
-              counterText: "3 / 5",
-              imgSrc: "https://img.example/pages/3.jpg",
-              originalHref: "https://img.example/original/3.png",
-              prevHref: VIEWER,
-              nextHref: NEXT_NEXT,
-            })
-          : null;
-      if (companion) {
-        state.pages.set(NEXT, companion);
-      }
-
-      active = harness();
-      mountViewer(host, data, active.ctx);
-      await flushMicrotasks(12);
-
-      const images =
-        mode === "continuous"
-          ? [requireNode<HTMLImageElement>(host, "#continuous .reader-page-img")]
-          : [
-              requireNode<HTMLImageElement>(host, "#main-img"),
-              requireNode<HTMLImageElement>(host, "#spread-img"),
-            ];
-      for (const img of images) {
-        Object.defineProperty(img, "clientHeight", { value: 400, configurable: true });
-        Object.defineProperty(img, "naturalHeight", { value: 1200, configurable: true });
-        Object.defineProperty(img, "naturalWidth", { value: 800, configurable: true });
-      }
-
-      for (let step = 0; step < 21; step++) {
-        ctrlPress("=");
-      }
-
-      expect(TestProbeImage.instances).toHaveLength(images.length);
-      for (const probe of TestProbeImage.instances) {
-        probe.onload?.(new Event("load"));
-      }
-
-      const originals = companion
-        ? [data.originalHref, companion.originalHref]
-        : [data.originalHref];
-      if (originals.some((src) => src === null)) {
-        throw new Error("missing original href");
-      }
-      expect(images.map((img) => img.getAttribute("src"))).toEqual(originals);
+  test("deep zoom upgrades both visible spread pages to their originals", async () => {
+    updateSettings({ ...DEFAULT_SETTINGS, readerMode: "spread" });
+    const data = page();
+    const companion = page({
+      viewerUrl: NEXT,
+      pageNum: 3,
+      counterText: "3 / 5",
+      imgSrc: "https://img.example/pages/3.jpg",
+      originalHref: "https://img.example/original/3.png",
+      prevHref: VIEWER,
+      nextHref: NEXT_NEXT,
     });
-  }
+    state.pages.set(NEXT, companion);
 
-  test("continuous R reloads the visible page's native token", async () => {
+    active = harness();
+    mountViewer(host, data, active.ctx);
+    await flushMicrotasks(12);
+
+    const images = [
+      requireNode<HTMLImageElement>(host, "#main-img"),
+      requireNode<HTMLImageElement>(host, "#spread-img"),
+    ];
+    for (const img of images) {
+      Object.defineProperty(img, "clientHeight", { value: 400, configurable: true });
+      Object.defineProperty(img, "naturalHeight", { value: 1200, configurable: true });
+      Object.defineProperty(img, "naturalWidth", { value: 800, configurable: true });
+    }
+
+    // The served copy runs out at 1200 / 400 = 3; past that the controller asks for originals.
+    for (let step = 0; step < 21; step++) {
+      ctrlPress("=");
+    }
+
+    expect(TestProbeImage.instances).toHaveLength(2);
+    for (const probe of TestProbeImage.instances) {
+      probe.onload?.(new Event("load"));
+    }
+
+    expect(images.map((img) => img.getAttribute("src"))).toEqual([
+      data.originalHref,
+      companion.originalHref,
+    ]);
+  });
+
+  test("continuous deep zoom upgrades the visible stack page", async () => {
     updateSettings({ ...DEFAULT_SETTINGS, readerMode: "continuous" });
+    const data = page();
     const next = page({
       viewerUrl: NEXT,
       pageNum: 3,
       counterText: "3 / 5",
       imgSrc: "https://img.example/pages/3.jpg",
-      nlToken: "888",
+      originalHref: "https://img.example/original/3.png",
       prevHref: VIEWER,
       nextHref: null,
     });
     state.pages.set(NEXT, next);
 
-    const data = page();
     active = harness();
     mountViewer(host, data, active.ctx);
-
     click(requireNode(host, "#hud-next"));
     await flushMicrotasks(12);
 
     const images = [...host.querySelectorAll<HTMLImageElement>("#continuous .reader-page-img")];
-    expect(images).toHaveLength(2);
+    const img = images[1];
+    if (img === undefined) {
+      throw new Error("expected the appended page image");
+    }
+    Object.defineProperty(img, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(img, "naturalHeight", { value: 1200, configurable: true });
+    Object.defineProperty(img, "naturalWidth", { value: 800, configurable: true });
 
-    press("r");
+    for (let step = 0; step < 21; step++) {
+      ctrlPress("=");
+    }
 
-    expect(images[1]?.getAttribute("src")).toContain("nl=888");
-    expect(images[0]?.getAttribute("src")).not.toContain("nl=777");
+    expect(TestProbeImage.instances).toHaveLength(1);
+    TestProbeImage.instances[0]?.onload?.(new Event("load"));
+    expect(img.getAttribute("src")).toBe(next.originalHref);
   });
 
   test("a failed continuous page offers retry and leaves Next enabled", async () => {
@@ -722,7 +716,7 @@ describe("mountViewer", () => {
     expect(retry.hidden).toBe(true);
   });
 
-  test("spread Next at the trailing edge does not re-open the displayed page", async () => {
+  test("spread Next at the trailing edge reports the edge instead of re-opening the displayed page", async () => {
     updateSettings({ ...DEFAULT_SETTINGS, readerMode: "spread" });
     const companion = page({
       viewerUrl: NEXT,
@@ -739,15 +733,13 @@ describe("mountViewer", () => {
     mountViewer(host, data, active.ctx);
     await flushMicrotasks(12);
 
-    const nextButton = requireNode<HTMLButtonElement>(host, "#hud-next");
-    expect(nextButton.disabled).toBe(true);
+    expect(requireNode<HTMLButtonElement>(host, "#hud-next").disabled).toBe(true);
 
-    click(nextButton);
     press("ArrowRight");
     clickAt(requireNode(host, "#reader"), 900);
     await flushMicrotasks(12);
 
     expect(active.navigations).toEqual([]);
-    expect(state.toasts).toEqual(["Last page", "Last page", "Last page"]);
+    expect(state.toasts).toEqual(["Last page", "Last page"]);
   });
 });

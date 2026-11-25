@@ -361,29 +361,27 @@ describe("prefetch scheduling", () => {
     expect(rig.clock.pending).toBe(0);
   });
 
-  test("depth walks the chain in order and stops at the ends", async () => {
-    const rig = createRig("ends", 6, 10);
+  test("each direction walks nearest-first and stops at the ends", async () => {
+    const forward = createRig("ends", 6, 10);
 
-    rig.prefetcher.warm(rig.pages.page(1));
-    rig.clock.advance(PREFETCH_IDLE_MS);
+    forward.prefetcher.warm(forward.pages.page(1));
+    forward.clock.advance(PREFETCH_IDLE_MS);
     await flushMicrotasks(500);
 
-    expect(startedIndices(rig.pages)).toEqual([2, 3, 4, 5, 6]);
-    expect(rig.images.preloaded.map((image) => image.src).sort()).toEqual(
-      [2, 3, 4, 5, 6].map((page) => rig.pages.image(page)),
+    expect(startedIndices(forward.pages)).toEqual([2, 3, 4, 5, 6]);
+    expect(forward.images.preloaded.map((image) => image.src).sort()).toEqual(
+      [2, 3, 4, 5, 6].map((page) => forward.pages.image(page)),
     );
-  });
 
-  test("the backward walk mirrors forward and stops at the first page", async () => {
-    const rig = createRig("ends-back", 6, 10);
+    const backward = createRig("ends-back", 6, 10);
 
-    rig.prefetcher.warm(rig.pages.page(6));
-    rig.clock.advance(PREFETCH_IDLE_MS);
+    backward.prefetcher.warm(backward.pages.page(6));
+    backward.clock.advance(PREFETCH_IDLE_MS);
     await flushMicrotasks(500);
 
-    expect(startedIndices(rig.pages)).toEqual([5, 4, 3, 2, 1]);
-    expect(rig.images.preloaded.map((image) => image.src).sort()).toEqual(
-      [1, 2, 3, 4, 5].map((page) => rig.pages.image(page)),
+    expect(startedIndices(backward.pages)).toEqual([5, 4, 3, 2, 1]);
+    expect(backward.images.preloaded.map((image) => image.src).sort()).toEqual(
+      [1, 2, 3, 4, 5].map((page) => backward.pages.image(page)),
     );
   });
 

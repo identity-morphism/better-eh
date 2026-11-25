@@ -27,19 +27,15 @@ describe("gallery favorite button", () => {
     updateSetting("netIntervalMs", interval);
   });
 
-  test("names the favorite folder instead of the generic label", () => {
+  test("names the favorite folder, or says Favorited when the site omits it", () => {
     document.cookie = "ipb_member_id=42";
     renderGalleryAt(host, data);
 
     const button = host.querySelector(".fav-btn");
     expect(button?.querySelector(".fav-label")?.textContent).toBe("Read later");
     expect(button?.getAttribute("aria-label")).toBe("Edit favorite");
-  });
 
-  test("falls back to Favorited when the site omits the folder name", () => {
-    document.cookie = "ipb_member_id=42";
     renderGalleryAt(host, { ...data, favorite: { folder: "", slot: 2 } });
-
     expect(host.querySelector(".fav-label")?.textContent).toBe("Favorited");
   });
 

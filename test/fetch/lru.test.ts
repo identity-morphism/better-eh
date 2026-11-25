@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createLru } from "../../src/fetch/lru";
 
 describe("createLru", () => {
-  test("keeps at most the limit and drops the oldest entry", () => {
+  test("keeps at most the limit, evicting the oldest and never an overwritten entry", () => {
     const lru = createLru<string, number>(2);
     lru.set("a", 1);
     lru.set("b", 2);
@@ -12,6 +12,14 @@ describe("createLru", () => {
     expect(lru.get("a")).toBeUndefined();
     expect(lru.get("b")).toBe(2);
     expect(lru.get("c")).toBe(3);
+
+    const overwritten = createLru<string, number>(2);
+    overwritten.set("a", 1);
+    overwritten.set("b", 2);
+    overwritten.set("a", 10);
+
+    expect(overwritten.get("a")).toBe(10);
+    expect(overwritten.get("b")).toBe(2);
   });
 
   test("a hit makes the entry the most recently used", () => {
@@ -26,16 +34,6 @@ describe("createLru", () => {
     expect(lru.get("c")).toBe(3);
   });
 
-  test("overwriting an entry does not evict another one", () => {
-    const lru = createLru<string, number>(2);
-    lru.set("a", 1);
-    lru.set("b", 2);
-    lru.set("a", 10);
-
-    expect(lru.get("a")).toBe(10);
-    expect(lru.get("b")).toBe(2);
-  });
-
   test("reports the evicted entry to the callback", () => {
     const evicted: Array<[string, number]> = [];
     const lru = createLru<string, number>(2, (value, key) => evicted.push([key, value]));
@@ -46,7 +44,7 @@ describe("createLru", () => {
     expect(evicted).toEqual([["a", 1]]);
   });
 
-  test("setLimit drops the oldest entries and reports each one", () => {
+  test("setLimit shrinks, grows and applies to later inserts", () => {
     const evicted: Array<[string, number]> = [];
     const lru = createLru<string, number>(4, (value, key) => evicted.push([key, value]));
     lru.set("a", 1);
@@ -64,25 +62,20 @@ describe("createLru", () => {
       ["a", 1],
       ["b", 2],
     ]);
-  });
-
-  test("a raised limit leaves entries alone and applies to later inserts", () => {
-    const lru = createLru<string, number>(2);
-    lru.set("a", 1);
-    lru.set("b", 2);
 
     lru.setLimit(3);
-    expect(lru.get("a")).toBe(1);
-    expect(lru.get("b")).toBe(2);
+    lru.set("e", 5);
+    lru.set("f", 6);
 
-    lru.set("c", 3);
-    expect(lru.get("c")).toBe(3);
-
-    lru.set("d", 4);
-    expect(lru.get("a")).toBeUndefined();
-    expect(lru.get("b")).toBe(2);
-    expect(lru.get("c")).toBe(3);
+    expect(lru.get("c")).toBeUndefined();
     expect(lru.get("d")).toBe(4);
+    expect(lru.get("e")).toBe(5);
+    expect(lru.get("f")).toBe(6);
+    expect(evicted).toEqual([
+      ["a", 1],
+      ["b", 2],
+      ["c", 3],
+    ]);
   });
 
   test("setLimit(0) clears the cache through the eviction hook", () => {

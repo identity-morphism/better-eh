@@ -71,61 +71,42 @@ describe("parseMyTags", () => {
     expect(parseTagset(plain, MYTAGS_URL)).toBeNull();
   });
 
-  test("keeps unknown tagset form fields and falls back to the selected option label", () => {
+  test("round-trips unknown fields, resolves an empty action and does not assume enablement", () => {
     const page = parseDocument(`
-      <form id="tagset_form" action="/mytags?tagset=3" method="post">
+      <form id="tagset_form" action="" method="post">
         <input type="hidden" name="tagset_action" value="">
         <input type="hidden" name="site_marker" value="keep-me">
         <select>
-          <option value="3" selected="selected">Custom (1)</option>
-          <option value="4">Second (0)</option>
+          <option value="1">First (0)</option>
+          <option value="2" selected="selected">Second (1)</option>
         </select>
         <input type="checkbox" name="tagset_enable">
         <input type="text" name="tagset_color" value="nope">
       </form>
     `);
 
-    const tagset = parseTagset(page, "https://e-hentai.org/mytags");
-    expect(tagset?.name).toBe("Custom");
+    const tagset = parseTagset(page, "https://e-hentai.org/mytags?tagset=2");
+    expect(tagset?.name).toBe("Second");
     expect(tagset?.enabled).toBe(false);
     expect(tagset?.color).toBe("");
-    expect(tagset?.action).toBe("https://e-hentai.org/mytags?tagset=3");
+    expect(tagset?.action).toBe("https://e-hentai.org/mytags?tagset=2");
+    expect(tagset?.currentId).toBe("2");
+    expect(tagset?.choices.map((choice) => choice.selected)).toEqual([false, true]);
     expect(tagset?.fields).toContainEqual({
       name: "site_marker",
       kind: "value",
       value: "keep-me",
     });
-  });
 
-  test("keeps an empty form action pointed at the selected set's URL", () => {
-    const page = parseDocument(`
-      <form id="tagset_form" action="" method="post">
-        <input type="hidden" name="tagset_action" value="">
-        <select>
-          <option value="1">First (0)</option>
-          <option value="2" selected="selected">Second (1)</option>
-        </select>
-        <input type="checkbox" name="tagset_enable" checked="checked">
-        <input type="text" name="tagset_color" value="">
-      </form>
-    `);
-
-    const tagset = parseTagset(page, "https://e-hentai.org/mytags?tagset=2");
-    expect(tagset?.currentId).toBe("2");
-    expect(tagset?.choices.map((choice) => choice.selected)).toEqual([false, true]);
-    expect(tagset?.action).toBe("https://e-hentai.org/mytags?tagset=2");
-  });
-
-  test("does not assume a tagset is enabled when its checkbox is absent", () => {
-    const page = parseDocument(`
+    const noEnable = parseDocument(`
       <form id="tagset_form" action="" method="post">
         <select><option value="1" selected="selected">Only (0)</option></select>
         <input type="text" name="tagset_color" value="">
       </form>
     `);
-    const tagset = parseTagset(page, "https://e-hentai.org/mytags");
-    expect(tagset?.enabled).toBe(false);
-    expect(tagset?.fields.some((field) => field.name === "tagset_enable")).toBe(false);
+    const unchecked = parseTagset(noEnable, MYTAGS_URL);
+    expect(unchecked?.enabled).toBe(false);
+    expect(unchecked?.fields.map((field) => field.name)).not.toContain("tagset_enable");
   });
 
   test("normalizes colours and rejects invalid input", () => {

@@ -25,15 +25,13 @@ describe("comment editing", () => {
     renderGalleryAt(host, source, undefined, deps);
   }
 
-  test("offers Edit only on the comment the site marks as the author's", () => {
+  test("offers Edit only on the author's comment and only when signed in", () => {
     render();
     const own = host.querySelector('.comment[data-comment-id="9001"]');
     const other = host.querySelector('.comment[data-comment-id="0"]');
     expect(own?.querySelector(".comment-edit")).not.toBeNull();
     expect(other?.querySelector(".comment-edit")).toBeNull();
-  });
 
-  test("hides editing on anonymous pages", () => {
     render({}, { ...data, apiConfig: null });
     expect(host.querySelector(".comment-edit")).toBeNull();
   });

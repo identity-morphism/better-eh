@@ -9,16 +9,13 @@ const doc = await loadFixture("favorites.html");
 const data = parseFavorites(doc, FAVORITES_URL);
 
 describe("parseFavorites", () => {
-  test("reads the folder tabs with counts and the active tab", () => {
+  test("reads the folder tabs with counts, the active tab and the order control", () => {
     expect(data.folders).toEqual([
       { slot: 0, name: "Good Stuff", count: 1207 },
       { slot: 1, name: "Plan to Read", count: 46 },
       { slot: 2, name: "Good Read", count: 49 },
     ]);
     expect(data.active).toBe(1);
-  });
-
-  test("reads the order control", () => {
     expect(data.order).toBe("published");
   });
 

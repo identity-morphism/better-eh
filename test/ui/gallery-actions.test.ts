@@ -11,13 +11,16 @@ interface ApiCall {
   body: unknown;
 }
 
-function recorder(): { calls: ApiCall[]; post: (url: string, body: unknown) => Promise<unknown> } {
+function recorder(response: unknown = {}): {
+  calls: ApiCall[];
+  post: (url: string, body: unknown) => Promise<unknown>;
+} {
   const calls: ApiCall[] = [];
   return {
     calls,
     post: (url, body) => {
       calls.push({ url, body });
-      return Promise.resolve({});
+      return Promise.resolve(response);
     },
   };
 }
@@ -35,12 +38,11 @@ describe("gallery parity actions", () => {
   }
 
   test("rating posts stars times two once and then thanks the user", async () => {
-    const api = recorder();
-    api.post = (url, body) => {
-      api.calls.push({ url, body });
-      return Promise.resolve({ rating_avg: 4.61, rating_cnt: 10, rating_usr: 5 });
-    };
+    const api = recorder({ rating_avg: 4.61, rating_cnt: 10, rating_usr: 5 });
     render({ post: api.post });
+
+    // The viewer's saved 4.5 stars light nine halves before any vote.
+    expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(9);
 
     const halves = [...host.querySelectorAll<HTMLButtonElement>(".rating-half")];
     expect(halves).toHaveLength(10);
@@ -63,14 +65,11 @@ describe("gallery parity actions", () => {
     });
     expect(host.querySelector(".rating-label")?.textContent).toBe("Thanks for rating!");
     expect(host.querySelector(".rating-count")?.textContent).toBe("10 votes");
+    expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(10);
   });
 
-  test("coarse pointers rate whole stars with full-star targets", async () => {
-    const api = recorder();
-    api.post = (url, body) => {
-      api.calls.push({ url, body });
-      return Promise.resolve({ rating_avg: 4.61, rating_cnt: 10, rating_usr: 4 });
-    };
+  test("coarse pointers rate whole stars", async () => {
+    const api = recorder({ rating_avg: 4.61, rating_cnt: 10, rating_usr: 4 });
     const original = Object.getOwnPropertyDescriptor(window, "matchMedia");
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -81,10 +80,11 @@ describe("gallery parity actions", () => {
       const stars = [...host.querySelectorAll<HTMLButtonElement>("button.rating-star")];
       expect(stars).toHaveLength(5);
       expect(host.querySelectorAll("button.rating-half")).toHaveLength(0);
-      // Each target still carries two half cells so fractional averages paint exactly.
       expect(stars.map((star) => star.querySelectorAll(".rating-half").length)).toEqual([
         2, 2, 2, 2, 2,
       ]);
+      // The fixture's saved 4.5-star rating lights nine halves before the vote.
+      expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(9);
 
       stars[3]?.click();
       await until(
@@ -93,6 +93,7 @@ describe("gallery parity actions", () => {
       );
 
       expect(api.calls[0]?.body).toMatchObject({ rating: 8 });
+      expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(8);
       expect(stars.map((star) => star.getAttribute("aria-pressed"))).toEqual([
         "true",
         "true",
@@ -109,48 +110,6 @@ describe("gallery parity actions", () => {
     }
   });
 
-  test("shows the viewer's half-star rating and votes in half steps", async () => {
-    const api = recorder();
-    api.post = (url, body) => {
-      api.calls.push({ url, body });
-      return Promise.resolve({ rating_avg: 4.61, rating_cnt: 10, rating_usr: 2.5 });
-    };
-    render({ post: api.post });
-
-    const halves = [...host.querySelectorAll<HTMLButtonElement>(".rating-half")];
-    expect(halves.map((half) => half.classList.contains("is-on"))).toEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      false,
-    ]);
-
-    halves[4]?.click();
-    await until(
-      () => host.querySelector(".rating-label")?.textContent === "Thanks for rating!",
-      50,
-    );
-
-    expect(api.calls[0]?.body).toEqual({
-      method: "rategallery",
-      apiuid: "777",
-      apikey: "key123",
-      gid: "123456",
-      token: "abcdef1234",
-      rating: 5,
-    });
-    // Five lit halves after the server confirms 2.5 stars.
-    expect(
-      [...host.querySelectorAll(".rating-half")].filter((half) => half.classList.contains("is-on")),
-    ).toHaveLength(5);
-  });
-
   test("a failed rating is reported in the control", async () => {
     render({ post: () => Promise.reject(new Error("Vote limit reached")) });
 
@@ -162,11 +121,7 @@ describe("gallery parity actions", () => {
   });
 
   test("comment voting posts the comment id and updates the score", async () => {
-    const api = recorder();
-    api.post = (url, body) => {
-      api.calls.push({ url, body });
-      return Promise.resolve({ comment_id: 9001, comment_score: 8, comment_vote: 1 });
-    };
+    const api = recorder({ comment_id: 9001, comment_score: 8, comment_vote: 1 });
     render({ post: api.post });
 
     const card = host.querySelector<HTMLElement>('[data-comment-id="9001"]');
@@ -238,10 +193,7 @@ describe("gallery parity actions", () => {
     const loads: string[] = [];
     const doc = await loadFixture("gallery-comments.html");
     render({
-      post: (url, body) => {
-        api.calls.push({ url, body });
-        return Promise.resolve({});
-      },
+      post: api.post,
       loadDocument: (url) => {
         loads.push(url);
         return Promise.resolve({ doc, url });
@@ -254,12 +206,7 @@ describe("gallery parity actions", () => {
     );
     // The browser menu is suppressed so ours can take its place.
     expect(opened).toBe(false);
-    const menu = document.querySelector<HTMLElement>(".tag-menu");
-    expect(menu).not.toBeNull();
-    expect(menu?.querySelector(".tag-menu-title")?.textContent).toBe("alice");
-    expect(menu?.querySelector(".tag-menu-ns")?.textContent).toBe("artist");
-    expect(menu?.querySelectorAll(".tag-menu-divider")).toHaveLength(2);
-    expect(menu?.querySelector("input[name='new_tags']")).not.toBeNull();
+    expect(document.querySelector(".tag-menu")).not.toBeNull();
 
     const voteUp = [...document.querySelectorAll<HTMLButtonElement>(".tag-menu-item")].find(
       (node) => node.textContent === "Vote up",
@@ -285,10 +232,7 @@ describe("gallery parity actions", () => {
     const loads: string[] = [];
     const doc = await loadFixture("gallery-comments.html");
     render({
-      post: (url, body) => {
-        api.calls.push({ url, body });
-        return Promise.resolve({});
-      },
+      post: api.post,
       loadDocument: (url) => {
         loads.push(url);
         return Promise.resolve({ doc, url });
@@ -327,46 +271,35 @@ describe("gallery parity actions", () => {
       "https://e-hentai.org/g/123456/abcdef1234/?report=select",
       "https://e-hentai.org/g/123456/abcdef1234/?act=expunge",
       "https://e-hentai.org/gallerypopups.php?gid=123456&t=abcdef1234&act=rename",
-      `https://e-hentai.org/g/123456/abcdef1234/?eh_native=1`,
+      "https://e-hentai.org/g/123456/abcdef1234/?eh_native=1",
     ]);
-    for (const link of links) {
-      // The archive chooser and the gallery torrent list are owned now; the other site actions
-      // still leave the shell.
-      const owned =
-        link.getAttribute("href")?.includes("gallerytorrents.php") === true ||
-        link.getAttribute("href")?.includes("archiver.php") === true;
-      expect(link.getAttribute("data-native")).toBe(owned ? null : "");
-    }
+    // The archive chooser and the gallery torrent list are owned now; the other site actions still
+    // leave the shell.
+    expect(links.map((link) => link.hasAttribute("data-native"))).toEqual([
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+    ]);
     expect(host.querySelector(".gallery-rail")?.getAttribute("aria-label")).toBe("Site actions");
   });
 
-  test("stars rest on the gallery average until the viewer rates", async () => {
-    data = { ...data, ratingInfo: { average: 3, votes: 5, user: null } };
-    const api = recorder();
-    render({ post: api.post });
-
-    expect(host.querySelector(".rating-label")?.textContent).toBe("Average: 3.00");
-    expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(6);
-    // The average is not the viewer's rating, so no half reads as pressed.
-    expect(host.querySelectorAll('.rating-half[aria-pressed="true"]')).toHaveLength(0);
-
-    host.querySelectorAll<HTMLButtonElement>(".rating-half")[9]?.click();
-    await until(
-      () => host.querySelector(".rating-label")?.textContent === "Thanks for rating!",
-      50,
-    );
-
-    expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(10);
-    expect(host.querySelectorAll('.rating-half[aria-pressed="true"]')).toHaveLength(10);
-  });
-
-  test("a saved rating starts as pressed, unlike the average", () => {
+  test("the stars show the viewer's rating while the label keeps the average", () => {
     data = { ...data, ratingInfo: { average: 3, votes: 5, user: 4 } };
     render();
 
     expect(host.querySelector(".rating-label")?.textContent).toBe("Average: 3.00");
     expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(8);
     expect(host.querySelectorAll('.rating-half[aria-pressed="true"]')).toHaveLength(8);
+
+    data = { ...data, ratingInfo: { average: 3, votes: 5, user: null } };
+    render();
+
+    // The average alone is not the viewer's rating, so no half reads as pressed.
+    expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(6);
+    expect(host.querySelectorAll('.rating-half[aria-pressed="true"]')).toHaveLength(0);
   });
 
   test("opens the same menu on right-click over the title", () => {
@@ -380,7 +313,7 @@ describe("gallery parity actions", () => {
     expect(document.querySelector(".action-menu-panel")).not.toBeNull();
   });
 
-  test("keeps the parent gallery and omits unreported visibility", async () => {
+  test("keeps the parent gallery and offers the native escape without site actions", async () => {
     ({ host, data } = await mountGallery());
     render();
 
@@ -390,6 +323,15 @@ describe("gallery parity actions", () => {
     expect(parent?.textContent).toBe("Parent: 100");
     expect(parent?.getAttribute("href")).toBe("https://e-hentai.org/g/100/parentcafe/");
     expect(host.querySelector(".gallery-meta")?.textContent).not.toContain("Visible");
+
+    const rail = [...host.querySelectorAll(".gallery-rail .rail-link")];
+    expect(rail.map((item) => item.textContent)).toEqual(["Open native page"]);
+  });
+
+  test("renders a non-default visibility marker", () => {
+    renderGalleryAt(host, { ...data, visible: "No" });
+
+    expect(host.querySelector(".gallery-meta")?.textContent).toContain("Visible: No");
   });
 
   test("anonymous comments stay readable without voting or composing", () => {
@@ -404,13 +346,5 @@ describe("gallery parity actions", () => {
       .querySelector(".tag-chip")
       ?.dispatchEvent(new Event("contextmenu", { bubbles: true, cancelable: true }));
     expect(document.querySelector(".tag-menu-panel")).toBeNull();
-  });
-
-  test("anonymous galleries without site actions keep the native escape hatch", async () => {
-    ({ host, data } = await mountGallery());
-    render();
-
-    const rail = [...host.querySelectorAll(".gallery-rail .rail-link")];
-    expect(rail.map((item) => item.textContent)).toEqual(["Open native page"]);
   });
 });

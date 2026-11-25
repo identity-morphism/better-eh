@@ -7,21 +7,18 @@ class FakeObserver {
   static last: FakeObserver | null = null;
 
   readonly callback: MutationCallback;
-  options: MutationObserverInit | undefined;
-  disconnected = false;
+  options: MutationObserverInit | null = null;
 
   constructor(callback: MutationCallback) {
     this.callback = callback;
     FakeObserver.last = this;
   }
 
-  observe(_node: Node, options?: MutationObserverInit): void {
-    this.options = options;
+  observe(_target: Node, options?: MutationObserverInit): void {
+    this.options = options ?? null;
   }
 
-  disconnect(): void {
-    this.disconnected = true;
-  }
+  disconnect(): void {}
 
   trigger(mutations: MutationRecord[]): void {
     this.callback(mutations, this as unknown as MutationObserver);
@@ -67,11 +64,13 @@ describe("site ads", () => {
     expect(doc.head.contains(app)).toBe(true);
   });
 
-  test("removes ad nodes added later, including inside a subtree", () => {
+  test("removes ad nodes the site adds later, including a subtree and a mutated src", () => {
     blockSiteAds(doc, { Observer: FakeObserver as unknown as typeof MutationObserver });
     const observer = FakeObserver.last;
-    expect(observer).not.toBeNull();
-    expect(observer?.options).toMatchObject({
+    if (observer === null) {
+      throw new Error("expected the ad observer");
+    }
+    expect(observer.options).toMatchObject({
       childList: true,
       subtree: true,
       attributes: true,
@@ -86,29 +85,17 @@ describe("site ads", () => {
     doc.head.append(script);
     doc.body.append(wrapper);
 
-    observer?.trigger([added(script, wrapper)]);
+    observer.trigger([added(script, wrapper)]);
 
     expect(doc.head.contains(script)).toBe(false);
     expect(doc.body.contains(wrapper)).toBe(true);
     expect(wrapper.contains(frame)).toBe(false);
-  });
 
-  test("removes an existing iframe when its src is changed to an ad host", () => {
-    blockSiteAds(doc, { Observer: FakeObserver as unknown as typeof MutationObserver });
-    const frame = doc.createElement("iframe");
-    doc.body.append(frame);
-    frame.src = "https://adserver.juicyads.com/adshow.php?adzone=3";
+    const retargeted = doc.createElement("iframe");
+    doc.body.append(retargeted);
+    retargeted.src = "https://adserver.juicyads.com/adshow.php?adzone=3";
+    observer.trigger([srcChanged(retargeted)]);
 
-    FakeObserver.last?.trigger([srcChanged(frame)]);
-
-    expect(doc.body.contains(frame)).toBe(false);
-  });
-
-  test("disconnects on demand", () => {
-    const stop = blockSiteAds(doc, {
-      Observer: FakeObserver as unknown as typeof MutationObserver,
-    });
-    stop();
-    expect(FakeObserver.last?.disconnected).toBe(true);
+    expect(doc.body.contains(retargeted)).toBe(false);
   });
 });

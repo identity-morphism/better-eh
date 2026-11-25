@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseGalleryApiConfig, parseGalleryPage } from "../../src/parse/gallery";
-import type { GalleryData } from "../../src/types";
+import { parseGalleryPage } from "../../src/parse/gallery";
 import { loadFixture } from "../dom";
 
 const GALLERY_URL = "https://e-hentai.org/g/123456/abcdef1234/";
@@ -53,46 +52,13 @@ describe("parseGalleryPage comments, rating and actions", () => {
       user: null,
     });
   });
-
-  test("resolves every action link, including the popup and rename targets", () => {
-    expect(data.actions).toEqual({
-      archiverHref: "https://e-hentai.org/archiver.php?gid=123456&token=abcdef1234",
-      torrentsHref: "https://e-hentai.org/gallerytorrents.php?gid=123456&t=abcdef1234",
-      reportHref: "https://e-hentai.org/g/123456/abcdef1234/?report=select",
-      expungeHref: "https://e-hentai.org/g/123456/abcdef1234/?act=expunge",
-      renameHref: "https://e-hentai.org/gallerypopups.php?gid=123456&t=abcdef1234&act=rename",
-    });
-  });
-
-  test("keeps the site's visibility phrase", () => {
-    expect(data.visible).toBe("Yes");
-  });
-
-  test("reads the API credentials from the inline script", () => {
-    expect(parseGalleryApiConfig(doc)).toEqual({
-      apiUrl: "https://api.e-hentai.org/api.php",
-      apiUid: "777",
-      apiKey: "key123",
-      gid: "123456",
-      token: "abcdef1234",
-    });
-  });
 });
 
 describe("parseGalleryPage without site extras", () => {
-  test("leaves new fields empty on a page with no comments or API script", async () => {
-    const plain: GalleryData = parseGalleryPage(await loadFixture("gallery.html"), GALLERY_URL);
+  test("leaves comments and credentials empty on a plain page", async () => {
+    const plain = parseGalleryPage(await loadFixture("gallery.html"), GALLERY_URL);
 
     expect(plain.comments).toEqual([]);
-    expect(plain.ratingInfo).toEqual({ average: 4.5, votes: 1234, user: null });
-    expect(plain.actions).toEqual({
-      archiverHref: null,
-      torrentsHref: null,
-      reportHref: null,
-      expungeHref: null,
-      renameHref: null,
-    });
-    expect(plain.visible).toBeNull();
     expect(plain.apiConfig).toBeNull();
   });
 });

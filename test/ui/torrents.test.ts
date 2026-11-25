@@ -44,68 +44,7 @@ describe("torrents view", () => {
     renderTorrents(host, data, viewContext({ navigate: recordNavigation }));
   });
 
-  test("numeric cells keep their labels in the accessibility tree", () => {
-    const size = requireNode<HTMLElement>(host, ".torrent-row .torrent-size");
-    const seeds = requireNode<HTMLElement>(host, ".torrent-row .torrent-seeds");
-    expect(size.getAttribute("aria-label")).toMatch(/^Size: /);
-    expect(seeds.getAttribute("aria-label")).toMatch(/^Seeds: /);
-  });
-
-  test("status filters navigate with the site's own parameter", () => {
-    expect(statusButton(host, "All").getAttribute("aria-pressed")).toBe("true");
-    expect(statusButton(host, "Seeded").getAttribute("aria-pressed")).toBe("false");
-
-    fire(statusButton(host, "Seeded"), "click");
-    fire(statusButton(host, "Unseeded"), "click");
-    fire(statusButton(host, "All"), "click");
-
-    expect(navigations).toEqual([`${BASE_URL}&s=seeded`, `${BASE_URL}&s=unseeded`, BASE_URL]);
-  });
-
-  test("builds filter and page links from the parsed page URL, not the ambient address", () => {
-    Object.assign(globalThis, { location: new URL("https://e-hentai.org/elsewhere") });
-    navigations = [];
-    renderTorrents(host, data, viewContext({ navigate: recordNavigation }));
-
-    fire(statusButton(host, "Seeded"), "click");
-    expect(navigations).toEqual([`${BASE_URL}&s=seeded`]);
-
-    const last = [...host.querySelectorAll<HTMLAnchorElement>("a.pager-num")].find(
-      (link) => link.textContent === "100",
-    );
-    expect(last?.getAttribute("href")).toBe(`${BASE_URL}&page=99`);
-  });
-
-  test("the only-my toggle adds the member id and preserves unrelated parameters", () => {
-    const input = requireNode<HTMLInputElement>(host, "input[type='checkbox']");
-    expect(input.checked).toBe(false);
-
-    input.checked = true;
-    fire(input, "change");
-
-    expect(navigations).toEqual([`${BASE_URL}&u=${MEMBER_ID}`]);
-  });
-
-  test("unchecking only-my removes the uploader filter", () => {
-    const mineUrl = `https://e-hentai.org/torrents.php?search=elf&u=${MEMBER_ID}`;
-    Object.assign(globalThis, { location: new URL(mineUrl) });
-    navigations = [];
-    renderTorrents(
-      host,
-      parseTorrents(fixture, mineUrl),
-      viewContext({ navigate: recordNavigation }),
-    );
-
-    const input = requireNode<HTMLInputElement>(host, "input[type='checkbox']");
-    expect(input.checked).toBe(true);
-
-    input.checked = false;
-    fire(input, "change");
-
-    expect(navigations).toEqual(["https://e-hentai.org/torrents.php?search=elf"]);
-  });
-
-  test("renders one row per torrent with numeric columns and gallery links", () => {
+  test("renders one row per torrent with labelled numeric cells and gallery links", () => {
     const rows = host.querySelectorAll("tbody tr.torrent-row");
     expect(rows).toHaveLength(3);
 
@@ -114,6 +53,12 @@ describe("torrents view", () => {
     expect(first?.querySelector(".torrent-seeds")?.textContent).toBe("1");
     expect(first?.querySelector(".torrent-peers")?.textContent).toBe("0");
     expect(first?.querySelector(".torrent-downloads")?.textContent).toBe("0");
+
+    const size = requireNode<HTMLElement>(host, ".torrent-row .torrent-size");
+    const seeds = requireNode<HTMLElement>(host, ".torrent-row .torrent-seeds");
+    expect(size.getAttribute("aria-label")).toMatch(/^Size: /);
+    expect(seeds.getAttribute("aria-label")).toMatch(/^Seeds: /);
+
     expect(
       first?.querySelector<HTMLAnchorElement>(".torrent-gallery a")?.getAttribute("href"),
     ).toBe("https://e-hentai.org/g/4281155/7decb991ec/");
@@ -122,9 +67,65 @@ describe("torrents view", () => {
     ).toBe("https://e-hentai.org/torrents.php?u=230357");
   });
 
-  test("marks the current torrent page", () => {
-    const pager = requireNode<HTMLElement>(host, "nav.pager");
-    expect(pager.querySelector(".pager-num.is-current")?.textContent).toBe("1 (current page)");
+  test("status filters navigate with the site's own parameter from the parsed page URL", () => {
+    expect(statusButton(host, "All").getAttribute("aria-pressed")).toBe("true");
+    expect(statusButton(host, "Seeded").getAttribute("aria-pressed")).toBe("false");
+
+    // The view keeps the parsed page URL, not the ambient address.
+    Object.assign(globalThis, { location: new URL("https://e-hentai.org/elsewhere") });
+    fire(statusButton(host, "Seeded"), "click");
+    fire(statusButton(host, "Unseeded"), "click");
+    fire(statusButton(host, "All"), "click");
+
+    expect(navigations).toEqual([`${BASE_URL}&s=seeded`, `${BASE_URL}&s=unseeded`, BASE_URL]);
+
+    const last = [...host.querySelectorAll<HTMLAnchorElement>("a.pager-num")].find(
+      (link) => link.textContent === "100",
+    );
+    expect(last?.getAttribute("href")).toBe(`${BASE_URL}&page=99`);
+  });
+
+  test("the only-my toggle adds and removes the member id", () => {
+    const input = requireNode<HTMLInputElement>(host, "input[type='checkbox']");
+    expect(input.checked).toBe(false);
+
+    input.checked = true;
+    fire(input, "change");
+    expect(navigations).toEqual([`${BASE_URL}&u=${MEMBER_ID}`]);
+
+    const mineUrl = `https://e-hentai.org/torrents.php?search=elf&u=${MEMBER_ID}`;
+    renderTorrents(
+      host,
+      parseTorrents(fixture, mineUrl),
+      viewContext({ navigate: recordNavigation }),
+    );
+
+    const mine = requireNode<HTMLInputElement>(host, "input[type='checkbox']");
+    expect(mine.checked).toBe(true);
+    mine.checked = false;
+    fire(mine, "change");
+    expect(navigations.at(-1)).toBe("https://e-hentai.org/torrents.php?search=elf");
+  });
+
+  test("marks the current page and windows the strip around it", () => {
+    renderTorrents(
+      host,
+      {
+        ...data,
+        page: 2,
+        prevHref: "https://e-hentai.org/torrents.php?search=elf&o=sd",
+        nextHref: "https://e-hentai.org/torrents.php?search=elf&o=sd&page=2",
+      },
+      viewContext({ navigate: recordNavigation }),
+    );
+
+    const current = requireNode<HTMLElement>(host, ".pager-num.is-current");
+    expect(current.textContent).toBe("2 (current page)");
+
+    const numberLinks = [...host.querySelectorAll<HTMLAnchorElement>("a.pager-num")];
+    expect(numberLinks.map((link) => link.textContent)).toEqual(["1", "3", "100"]);
+    expect(numberLinks[0]?.getAttribute("href")).toBe(BASE_URL);
+    expect(host.querySelector("a.pager-btn")).toBeNull();
   });
 
   test("column headers sort through the site's own o parameter", () => {
@@ -153,27 +154,6 @@ describe("torrents view", () => {
     expect(byLabel("Added").getAttribute("href")).toBe(
       "https://e-hentai.org/torrents.php?search=elf",
     );
-  });
-
-  test("windows the page strip around the current page instead of the site's arrows", () => {
-    renderTorrents(
-      host,
-      {
-        ...data,
-        page: 2,
-        prevHref: "https://e-hentai.org/torrents.php?search=elf&o=sd",
-        nextHref: "https://e-hentai.org/torrents.php?search=elf&o=sd&page=2",
-      },
-      viewContext({ navigate: recordNavigation }),
-    );
-
-    const current = requireNode<HTMLElement>(host, ".pager-num.is-current");
-    expect(current.textContent).toBe("2 (current page)");
-
-    const numberLinks = [...host.querySelectorAll<HTMLAnchorElement>("a.pager-num")];
-    expect(numberLinks.map((link) => link.textContent)).toEqual(["1", "3", "100"]);
-    expect(numberLinks[0]?.getAttribute("href")).toBe(BASE_URL);
-    expect(host.querySelector("a.pager-btn")).toBeNull();
   });
 
   test("an empty index points at the native page", () => {

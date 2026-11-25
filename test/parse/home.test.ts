@@ -18,7 +18,7 @@ function section(title: string) {
 }
 
 describe("parseHome", () => {
-  test("collects the account subnav and marks the current page", () => {
+  test("collects the account subnav and titled boxes in page order", () => {
     expect(home.nav.map((link) => link.label)).toEqual([
       "Overview",
       "My Stats",
@@ -28,9 +28,6 @@ describe("parseHome", () => {
     ]);
     expect(home.nav.map((link) => link.active)).toEqual([true, false, false, false, false]);
     expect(home.nav[1]?.href).toBe("https://e-hentai.org/stats.php");
-  });
-
-  test("keeps each titled account box in page order", () => {
     expect(home.sections.map((entry) => entry.title)).toEqual([
       "Image Limits",
       "EHTracker",
@@ -40,16 +37,19 @@ describe("parseHome", () => {
     ]);
   });
 
-  test("reads image-limit prose and the native action label", () => {
+  test("keeps a prose box readable and reads the native action label", () => {
     const limits = section("Image Limits");
     expect(limits.paragraphs).toEqual([
       "Due to widespread usage of bulk downloaders, high-resolution images can be limited.",
       "Alternatively, you can unlock a high-resolution quota for 24 hours by spending 20,000 GP.",
     ]);
     expect(limits.action).toBe("Unlock Quota");
+    expect(section("Toplists").paragraphs).toEqual([
+      "You are currently not featured on any toplists...",
+    ]);
   });
 
-  test("pairs the tracker's value-first cells with their labels", () => {
+  test("pairs tracker, GP and moderation rows regardless of value order", () => {
     const tracker = section("EHTracker");
     expect(tracker.facts).toEqual([
       { label: "uploaded", value: "12.34 MiB" },
@@ -64,24 +64,13 @@ describe("parseHome", () => {
       { label: "Show My Torrents", href: "https://e-hentai.org/torrents.php?u=12345" },
     ]);
     expect(tracker.action).toBe("Reset Torrent Key");
-  });
 
-  test("reads the GP rows as value then label", () => {
     expect(section("Total GP Gained").facts).toEqual([
       { label: "GP from gallery visits", value: "120" },
       { label: "GP from torrent completions", value: "30" },
       { label: "GP from archive downloads", value: "0" },
       { label: "GP from Hentai@Home", value: "5" },
     ]);
-  });
-
-  test("keeps a one-sentence box as prose", () => {
-    expect(section("Toplists").paragraphs).toEqual([
-      "You are currently not featured on any toplists...",
-    ]);
-  });
-
-  test("reads moderation totals and label-first rows", () => {
     expect(section("Moderation Power").facts).toEqual([
       { label: "Current", value: "6" },
       { label: "Base", value: "+1" },

@@ -47,14 +47,11 @@ describe("search query serialization", () => {
       "/?f_search=foo+bar&f_cats=4&f_srdd=3&f_sh=on&f_spf=1&f_spt=10&f_sfl=on&f_sft=on&advsearch=1",
     );
     expect(parseSearchQuery(new URL(built, BASE))).toEqual(query);
-  });
 
-  test("round-trips a parsed URL that already carries advsearch=1", () => {
-    const parsed = parseSearchQuery(
-      new URL("https://e-hentai.org/?f_search=dogs&f_srdd=2&advsearch=1"),
-    );
-
-    expect(buildSearchUrl(parsed)).toBe("/?f_search=dogs&f_srdd=2&advsearch=1");
+    // A URL the site itself produced survives a parse/build cycle unchanged.
+    expect(
+      buildSearchUrl(parseSearchQuery(new URL("/?f_search=dogs&f_srdd=2&advsearch=1", BASE))),
+    ).toBe("/?f_search=dogs&f_srdd=2&advsearch=1");
   });
 
   test("builds a bare URL when every field is empty", () => {
@@ -62,11 +59,8 @@ describe("search query serialization", () => {
     expect(parseSearchQuery(new URL("/", BASE))).toEqual(EMPTY);
   });
 
-  test("trims search text and omits advsearch for plain searches", () => {
+  test("trims plain searches and flags advanced switches", () => {
     expect(buildSearchUrl({ ...EMPTY, text: "  cat  " })).toBe("/?f_search=cat");
-  });
-
-  test("adds advsearch when an advanced switch is set", () => {
     expect(buildSearchUrl({ ...EMPTY, torrent: true })).toBe("/?f_sto=on&advsearch=1");
   });
 
@@ -81,16 +75,12 @@ describe("search query serialization", () => {
     const built = buildSearchUrl(query);
     expect(built).toBe("/?f_search=dogs&eh_since=2024-01-01&eh_until=2024-12-31&advsearch=1");
     expect(parseSearchQuery(new URL(built, BASE))).toEqual(query);
-  });
 
-  test("parses a posted-date range without requiring the other bound", () => {
-    const parsed = parseSearchQuery(
-      new URL("https://e-hentai.org/?eh_since=2024-01-01&advsearch=1"),
-    );
-
-    expect(parsed.since).toBe("2024-01-01");
-    expect(parsed.until).toBe("");
-    expect(buildSearchUrl(parsed)).toBe("/?eh_since=2024-01-01&advsearch=1");
+    // One bound is enough; the other stays unset.
+    const open = parseSearchQuery(new URL("https://e-hentai.org/?eh_since=2024-01-01&advsearch=1"));
+    expect(open.since).toBe("2024-01-01");
+    expect(open.until).toBe("");
+    expect(buildSearchUrl(open)).toBe("/?eh_since=2024-01-01&advsearch=1");
   });
 });
 
@@ -109,25 +99,19 @@ describe("tag links", () => {
     expect(tagTokenFromHref("/tag/anime:foo", BASE)).toBe("anime:foo$");
   });
 
-  test("ignores anchors outside /tag/", () => {
+  test("rejects anchors outside /tag/ and malformed escapes", () => {
     expect(tagTokenFromHref("/g/1/abc/", BASE)).toBeNull();
-  });
-
-  test("drops a malformed percent escape instead of throwing", () => {
     expect(tagTokenFromHref("/tag/female:%ZZ", BASE)).toBeNull();
     expect(tagTokenFromHref("/tag/female:%", BASE)).toBeNull();
   });
 });
 
 describe("uploader links", () => {
-  test("turns an uploader page into its search token", () => {
+  test("turns an uploader page into its quoted search token", () => {
     expect(uploaderTokenFromHref("/uploader/lasthm", BASE)).toBe("uploader:lasthm$");
     expect(uploaderTokenFromHref("https://e-hentai.org/uploader/lasthm/", BASE)).toBe(
       "uploader:lasthm$",
     );
-  });
-
-  test("quotes multi-word uploader names", () => {
     expect(uploaderTokenFromHref("/uploader/Zero+Angel", BASE)).toBe('uploader:"Zero Angel$"');
     expect(uploaderTokenFromHref("/uploader/Zero%20Angel", BASE)).toBe('uploader:"Zero Angel$"');
   });

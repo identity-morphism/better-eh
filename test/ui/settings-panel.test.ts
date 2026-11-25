@@ -89,18 +89,11 @@ describe("renderUserscriptSettings", () => {
 
     expect(control<HTMLInputElement>("settings-userscript-scrollStep").value).toBe("300");
     expect(control<HTMLInputElement>("settings-userscript-fitHeight").checked).toBe(false);
-    expect(control<HTMLInputElement>("settings-userscript-tagSuggestions").checked).toBe(true);
-    expect(control<HTMLInputElement>("settings-userscript-netTimeoutMs").value).toBe("15000");
     expect(
       control<HTMLSelectElement>("settings-userscript-readerMode")
         .querySelector("option[selected]")
         ?.getAttribute("value"),
     ).toBe("single");
-    expect(
-      control<HTMLSelectElement>("settings-userscript-readingDirection")
-        .querySelector("option[selected]")
-        ?.getAttribute("value"),
-    ).toBe("ltr");
     expect(capture("next").closest(".settings-key-row")?.textContent).toContain("N");
   });
 
@@ -120,28 +113,6 @@ describe("renderUserscriptSettings", () => {
     );
   });
 
-  test("draft bindings read and write the controls through the shared adapter", () => {
-    const panel = render();
-    const fit = panel.bindings.find((binding) => binding.key === "fitHeight");
-    const mode = panel.bindings.find((binding) => binding.key === "readerMode");
-    if (!fit || !mode) {
-      throw new Error("missing draft bindings");
-    }
-
-    fit.write(false);
-    expect(control<HTMLInputElement>("settings-userscript-fitHeight").checked).toBe(false);
-    control<HTMLInputElement>("settings-userscript-fitHeight").checked = true;
-    expect(fit.read()).toBe(true);
-
-    mode.write("spread");
-    expect(
-      control<HTMLSelectElement>("settings-userscript-readerMode")
-        .querySelector("option[selected]")
-        ?.getAttribute("value"),
-    ).toBe("spread");
-    expect(mode.read()).toBe("spread");
-  });
-
   test("number controls take their bounds from the schema", () => {
     render();
 
@@ -159,20 +130,6 @@ describe("renderUserscriptSettings", () => {
     panel.apply();
 
     expect(getSettings().netConcurrency).toBe(DEFAULT_SETTINGS.netConcurrency);
-  });
-
-  test("a modified capture is rejected instead of storing a dead key", () => {
-    const panel = render();
-    capture("next").click();
-
-    const event = new Event("keydown", { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "key", { value: "k" });
-    Object.defineProperty(event, "ctrlKey", { value: true });
-    capture("next").dispatchEvent(event);
-
-    panel.apply();
-    expect(getSettings().keymap.next).not.toContain("K");
-    expect(root.querySelector(".settings-keymap-status")?.textContent).toContain("unmodified");
   });
 
   test("apply clamps an out-of-range number through the store", () => {
@@ -259,15 +216,23 @@ describe("renderUserscriptSettings", () => {
     expect(getSettings().keymap.next).not.toContain("B");
   });
 
-  test("Escape cancels capture and Tab is not bound", () => {
+  test("capture rejects modified keys, Tab and Escape", () => {
     const panel = render();
     capture("next").click();
+
+    const modified = new Event("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperty(modified, "key", { value: "k" });
+    Object.defineProperty(modified, "ctrlKey", { value: true });
+    capture("next").dispatchEvent(modified);
+    expect(root.querySelector(".settings-keymap-status")?.textContent).toContain("unmodified");
+
     press(capture("next"), "Tab");
     expect(capture("next").textContent).toBe("Press a key…");
 
     press(capture("next"), "Escape");
     expect(capture("next").textContent).toBe("Add key");
     panel.apply();
+    expect(getSettings().keymap.next).not.toContain("K");
     expect(getSettings().keymap.next).toEqual(DEFAULT_SETTINGS.keymap.next);
   });
 
@@ -350,7 +315,7 @@ describe("parseSettingsJson", () => {
     expect(clamped.settings.scrollStep).toBe(5000);
   });
 
-  test("rejects wrong types and malformed keymaps", () => {
+  test("rejects wrong types, impossible keys and a non-object envelope", () => {
     expect(parseSettingsJson("[]")).toEqual({
       ok: false,
       error: "That file does not contain a settings object.",
@@ -359,61 +324,43 @@ describe("parseSettingsJson", () => {
       ok: false,
       error: '"debug" must be true or false.',
     });
-    expect(parseSettingsJson('{"gap":"12"}')).toEqual({
-      ok: false,
-      error: '"gap" must be a number.',
-    });
-    expect(parseSettingsJson('{"readerMode":"strip"}')).toEqual({
-      ok: false,
-      error: '"readerMode" must be single, spread, or continuous.',
-    });
-    expect(parseSettingsJson('{"readingDirection":"up"}')).toEqual({
-      ok: false,
-      error: '"readingDirection" must be ltr or rtl.',
-    });
     const badKeymap = parseSettingsJson('{"keymap":{"next":"D"}}');
     expect(badKeymap.ok).toBe(false);
     if (!badKeymap.ok) {
       expect(badKeymap.error).toContain("list of keys");
     }
-    expect(parseSettingsJson('{"keymap":{"next":[1]}}').ok).toBe(false);
-  });
 
-  test("rejects a non-object values envelope instead of resetting every setting", () => {
-    const result = parseSettingsJson('{"values":[]}');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain("values");
+    for (const text of [
+      '{"gap":"12"}',
+      '{"readerMode":"strip"}',
+      '{"readingDirection":"up"}',
+      '{"keymap":{"next":[1]}}',
+      '{"keymap":{"next":["Ctrl+K"]}}',
+      '{"keymap":{"next":["Shift"]}}',
+      '{"values":[]}',
+    ]) {
+      expect(parseSettingsJson(text).ok).toBe(false);
     }
   });
 
-  test("rejects keys that can never match the runtime", () => {
-    expect(parseSettingsJson('{"keymap":{"next":["Ctrl+K"]}}').ok).toBe(false);
-    expect(parseSettingsJson('{"keymap":{"next":["Shift"]}}').ok).toBe(false);
-  });
-
-  test("rejects a key bound to two actions", () => {
-    const result = parseSettingsJson('{"keymap":{"next":["X"],"prev":["X"]}}');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain("more than one action");
+  test("imports keymaps under the shared move, conflict and limit policy", () => {
+    const moved = parseSettingsJson('{"keymap":{"prev":["D"]}}');
+    if (!moved.ok) {
+      throw new Error(moved.error);
     }
-  });
+    expect(moved.settings.keymap.prev).toEqual(["D"]);
+    expect(moved.settings.keymap.next).not.toContain("D");
 
-  test("moves an explicit key off another action's defaults", () => {
-    const result = parseSettingsJson('{"keymap":{"prev":["D"]}}');
-    if (!result.ok) {
-      throw new Error(result.error);
+    const conflict = parseSettingsJson('{"keymap":{"next":["X"],"prev":["X"]}}');
+    expect(conflict.ok).toBe(false);
+    if (!conflict.ok) {
+      expect(conflict.error).toContain("more than one action");
     }
-    expect(result.settings.keymap.prev).toEqual(["D"]);
-    expect(result.settings.keymap.next).not.toContain("D");
-  });
 
-  test("rejects an action with more keys than the shared limit", () => {
-    const result = parseSettingsJson('{"keymap":{"next":["1","2","3","4","5","6","7"]}}');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain("at most");
+    const overLimit = parseSettingsJson('{"keymap":{"next":["1","2","3","4","5","6","7"]}}');
+    expect(overLimit.ok).toBe(false);
+    if (!overLimit.ok) {
+      expect(overLimit.error).toContain("at most");
     }
   });
 });

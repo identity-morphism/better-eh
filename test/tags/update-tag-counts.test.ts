@@ -30,9 +30,7 @@ describe("tag count source", () => {
     expect(counts.has("en")).toBe(false);
     expect(counts.has("low")).toBe(false);
     expect(counts.has("thing")).toBe(false);
-  });
 
-  test("rejects an empty payload", () => {
     expect(() => parseTagCountsCsv("tag_name,len")).toThrow();
   });
 });

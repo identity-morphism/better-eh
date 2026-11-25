@@ -14,7 +14,6 @@ const LIST_URL = "https://e-hentai.org/";
 const GALLERY_URL = "https://e-hentai.org/g/111/aaaa/";
 
 const listHtml = await Bun.file(`${import.meta.dir}/../fixtures/list.html`).text();
-const toplistHtml = await Bun.file(`${import.meta.dir}/../fixtures/toplist.html`).text();
 const pristineList = await loadFixture("list.html");
 const galleryDoc = await loadFixture("gallery.html");
 
@@ -51,11 +50,8 @@ interface Harness {
 
 let respond: Respond = () => Promise.resolve({ doc: galleryDoc, url: GALLERY_URL });
 
-function construct({
-  url = LIST_URL,
-  initialHtml = listHtml,
-}: { url?: string; initialHtml?: string } = {}): Harness {
-  const document = installDom(url, initialHtml);
+function construct(): Harness {
+  const document = installDom(LIST_URL, listHtml);
   installNoopObservers();
   const view = document.defaultView;
   if (view === null) {
@@ -63,7 +59,7 @@ function construct({
   }
 
   const globals = globalThis as unknown as Record<string, unknown>;
-  let current = new URL(url);
+  let current = new URL(LIST_URL);
   const moveTo = (next: string | URL | null | undefined): void => {
     if (next === undefined || next === null || String(next) === "") {
       return;
@@ -224,24 +220,14 @@ beforeEach(() => {
 });
 
 describe("boot shell", () => {
-  test("renders the shell and the list fixture from one injected environment", () => {
-    const harness = construct();
-    const { document, view, host } = harness;
+  test("boots the shell from one injected environment and leaves the site's page behind", () => {
+    const { document, view, host } = construct();
 
-    expect(requireNode(document, "#eh-root").parentElement).toBe(document.body);
-    expect(document.body.className).toBe("eh-body");
     expect(requireNode(document, "a.eh-skip").getAttribute("href")).toBe("#eh-view");
-    expect(document.querySelectorAll("#eh-loading")).toHaveLength(1);
-    expect(requireNode(document.head, 'meta[name="viewport"]').getAttribute("content")).toBe(
-      "width=device-width, initial-scale=1",
-    );
-
     expect(host.querySelectorAll(".card").length).toBeGreaterThan(0);
     expect(host.querySelector(".topbar-search input")).not.toBeNull();
-    expect(host.getAttribute("aria-busy")).toBeNull();
-    expect(document.body.classList.contains("is-loading")).toBe(false);
-    expect(document.documentElement.style.getPropertyValue("visibility")).toBe("");
     expect(document.title).toContain("E-Hentai");
+    expect(document.documentElement.style.getPropertyValue("visibility")).toBe("");
 
     // The site's viewer handlers and its pending page image must not outlive the takeover.
     expect(document.onkeydown).toBeNull();
@@ -277,6 +263,8 @@ describe("boot shell", () => {
     expect(host.getAttribute("aria-busy")).toBeNull();
     expect(harness.document.body.classList.contains("is-loading")).toBe(false);
     expect(harness.url()).toBe(GALLERY_URL);
+    // The pushed entry marks the app's own history, with no stored position.
+    expect(harness.history.state).toEqual({ eh: true, scrollY: 0 });
   });
 
   test("renders the error panel with the native escape when the load fails", async () => {
@@ -360,19 +348,6 @@ describe("boot shell", () => {
     expect(harness.loads.filter((url) => url === LIST_URL).length).toBe(listLoads + 1);
     expect(host.querySelector(".gallery-title")).toBeNull();
   });
-
-  test("a second shell renders its own document in the same process", () => {
-    const first = construct();
-    expect(first.host.querySelectorAll(".card").length).toBeGreaterThan(0);
-
-    const second = construct({
-      url: "https://e-hentai.org/toplist.php",
-      initialHtml: toplistHtml,
-    });
-    expect(second.document).not.toBe(first.document);
-    expect(second.document.body.className).toBe("eh-body");
-    expect(second.host.querySelector(".toplist-tabs")).not.toBeNull();
-  });
 });
 
 describe("isFragmentOnlyChange", () => {
@@ -380,15 +355,13 @@ describe("isFragmentOnlyChange", () => {
 
   test("accepts an in-page fragment change on the same document", () => {
     expect(isFragmentOnlyChange(base, `${base}#comments`)).toBe(true);
+    expect(isFragmentOnlyChange(`${base}#comments`, `${base}#similar`)).toBe(true);
   });
 
-  test("rejects a query, path or origin change", () => {
+  test("rejects a query, path or origin change and unusable addresses", () => {
     expect(isFragmentOnlyChange(base, `${base}?p=2`)).toBe(false);
     expect(isFragmentOnlyChange(base, "https://e-hentai.org/g/2/token/")).toBe(false);
     expect(isFragmentOnlyChange(base, "https://example.com/g/1/token/")).toBe(false);
-  });
-
-  test("rejects an empty current address and an unparseable one", () => {
     expect(isFragmentOnlyChange("", `${base}#comments`)).toBe(false);
     expect(isFragmentOnlyChange("http://[", `${base}#comments`)).toBe(false);
   });

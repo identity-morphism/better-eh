@@ -29,10 +29,13 @@ describe("favorites selection", () => {
     expect(selection.size).toBe(1);
   });
 
-  test("extends a shift range forward and backward from the anchor", () => {
+  test("extends a shift range from the anchor, forward and backward", () => {
     const selection = sample();
 
-    selection.toggle("102");
+    // No anchor yet: a shift toggle is a plain toggle and becomes the anchor.
+    selection.toggle("102", { shift: true });
+    expect(selection.ids()).toEqual(["102"]);
+
     selection.toggle("104", { shift: true });
     expect(selection.ids()).toEqual(["102", "103", "104"]);
 
@@ -42,17 +45,7 @@ describe("favorites selection", () => {
     expect(selection.all).toBe(true);
   });
 
-  test("treats a shift toggle with no anchor as a plain toggle", () => {
-    const selection = sample();
-
-    selection.toggle("102", { shift: true });
-    expect(selection.ids()).toEqual(["102"]);
-
-    selection.toggle("104", { shift: true });
-    expect(selection.ids()).toEqual(["102", "103", "104"]);
-  });
-
-  test("derives select-all and some, and clears them", () => {
+  test("selects all, clears, and resets the anchor", () => {
     const selection = sample();
 
     selection.setAll(true);
@@ -63,18 +56,12 @@ describe("favorites selection", () => {
     selection.toggle("102");
     expect(selection.all).toBe(false);
     expect(selection.some).toBe(true);
-    expect(selection.size).toBe(3);
 
     selection.setAll(false);
-    expect(selection.all).toBe(false);
     expect(selection.some).toBe(false);
     expect(selection.size).toBe(0);
-    expect(selection.ids()).toEqual([]);
-  });
 
-  test("resets the anchor on clear and on select-all", () => {
-    const selection = sample();
-
+    // clear() and select-all both reset the anchor.
     selection.toggle("101");
     selection.toggle("103", { shift: true });
     expect(selection.ids()).toEqual(["101", "102", "103"]);
@@ -87,9 +74,14 @@ describe("favorites selection", () => {
     selection.setAll(false);
     selection.toggle("102", { shift: true });
     expect(selection.ids()).toEqual(["102"]);
+
+    const empty = createSelection([]);
+    empty.setAll(true);
+    expect(empty.all).toBe(false);
+    expect(empty.size).toBe(0);
   });
 
-  test("notifies once per mutation, and not after unsubscribe", () => {
+  test("notifies once per mutation and ignores gids that are not on the page", () => {
     const selection = sample();
     let calls = 0;
 
@@ -98,44 +90,19 @@ describe("favorites selection", () => {
     });
 
     selection.toggle("101");
-    expect(calls).toBe(1);
-
     selection.toggle("104", { shift: true });
-    expect(calls).toBe(2);
-
     selection.setAll(true);
-    expect(calls).toBe(3);
-
     selection.clear();
+    expect(calls).toBe(4);
+
+    selection.toggle("999");
+    selection.toggle("999", { shift: true });
+    expect(selection.size).toBe(0);
     expect(calls).toBe(4);
 
     unsubscribe();
     selection.toggle("102");
     selection.clear();
     expect(calls).toBe(4);
-  });
-
-  test("ignores gids that are not on the page", () => {
-    const selection = sample();
-    let calls = 0;
-    selection.subscribe(() => {
-      calls += 1;
-    });
-
-    selection.toggle("999");
-    selection.toggle("999", { shift: true });
-
-    expect(selection.size).toBe(0);
-    expect(calls).toBe(0);
-  });
-
-  test("an empty page is never all-selected", () => {
-    const selection = createSelection([]);
-
-    expect(selection.all).toBe(false);
-    expect(selection.some).toBe(false);
-    selection.setAll(true);
-    expect(selection.size).toBe(0);
-    expect(selection.all).toBe(false);
   });
 });

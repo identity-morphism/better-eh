@@ -45,9 +45,17 @@ afterAll(() => {
 });
 
 describe("resultCard", () => {
-  test("caps an extreme tall cover and leaves a normal portrait alone", () => {
-    const normal = resultCard(ITEM, new AbortController().signal);
-    expect(normal.querySelector(".card-cover")?.className).not.toContain("is-tall-cover");
+  test("lays out a normal portrait and caps an extreme tall cover", () => {
+    const article = resultCard(ITEM, new AbortController().signal);
+    const cover = article.querySelector(".card-cover");
+
+    expect(article.tagName).toBe("ARTICLE");
+    expect(article.className).toBe("card");
+    expect(cover).not.toBeNull();
+    expect(cover?.className).not.toContain("is-tall-cover");
+    expect(article.querySelector(".card-cover-wrap .fav-btn")).not.toBeNull();
+    expect(article.querySelector(".card-body .card-title")).not.toBeNull();
+    expect(article.querySelector(".card-posted")?.textContent).toBe("2024-01-01 12:00");
 
     const tall = resultCard(
       { ...ITEM, coverSize: { width: 250, height: 5000 } },
@@ -59,17 +67,25 @@ describe("resultCard", () => {
     expect(unknown.querySelector(".card-cover")?.className).not.toContain("is-tall-cover");
   });
 
-  test("lays the article out with a cover, title, uploader and meta", () => {
+  test("binds the parsed title, rating, pages and torrent link", () => {
     const article = resultCard(ITEM, new AbortController().signal);
+    const title = article.querySelector(".card-title");
+    expect(title?.querySelector(".card-artist")?.textContent).toBe("[Circle] ");
+    expect(title?.querySelector(".card-primary")?.textContent).toBe("Alpha");
+    expect(title?.querySelector(".card-secondary")?.textContent).toBe("Extra");
 
-    expect(article.tagName).toBe("ARTICLE");
-    expect(article.className).toBe("card");
-    expect(article.querySelector(".card-cover-wrap .card-cover")).not.toBeNull();
-    expect(article.querySelector(".card-cover-wrap .fav-btn")).not.toBeNull();
-    expect(article.querySelector(".card-body .card-title")).not.toBeNull();
-    expect(article.querySelector(".card-body .card-uploader")).not.toBeNull();
-    expect(article.querySelector(".card-body .card-meta")).not.toBeNull();
-    expect(article.querySelector(".card-posted")?.textContent).toBe("2024-01-01 12:00");
+    const stars = article.querySelector(".rating-stars");
+    expect(stars?.getAttribute("aria-label")).toBe("4 out of 5 stars");
+    expect(stars?.querySelectorAll(".rating-half.is-on")).toHaveLength(8);
+    expect(article.querySelector(".card-meta")?.textContent).toContain("10 pages");
+
+    const torrent = article.querySelector<HTMLAnchorElement>(".card-torrent");
+    expect(torrent?.getAttribute("href")).toBe(ITEM.torrentsHref);
+    expect(torrent?.hasAttribute("data-native")).toBe(false);
+
+    const cover = article.querySelector<HTMLImageElement>(".card-cover img");
+    expect(cover?.getAttribute("width")).toBe("250");
+    expect(cover?.getAttribute("height")).toBe("353");
   });
 
   test("renders unknown favorite state as today's neutral button", () => {

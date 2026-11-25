@@ -74,17 +74,16 @@ describe("RequestQueue cancellation", () => {
 
   test("an aborted running request aborts the transport signal", async () => {
     let transportSignal: AbortSignal | undefined;
-    stubFetch(
-      (_url, init) =>
-        new Promise<Response>((_resolve, reject) => {
-          transportSignal = init?.signal ?? undefined;
-          transportSignal?.addEventListener(
-            "abort",
-            () => reject(new DOMException("Aborted", "AbortError")),
-            { once: true },
-          );
-        }),
-    );
+    stubFetch((_url, init) => {
+      const { promise, reject } = Promise.withResolvers<Response>();
+      transportSignal = init?.signal ?? undefined;
+      transportSignal?.addEventListener(
+        "abort",
+        () => reject(new DOMException("Aborted", "AbortError")),
+        { once: true },
+      );
+      return promise;
+    });
 
     const queue = new RequestQueue();
     const controller = new AbortController();
@@ -114,7 +113,7 @@ describe("RequestQueue purge", () => {
 });
 
 describe("priority policy", () => {
-  test("the named classes are strictly ordered with prefetch last", () => {
+  test("orders the named classes, with facing starting before prefetch", async () => {
     const values = PRIORITY_CLASSES.map((name) => priorityOf(name));
 
     for (let index = 1; index < values.length; index++) {
@@ -126,9 +125,7 @@ describe("priority policy", () => {
       expect(current).toBeLessThan(previous);
     }
     expect(priorityOf("prefetch")).toBe(Math.min(...values));
-  });
 
-  test("a facing request starts before a prefetch request at the same availability", async () => {
     const calls: string[] = [];
     const blocking = deferred<Response>();
     stubFetch((url) => {

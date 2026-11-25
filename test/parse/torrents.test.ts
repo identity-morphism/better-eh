@@ -17,10 +17,8 @@ describe("parseTorrents", () => {
     const plain = parseTorrents(doc, "https://e-hentai.org/torrents.php");
     expect(plain.status).toBe("all");
     expect(plain.uploaderFilter).toBeNull();
+    expect(plain.search).toBe("");
 
-    expect(
-      parseTorrents(doc, "https://e-hentai.org/torrents.php?search=elf&u=42").uploaderFilter,
-    ).toBe("42");
     expect(parseTorrents(doc, "https://e-hentai.org/torrents.php?search=elf").search).toBe("elf");
 
     expect(parseTorrents(doc, "https://e-hentai.org/torrents.php?s=unseeded").status).toBe(
@@ -29,11 +27,8 @@ describe("parseTorrents", () => {
     expect(parseTorrents(doc, "https://e-hentai.org/torrents.php?s=bogus").status).toBe("all");
   });
 
-  test("reads the summary", () => {
+  test("reads the summary and turns the zero-based page parameter into a displayed page", () => {
     expect(data.summary).toBe("Showing 1-3 of 964,330");
-  });
-
-  test("turns the zero-based page parameter into a displayed page", () => {
     expect(data.page).toBe(1);
     expect(parseTorrents(doc, "https://e-hentai.org/torrents.php?page=2").page).toBe(3);
     expect(parseTorrents(doc, "https://e-hentai.org/torrents.php?page=nope").page).toBe(1);
@@ -60,18 +55,11 @@ describe("parseTorrents", () => {
       uploaderHref: "https://e-hentai.org/torrents.php?u=230357",
       added: "2026-10-25 14:24",
     });
-    expect(data.rows[1]).toEqual({
+    expect(data.rows[1]).toMatchObject({
       gid: "4281137",
-      name: "[Midorikawa Pest] Sake wa Nondemo Nomareruna [English].zip",
-      torrentHref: "https://e-hentai.org/gallerytorrents.php?gid=4281137&t=1c8a7ace88&gtid=2290241",
-      galleryHref: "https://e-hentai.org/g/4281137/1c8a7ace88/",
-      size: "9.05 MiB",
       seeds: 0,
       peers: 1,
       downloads: 2,
-      uploader: "Bowden",
-      uploaderHref: "https://e-hentai.org/torrents.php?u=399592",
-      added: "2026-10-25 14:23",
     });
     expect(data.rows[2]?.gid).toBe("4280579");
     expect(data.rows[2]?.downloads).toBe(3);

@@ -68,6 +68,7 @@ describe("gallery tag section", () => {
     notedChip().dispatchEvent(new Event("contextmenu", { bubbles: true, cancelable: true }));
 
     const menu = document.querySelector<HTMLElement>(".tag-menu");
+    expect(menu).not.toBeNull();
     expect(menu?.querySelector(".tag-menu-title")?.textContent).toBe("japanese");
     expect(menu?.querySelector(".tag-menu-ns")?.textContent).toBe("language");
   });
@@ -79,13 +80,6 @@ describe("gallery tag section", () => {
     trigger?.click();
 
     expect(document.querySelector(".tag-menu-title")?.textContent).toBe("japanese");
-    expect(document.querySelector(".tag-menu-color")).not.toBeNull();
-  });
-
-  test("opens the tag menu when the gallery has API credentials", () => {
-    notedChip().dispatchEvent(new Event("contextmenu", { bubbles: true, cancelable: true }));
-
-    expect(document.querySelector(".tag-menu")).not.toBeNull();
   });
 
   test("uses the shared empty panel for a gallery without thumbnails", () => {

@@ -30,11 +30,9 @@ interface RoutedList {
 async function listDocument({
   dates,
   nextHref = null,
-  resultText = "Found 1,234 results.",
 }: {
   dates: Readonly<Record<string, string>>;
   nextHref?: string | null;
-  resultText?: string;
 }): Promise<Document> {
   const doc = await loadFixture("list.html");
   const rows = [...doc.querySelectorAll<HTMLTableRowElement>("table.itg > tbody > tr")];
@@ -69,7 +67,7 @@ async function listDocument({
   }
   const summary = doc.querySelector(".searchtext p");
   if (summary !== null) {
-    summary.textContent = resultText;
+    summary.textContent = "Found 1,234 results.";
   }
   const next = doc.getElementById("dnext");
   if (next !== null) {
@@ -136,22 +134,7 @@ beforeEach(() => {
 });
 
 describe("posted-date range in the filter panel", () => {
-  test("renders posted-since and posted-until date fields", async () => {
-    const row = routedList(`${BASE}?f_search=dogs`, await listDocument({ dates: {} }));
-    render(row.data.page, `${BASE}?f_search=dogs`, listSource(row));
-
-    const since = host.querySelector<HTMLInputElement>('input[aria-label="Posted since"]');
-    const until = host.querySelector<HTMLInputElement>('input[aria-label="Posted until"]');
-
-    expect(since?.getAttribute("type")).toBe("date");
-    expect(until?.getAttribute("type")).toBe("date");
-    expect(since?.getAttribute("placeholder")).toBe("YYYY-MM-DD");
-    expect(until?.getAttribute("placeholder")).toBe("YYYY-MM-DD");
-    expect(since?.getAttribute("title")).toContain("on or after");
-    expect(until?.getAttribute("title")).toContain("on or before");
-  });
-
-  test("applies the range through the existing filter form", async () => {
+  test("renders the range fields and applies them through the filter form", async () => {
     const row = routedList(`${BASE}?f_search=dogs`, await listDocument({ dates: {} }));
     render(row.data.page, `${BASE}?f_search=dogs`);
 
@@ -161,6 +144,10 @@ describe("posted-date range in the filter panel", () => {
     if (!form || !since || !until) {
       throw new Error("missing date range fields");
     }
+    expect(since.getAttribute("type")).toBe("date");
+    expect(until.getAttribute("type")).toBe("date");
+    expect(since.getAttribute("title")).toContain("on or after");
+    expect(until.getAttribute("title")).toContain("on or before");
 
     since.value = "2024-01-01";
     until.value = "2024-12-31";
@@ -222,34 +209,25 @@ describe("posted-date range policy", () => {
     expect(pagerNext()).toBeNull();
   });
 
-  test("the list row carries the range onto an in-range next link", async () => {
-    const row = routedList(
-      RANGE_URL,
-      await listDocument({
-        dates: {
-          "111": "2024-12-31 23:00",
-          "222": "2024-06-01 09:00",
-          "444": "2024-08-01 09:00",
-        },
-        nextHref: NEXT_URL,
-      }),
-    );
-
-    render(row.data.page, row.data.page.url);
+  test("carries the range onto an in-range next link and passes range-free listings through", async () => {
+    const dates = {
+      "111": "2024-12-31 23:00",
+      "222": "2024-06-01 09:00",
+      "444": "2024-08-01 09:00",
+    };
+    const ranged = routedList(RANGE_URL, await listDocument({ dates, nextHref: NEXT_URL }));
+    render(ranged.data.page, ranged.data.page.url);
 
     const next = pagerNext();
     expect(next?.textContent).toBe("Next");
-
     const href = new URL(next?.getAttribute("href") ?? "", BASE);
     expect(href.searchParams.get("p")).toBe("1");
     expect(href.searchParams.get("eh_since")).toBe("2024-01-01");
     expect(href.searchParams.get("eh_until")).toBe("2024-12-31");
-  });
 
-  test("a range-free listing passes through unchanged", async () => {
-    const url = `${BASE}?f_search=dogs`;
-    const row = routedList(
-      url,
+    const plainUrl = `${BASE}?f_search=dogs`;
+    const plain = routedList(
+      plainUrl,
       await listDocument({
         dates: {
           "111": "2024-12-31 23:00",
@@ -259,8 +237,7 @@ describe("posted-date range policy", () => {
         nextHref: NEXT_URL,
       }),
     );
-
-    render(row.data.page, url);
+    render(plain.data.page, plainUrl);
 
     expect(host.querySelectorAll(".card")).toHaveLength(3);
     expect(host.querySelector(".list-summary")?.textContent).toBe("Found 1,234 results.");
