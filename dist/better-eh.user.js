@@ -10511,8 +10511,41 @@ ${defaultKeySummary()}`)) {
     }
     return count;
   }
+  function activeFilterLabels(query) {
+    const labels = [];
+    if (query.rating > 0) {
+      labels.push(`${query.rating}★ minimum`);
+    }
+    const pageFrom = query.pageFrom.trim();
+    const pageTo = query.pageTo.trim();
+    if (pageFrom !== "" || pageTo !== "") {
+      labels.push(pageFrom !== "" && pageTo !== "" ? `${pageFrom}–${pageTo} pages` : pageFrom !== "" ? `${pageFrom}+ pages` : `≤${pageTo} pages`);
+    }
+    if (isDateRangeActive({ since: query.since, until: query.until })) {
+      const since = query.since.trim();
+      const until = query.until.trim();
+      labels.push(since !== "" && until !== "" ? `Posted ${since} – ${until}` : since !== "" ? `Posted from ${since}` : `Posted until ${until}`);
+    }
+    if (query.expunged) {
+      labels.push("Expunged included");
+    }
+    if (query.torrent) {
+      labels.push("Torrent required");
+    }
+    if (query.disableLanguage) {
+      labels.push("Language filter off");
+    }
+    if (query.disableUploader) {
+      labels.push("Uploader filter off");
+    }
+    if (query.disableTags) {
+      labels.push("Tag filter off");
+    }
+    return labels;
+  }
   function advancedPanel(query, ctx) {
     const activeCount = narrowCount(query) + relaxedCount(query);
+    const activeLabels = activeFilterLabels(query);
     const rating = createSelect({
       class: "field-select",
       ariaLabel: "Minimum rating",
@@ -10621,7 +10654,11 @@ ${defaultKeySummary()}`)) {
       event.preventDefault();
       apply();
     }, { signal: ctx.signal });
-    const details = el("details", { class: "filters", open: isListPanelOpen() ? "" : null }, el("summary", { class: "filters-summary" }, icon("filter"), el("span", { text: "Filters" }), activeCount > 0 ? el("span", { class: "filters-count", text: String(activeCount) }) : ""), form);
+    const details = el("details", { class: "filters", open: isListPanelOpen() ? "" : null }, el("summary", { class: "filters-summary" }, icon("filter"), el("span", { text: "Filters" }), activeCount > 0 ? el("span", { class: "filters-count", text: String(activeCount) }) : "", activeLabels.length > 0 ? el("span", {
+      class: "filters-active",
+      text: activeLabels.join(" · "),
+      title: activeLabels.join(" · ")
+    }) : ""), form);
     details.addEventListener("toggle", () => {
       setListPanelOpen(details.hasAttribute("open"));
     }, { signal: ctx.signal });
@@ -15745,6 +15782,16 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-micro);
     --tw-font-weight: var(--font-weight-bold);
     font-weight: var(--font-weight-bold);
+  }
+  .filters-active {
+    min-width: 0px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    --tw-font-weight: var(--font-weight-normal);
+    font-weight: var(--font-weight-normal);
+    color: var(--color-muted);
   }
   .filters-grid {
     display: flex;

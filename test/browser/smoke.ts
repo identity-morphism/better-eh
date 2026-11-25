@@ -153,6 +153,13 @@ try {
   await list.waitForSelector(".card", { timeout: 15_000 });
   await expectAccessible(list, "list");
 
+  const filtered = await open("/?f_search=test&f_srdd=4&f_sfl=on");
+  await filtered.waitForSelector(".filters-active", { timeout: 15_000 });
+  const filtersSummary = await filtered.locator(".filters-active").innerText();
+  if (filtersSummary !== "4★ minimum · Language filter off") {
+    fail(`unexpected active filter summary: ${filtersSummary}`);
+  }
+
   // Boot turns the app-owned posted-date range into the site's date cursor: the listing opens at
   // the end of the range with `seek` set. `commit` returns before that redirect navigates, so the
   // initial response cannot abort the request under test.

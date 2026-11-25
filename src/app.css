@@ -713,6 +713,10 @@ input[type="radio"] {
   @apply inline-flex min-w-[18px] items-center justify-center rounded-none px-1.5 py-0.5 text-micro font-bold;
 }
 
+.filters-active {
+  @apply min-w-0 truncate text-meta font-normal text-muted;
+}
+
 .filters-grid {
   @apply flex flex-wrap items-end gap-4 px-3 pb-3;
 }
