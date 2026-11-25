@@ -109,9 +109,67 @@ describe("restoreScrollWhenReady", () => {
     expect(growing.frames.filter((frame) => !frame.cancelled)).toHaveLength(1);
 
     growing.setHeight(6000);
+    // The restore measures on a 100ms clock rather than once per frame.
+    growing.setNow(100);
     expect(growing.runNext()).toBe(true);
     expect(growing.scroll()).toBe(4000);
     expect(growing.frames.filter((frame) => !frame.cancelled)).toHaveLength(0);
+  });
+
+  test("reports completion so the caller can drop its listeners", () => {
+    const env = fakeEnvironment(5000);
+    let done = 0;
+    restoreScrollWhenReady(480, {
+      ...env.deps,
+      onDone: () => {
+        done += 1;
+      },
+    });
+
+    expect(env.runNext()).toBe(true);
+    expect(done).toBe(1);
+    expect(env.frames.filter((frame) => !frame.cancelled)).toHaveLength(0);
+  });
+
+  test("samples on a clock and stops asking the region after a refusal", async () => {
+    const env = fakeEnvironment(2000, 0, 0);
+    let calls = 0;
+    restoreScrollWhenReady(9000, {
+      ...env.deps,
+      advance: () => {
+        calls += 1;
+        return Promise.resolve(calls < 3);
+      },
+    });
+    const settle = async (): Promise<void> => {
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+
+    expect(env.runNext()).toBe(true);
+    await settle();
+    expect(calls).toBe(1);
+
+    // Frames inside the same sample window must not measure or chain another page.
+    expect(env.runNext()).toBe(true);
+    await settle();
+    expect(calls).toBe(1);
+
+    env.setNow(100);
+    expect(env.runNext()).toBe(true);
+    await settle();
+    expect(calls).toBe(2);
+
+    env.setNow(200);
+    expect(env.runNext()).toBe(true);
+    await settle();
+    expect(calls).toBe(3);
+
+    // The third page refused; the region has nothing more to append, so no further asks.
+    env.setNow(300);
+    expect(env.runNext()).toBe(true);
+    await settle();
+    expect(calls).toBe(3);
   });
 
   test("stops once the document stops growing or the deadline passes", () => {

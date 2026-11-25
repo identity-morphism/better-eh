@@ -91,7 +91,8 @@ a {
 .gallery-resume-clear,
 .search-history-remove,
 .settings-key-capture {
-  @apply inline-flex cursor-pointer items-center justify-center gap-1.5;
+  @apply inline-flex cursor-pointer items-center justify-center;
+  gap: 6px;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
   background: var(--color-panel);
@@ -133,7 +134,8 @@ a {
 .cat-chip,
 .quick-tag,
 .quick-tag-edit {
-  @apply inline-flex h-[26px] cursor-pointer items-center rounded-chip text-meta font-semibold;
+  @apply inline-flex h-[26px] cursor-pointer items-center rounded-chip text-meta;
+  font-weight: 600;
 }
 
 /* A clickable row: menu item, tab, rail link, sort filter. One shape and one hover. Current
@@ -149,7 +151,14 @@ a {
 .topbar-tab,
 .action-menu-item,
 .tag-menu-item {
-  @apply flex h-7 cursor-pointer items-center gap-1 rounded-row px-2 text-control text-muted no-underline transition-colors;
+  @apply flex cursor-pointer items-center rounded-row text-control text-muted no-underline;
+  height: 28px;
+  gap: 4px;
+  padding-inline: 8px;
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .topbar-clear:hover,
@@ -222,7 +231,11 @@ a {
 .draft-note,
 .tag-menu-error,
 .torrent-filter-note {
-  @apply m-0 rounded-row border px-2.5 py-1.5 text-meta;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-row);
+  font-size: var(--text-meta);
 }
 
 .draft-note {
@@ -244,8 +257,9 @@ a {
 .search-history-heading,
 .toplist-tab-group-title,
 .favorites-move-head {
-  @apply font-semibold uppercase;
+  @apply uppercase;
   font-size: var(--text-micro);
+  font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--color-muted);
 }
@@ -350,7 +364,6 @@ input[type="radio"] {
   margin: 0 -28px;
   padding: 14px 28px 10px;
   background: linear-gradient(var(--color-canvas) 82%, transparent);
-  backdrop-filter: blur(10px);
 }
 
 .topbar-main {
@@ -372,11 +385,20 @@ input[type="radio"] {
 }
 
 .brand {
-  @apply inline-flex h-8 shrink-0 items-center rounded-control bg-parchment px-3 text-control font-extrabold tracking-[0.08em] text-burgundy no-underline;
+  @apply inline-flex shrink-0 items-center rounded-control bg-parchment text-control font-extrabold tracking-[0.08em] text-burgundy no-underline;
+  height: 32px;
+  padding-inline: 12px;
 }
 
 .topbar-search {
-  @apply flex h-8 min-w-0 max-w-[760px] flex-1 items-center rounded-control border border-line-strong bg-panel pl-2.5 transition-colors;
+  @apply flex min-w-0 max-w-[760px] flex-1 items-center rounded-control bg-panel;
+  height: 32px;
+  padding-left: 10px;
+  border: 1px solid var(--color-line-strong);
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .topbar-search:focus-within {
@@ -389,7 +411,8 @@ input[type="radio"] {
 }
 
 .topbar-search input {
-  @apply h-full min-w-0 flex-1 border-0 bg-transparent px-2.5 text-body text-fg outline-none;
+  @apply h-full min-w-0 flex-1 border-0 bg-transparent text-body text-fg outline-none;
+  padding-inline: 10px;
 }
 
 .topbar-search input::placeholder {
@@ -407,7 +430,9 @@ input[type="radio"] {
 /* One keyboard-hint recipe, shared by the topbar shortcut and the reader help panel. */
 .kbd,
 .settings-key {
-  @apply inline-flex min-h-[18px] shrink-0 items-center justify-center rounded-row border border-line bg-canvas px-[5px] text-micro text-muted;
+  @apply inline-flex min-h-[18px] shrink-0 items-center justify-center rounded-row bg-canvas text-micro text-muted;
+  padding-inline: 5px;
+  border: 1px solid var(--color-line);
   font-family: inherit;
 }
 
@@ -422,7 +447,8 @@ input[type="radio"] {
 }
 
 .fact-value {
-  @apply text-body font-semibold;
+  @apply text-body;
+  font-weight: 600;
 }
 
 .topbar-kbd {
@@ -430,7 +456,14 @@ input[type="radio"] {
 }
 
 .topbar-search-submit {
-  @apply mr-1 h-6 cursor-pointer rounded-control border-0 px-2.5 text-meta font-semibold transition-colors;
+  @apply cursor-pointer rounded-control border-0 text-meta;
+  margin-right: 4px;
+  height: 24px;
+  padding-inline: 10px;
+  font-weight: 600;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
 }
 
 .topbar-clear,
@@ -450,7 +483,8 @@ input[type="radio"] {
 }
 
 .list-heading h1 {
-  @apply m-0 text-heading font-semibold tracking-[-0.01em];
+  @apply m-0 text-heading tracking-[-0.01em];
+  font-weight: 600;
 }
 
 .list-summary {
@@ -458,7 +492,9 @@ input[type="radio"] {
 }
 
 .badge {
-  @apply rounded-none border border-line-strong px-2 py-0.5 text-meta text-muted;
+  @apply rounded-none text-meta text-muted;
+  padding: 2px 8px;
+  border: 1px solid var(--color-line-strong);
 }
 
 /* -------------------------------------------------------- search filters */
@@ -469,7 +505,8 @@ input[type="radio"] {
 }
 
 .term-chip {
-  @apply inline-flex min-w-0 items-stretch overflow-hidden rounded-none border border-line-strong bg-panel;
+  @apply inline-flex min-w-0 items-stretch overflow-hidden rounded-none bg-panel;
+  border: 1px solid var(--color-line-strong);
 }
 
 .term-chip.is-excluded {
@@ -547,7 +584,9 @@ input[type="radio"] {
 }
 
 .tag-option-badge {
-  @apply shrink-0 rounded-none border px-1 py-px text-micro uppercase;
+  @apply shrink-0 rounded-none text-micro uppercase;
+  padding: 1px 4px;
+  border: 1px solid;
   letter-spacing: 0.04em;
   color: var(--ns-color, var(--color-muted));
   border-color: color-mix(in srgb, var(--ns-color, var(--color-muted)) 45%, transparent);
@@ -572,7 +611,7 @@ input[type="radio"] {
 }
 
 .tag-option.is-namespace .tag-option-key {
-  @apply font-semibold;
+  font-weight: 600;
 }
 
 .tag-combobox-state {
@@ -580,7 +619,8 @@ input[type="radio"] {
 }
 
 .tag-combobox-state strong {
-  @apply font-semibold text-fg;
+  @apply text-fg;
+  font-weight: 600;
 }
 
 .tag-combobox-foot {
@@ -602,7 +642,10 @@ input[type="radio"] {
 }
 
 .tag-combobox-exclude {
-  @apply min-h-6 cursor-pointer rounded-none border border-line-strong bg-transparent px-2 py-0.5 text-micro text-muted;
+  @apply cursor-pointer rounded-none bg-transparent text-micro text-muted;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-line-strong);
   font: inherit;
 }
 
@@ -615,7 +658,8 @@ input[type="radio"] {
 /* Native `.cs` category buttons: the site's hue, re-tinted for a dark theme. The lightness and
    chroma are fixed so one white label clears 4.5:1 on every one of the ten. */
 .cat-chip {
-  @apply px-3 transition-opacity;
+  padding-inline: 12px;
+  transition: opacity 0.15s;
   border: 1px solid color-mix(in oklab, var(--cat, var(--color-accent)) 70%, transparent);
   background: linear-gradient(
     oklch(0.47 var(--cat-c, 0.1) var(--cat-h, 20)),
@@ -644,7 +688,13 @@ input[type="radio"] {
 }
 
 .quick-tag {
-  @apply border border-line-strong bg-panel px-3 text-muted transition-colors;
+  @apply bg-panel text-muted;
+  padding-inline: 12px;
+  border: 1px solid var(--color-line-strong);
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .quick-tag:hover {
@@ -661,7 +711,10 @@ input[type="radio"] {
 }
 
 .quick-tag-edit {
-  @apply ml-0.5 border border-dashed border-line-strong bg-transparent px-2.5 text-muted;
+  @apply bg-transparent text-muted;
+  margin-left: 2px;
+  padding-inline: 10px;
+  border: 1px dashed var(--color-line-strong);
 }
 
 .quick-tag-edit:hover,
@@ -678,7 +731,8 @@ input[type="radio"] {
 }
 
 .quick-tag-editor-title {
-  @apply m-0 font-semibold text-fg;
+  @apply m-0 text-fg;
+  font-weight: 600;
 }
 
 .quick-tag-editor-hint {
@@ -710,7 +764,8 @@ input[type="radio"] {
 }
 
 .filters {
-  @apply w-fit rounded-control border border-line bg-surface;
+  @apply w-fit rounded-control bg-surface;
+  border: 1px solid var(--color-line);
 }
 
 .filters-summary {
@@ -748,8 +803,9 @@ input[type="radio"] {
 .field-input,
 .field-select {
   /* The fill is nearly the section colour, so this border is what identifies the field: 3:1. */
-  @apply h-8 min-w-0 rounded-control border border-line bg-canvas px-2.5 text-control text-fg;
-  border-color: var(--color-field-line);
+  @apply h-8 min-w-0 rounded-control bg-canvas text-control text-fg;
+  padding-inline: 10px;
+  border: 1px solid var(--color-field-line);
 }
 
 .field-select:focus,
@@ -806,11 +862,20 @@ input[type="radio"] {
 }
 
 .card {
-  @apply flex flex-col overflow-hidden rounded-card border border-line bg-panel transition-[border-color,transform] duration-150;
+  @apply flex flex-col overflow-hidden rounded-card bg-panel;
+  border: 1px solid var(--color-line);
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+  /* Offscreen cards skip layout and paint; the estimate is a 250px column's cover
+     (250 x 353) plus the body, and `auto` remembers each card's real box once measured. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 460px;
 }
 
 .card:hover {
-  @apply -translate-y-0.5 border-line-strong;
+  @apply border-line-strong;
+  transform: translateY(-2px);
 }
 
 .card-cover-wrap {
@@ -848,7 +913,10 @@ input[type="radio"] {
 }
 
 .card-cover-wrap .fav-btn {
-  @apply absolute top-2 right-2 rounded-none p-1.5 backdrop-blur-sm;
+  @apply absolute rounded-none;
+  top: 8px;
+  right: 8px;
+  padding: 6px;
   background: var(--scrim-control);
 }
 
@@ -857,7 +925,9 @@ input[type="radio"] {
 }
 
 .card-body {
-  @apply flex flex-col gap-1 px-3 pt-2.5 pb-3;
+  @apply flex flex-col;
+  gap: 4px;
+  padding: 10px 12px 12px;
 }
 
 .card-title {
@@ -871,7 +941,8 @@ input[type="radio"] {
 /* The translated title owns the two-line clamp; the original title sits under it as its own
    truncated line instead of wrapping mid-separator. */
 .card-primary {
-  @apply line-clamp-2 font-semibold;
+  @apply line-clamp-2;
+  font-weight: 600;
 }
 
 .card-secondary {
@@ -902,7 +973,8 @@ input[type="radio"] {
 /* ---------------------------------------------------------------- gallery */
 
 .gallery-header {
-  @apply mt-2 grid grid-cols-[250px_minmax(0,1fr)_auto] items-center gap-7 rounded-card border border-line bg-gradient-to-b from-panel to-surface p-5;
+  @apply mt-2 grid grid-cols-[250px_minmax(0,1fr)_auto] items-center gap-7 rounded-card bg-gradient-to-b from-panel to-surface p-5;
+  border: 1px solid var(--color-line);
 }
 
 /* Let a long translated title wrap instead of widening the header's middle column. */
@@ -919,7 +991,8 @@ input[type="radio"] {
 }
 
 .gallery-cover {
-  @apply w-[250px] overflow-hidden rounded-control border border-line-strong bg-surface;
+  @apply w-[250px] overflow-hidden rounded-control bg-surface;
+  border: 1px solid var(--color-line-strong);
 }
 
 .gallery-cover.is-missing {
@@ -970,7 +1043,8 @@ input[type="radio"] {
 }
 
 .gallery-title .title-primary {
-  @apply block text-display leading-[1.22] font-semibold tracking-[-0.01em] text-fg;
+  @apply block text-display leading-[1.22] tracking-[-0.01em] text-fg;
+  font-weight: 600;
 }
 
 .gallery-title .title-secondary,
@@ -993,7 +1067,9 @@ input[type="radio"] {
      4.5:1 on the card panel for all ten categories. */
   --cat-fg: oklch(0.85 calc(var(--cat-c, 0.1) * 0.45) var(--cat-h, 20));
   --cat: oklch(0.72 var(--cat-c, 0.1) var(--cat-h, 20));
-  @apply inline-flex items-center gap-1.5 rounded-chip border px-2 py-0.5 text-meta font-medium;
+  @apply inline-flex items-center gap-1.5 rounded-chip text-meta font-medium;
+  padding: 2px 8px;
+  border: 1px solid;
   border-color: color-mix(in oklab, var(--cat) 40%, transparent);
   background: color-mix(in oklab, var(--cat) 12%, transparent);
   color: var(--cat-fg);
@@ -1066,7 +1142,8 @@ input[type="radio"] {
 
 /* The field holds a draft that the rendered results do not match yet. */
 .draft-note strong {
-  @apply font-semibold text-fg;
+  @apply text-fg;
+  font-weight: 600;
 }
 
 .gallery-actions {
@@ -1074,7 +1151,10 @@ input[type="radio"] {
 }
 
 .btn {
-  @apply h-8 whitespace-nowrap px-3.5 text-body font-semibold no-underline;
+  @apply whitespace-nowrap text-body no-underline;
+  height: 32px;
+  padding-inline: 14px;
+  font-weight: 600;
 }
 
 .btn-primary {
@@ -1090,7 +1170,9 @@ input[type="radio"] {
 }
 
 .btn-small {
-  @apply h-7 px-3 text-control;
+  @apply text-control;
+  height: 28px;
+  padding-inline: 12px;
 }
 
 .btn.is-disabled,
@@ -1103,7 +1185,10 @@ input[type="radio"] {
 }
 
 .fav-btn {
-  @apply h-8 max-w-full overflow-hidden whitespace-nowrap px-3 text-body font-semibold text-muted;
+  @apply max-w-full overflow-hidden whitespace-nowrap text-body text-muted;
+  height: 32px;
+  padding-inline: 12px;
+  font-weight: 600;
 }
 
 .fav-btn:hover {
@@ -1124,7 +1209,8 @@ input[type="radio"] {
 /* ------------------------------------------------------------------- tags */
 
 .tag-section {
-  @apply grid gap-2 border-b border-line py-5;
+  @apply grid gap-2 py-5;
+  border-bottom: 1px solid var(--color-line);
 }
 
 .tag-ns {
@@ -1145,8 +1231,14 @@ input[type="radio"] {
 }
 
 .tag-chip {
-  @apply rounded-none border bg-panel px-2.5 py-1 text-control text-muted no-underline transition-colors;
+  @apply rounded-none bg-panel text-control text-muted no-underline;
+  padding: 4px 10px;
+  border: 1px solid;
   border-color: var(--ns-color, var(--color-line));
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .tag-chip-wrap {
@@ -1160,7 +1252,10 @@ input[type="radio"] {
 
 @media (pointer: coarse), (hover: none) {
   .tag-menu-trigger {
-    @apply grid w-6 cursor-pointer place-items-center border border-l-0 bg-panel text-control text-muted;
+    @apply grid w-6 cursor-pointer place-items-center text-control text-muted;
+    border: 1px solid;
+    border-left-width: 0;
+    background: var(--color-panel);
     border-color: var(--ns-color, var(--color-line));
   }
 
@@ -1233,7 +1328,8 @@ input[type="radio"] {
 }
 
 .thumb-cell {
-  @apply flex flex-col gap-1;
+  @apply flex flex-col;
+  gap: 4px;
 }
 
 .thumb {
@@ -1269,7 +1365,9 @@ input[type="radio"] {
 }
 
 .pager-btn {
-  @apply h-7 px-3 text-control no-underline;
+  @apply text-control no-underline;
+  height: 28px;
+  padding-inline: 12px;
 }
 
 .pager-nums {
@@ -1277,7 +1375,9 @@ input[type="radio"] {
 }
 
 .pager-num {
-  @apply h-7 min-w-7 px-2 text-control text-muted no-underline;
+  @apply min-w-7 text-control text-muted no-underline;
+  height: 28px;
+  padding-inline: 8px;
 }
 
 .pager-gap {
@@ -1290,14 +1390,23 @@ input[type="radio"] {
    deliberately not tab-shaped: these move within the page, they do not change route. */
 .settings-jump,
 .toplist-jump {
-  @apply sticky z-20 flex items-center gap-0.5 overflow-x-auto border border-line bg-surface px-2 py-1 text-meta text-muted;
+  @apply sticky z-20 flex items-center overflow-x-auto bg-surface text-meta text-muted;
+  gap: 2px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-line);
   top: var(--topbar-h, 0px);
   border-radius: var(--radius-card);
 }
 
 .settings-jump-link,
 .toplist-jump-link {
-  @apply inline-flex h-6 shrink-0 items-center rounded-row px-2 no-underline transition-colors;
+  @apply inline-flex shrink-0 items-center rounded-row no-underline;
+  height: 24px;
+  padding-inline: 8px;
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 /* --------------------------------------------------------- infinite scroll */
@@ -1340,6 +1449,8 @@ input[type="radio"] {
 
 .fav-dot {
   @apply size-2 shrink-0 rounded-full;
+  /* Fallback for a dot built without an inline folder colour. */
+  background: var(--color-danger);
 }
 
 /* The folder the gallery already sits in: the picker says which choice is a no-op. */
@@ -1386,7 +1497,8 @@ input[type="radio"] {
 }
 
 .eh-banner {
-  @apply flex w-full max-w-[760px] items-start gap-2.5 rounded-control border border-danger-line bg-danger-surface px-3 py-2.5 text-control leading-relaxed text-danger-text shadow-float;
+  @apply flex w-full max-w-[760px] items-start gap-2.5 rounded-control bg-danger-surface px-3 py-2.5 text-control leading-relaxed text-danger-text shadow-float;
+  border: 1px solid var(--color-danger-line);
 }
 
 .eh-banner svg {
@@ -1410,7 +1522,8 @@ input[type="radio"] {
 }
 
 .eh-toast {
-  @apply fixed bottom-[26px] left-1/2 z-[350] rounded-chip border border-line-strong bg-panel px-4 py-2 text-control text-fg opacity-0 shadow-float;
+  @apply fixed bottom-[26px] left-1/2 z-[350] rounded-chip bg-panel px-4 py-2 text-control text-fg opacity-0 shadow-float;
+  border: 1px solid var(--color-line-strong);
   pointer-events: none;
   transform: translate(-50%, 8px);
   transition:
@@ -1453,7 +1566,8 @@ body.is-loading .eh-loading {
 
 .empty-state,
 .error-view {
-  @apply mx-auto my-16 max-w-[560px] rounded-card border border-line-strong bg-panel p-8 text-center;
+  @apply mx-auto my-16 max-w-[560px] rounded-card bg-panel p-8 text-center;
+  border: 1px solid var(--color-line-strong);
 }
 
 .state-icon {
@@ -1461,7 +1575,8 @@ body.is-loading .eh-loading {
 }
 
 .state-title {
-  @apply mt-0 mb-2 text-heading font-semibold text-fg;
+  @apply mt-0 mb-2 text-heading text-fg;
+  font-weight: 600;
 }
 
 .state-text {
@@ -1623,7 +1738,8 @@ body.is-loading .eh-loading {
 }
 
 .search-history-title {
-  @apply m-0 text-body font-semibold text-fg;
+  @apply m-0 text-body text-fg;
+  font-weight: 600;
 }
 
 .search-history-heading {
@@ -1639,8 +1755,15 @@ body.is-loading .eh-loading {
 }
 
 .search-history-query {
-  @apply flex min-w-0 flex-1 cursor-pointer flex-col items-start gap-0.5 border border-line bg-canvas px-2 py-1 text-left text-control text-fg transition-colors;
+  @apply flex min-w-0 flex-1 cursor-pointer flex-col items-start bg-canvas text-left text-control text-fg;
+  gap: 2px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-line);
   border-radius: var(--radius-row);
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .search-history-query:hover,
@@ -1649,7 +1772,8 @@ body.is-loading .eh-loading {
 }
 
 .search-history-name {
-  @apply w-full truncate font-semibold;
+  @apply w-full truncate;
+  font-weight: 600;
 }
 
 .search-history-text {

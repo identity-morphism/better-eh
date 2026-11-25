@@ -213,6 +213,11 @@ function categoryKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+/** Category keys are fixed, so one map replaces a `CATEGORIES` scan per `ct_*` field. */
+const CATEGORIES_BY_KEY = new Map(
+  CATEGORIES.map((category) => [categoryKey(category.name), category]),
+);
+
 /** The site's hidden category switches: `"0"` shows the category, `"1"` excludes it. */
 export function categorySwitchShown(value: string): boolean {
   return value === "0";
@@ -229,7 +234,7 @@ function categoryFor(name: string, value: string): UconfigCategory | null {
     return null;
   }
   const key = categoryKey(name.slice("ct_".length));
-  const category = CATEGORIES.find((candidate) => categoryKey(candidate.name) === key);
+  const category = CATEGORIES_BY_KEY.get(key);
   return category
     ? {
         bit: category.bit,

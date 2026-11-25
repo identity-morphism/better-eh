@@ -46,13 +46,21 @@ export function preloadImage(src: string): HTMLImageElement {
 
   const container = ensurePreloadContainer();
   const img = document.createElement("img");
+  // A speculative page must never compete with the image the reader is looking at.
+  img.setAttribute("fetchpriority", "low");
+  img.decoding = "async";
   img.onload = () => {
     void img.decode().then(
       () => log("preload + decode done", src),
       (error) => warn("preload decode failed", src, error),
     );
   };
-  img.onerror = () => warn("preload error", src);
+  img.onerror = () => {
+    // A broken image must not hold a slot: it can never satisfy a later `preloadImage` call.
+    imgCache.delete(src);
+    img.remove();
+    warn("preload error", src);
+  };
   img.src = src;
   container.append(img);
   imgCache.set(src, img);

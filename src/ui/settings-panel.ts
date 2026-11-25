@@ -46,7 +46,7 @@ const VISUALLY_HIDDEN = "settings-file-input";
 export const USERSCRIPT_SETTINGS_SECTION_ID = "settings-userscript";
 
 interface SettingsPanelDeps {
-  /** Called after a control change or a draft reset/rebase, so the view can refresh its state. */
+  /** Called after a keymap edit, an import or a draft reset/rebase, so the view can refresh. */
   onChange?: () => void;
   /** Replace file writing in tests. */
   exportFile?: (filename: string, contents: string) => void;
@@ -630,11 +630,6 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
       statusNode,
     ),
   );
-
-  // Every edit marks the surrounding view dirty, whatever kind of control changed.
-  for (const type of ["input", "change"] as const) {
-    section.addEventListener(type, change);
-  }
 
   loadDraft(synced);
   const engine = createSettingsDraft({ bindings, onChange: deps.onChange });

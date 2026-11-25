@@ -1,8 +1,8 @@
 import { SITE_PATHS } from "../site";
-import { anchorHref, cleanText, parseNumber } from "./helpers";
+import { cleanText, parseNumber } from "./helpers";
 import { parseListPage } from "./list";
-import { pagerArrows, pagerCurrent, pagerPages, pagerTable } from "./pager";
-import { galleryIdentity, safeUrl } from "./url";
+import { pagerData, pagerTable } from "./pager";
+import { GALLERY_PATH, safeUrl } from "./url";
 
 export interface ToplistTab {
   label: string;
@@ -109,6 +109,25 @@ function toplistKey(url: string | null): string | null {
   return url === null ? null : (safeUrl(url)?.searchParams.get("tl") ?? null);
 }
 
+/**
+ * Resolve one anchor against the page URL once, yielding both the absolute href and its gallery id.
+ * Rows otherwise parse the same href twice, once for the link and once for the identity.
+ */
+function resolveAnchor(
+  anchor: Element | null | undefined,
+  base: string,
+): { href: string | null; gid: string | null } {
+  const raw = anchor?.getAttribute("href");
+  if (raw === null || raw === undefined) {
+    return { href: null, gid: null };
+  }
+  const url = safeUrl(raw, base);
+  if (url === null) {
+    return { href: null, gid: null };
+  }
+  return { href: url.href, gid: GALLERY_PATH.exec(url.pathname)?.[1] ?? null };
+}
+
 function buildTabs(sources: readonly TabSource[], requested: string | null): ToplistTab[] {
   const seen = new Set<string>();
   const tabs: ToplistTab[] = [];
@@ -158,16 +177,36 @@ function galleryMetrics(doc: Document, url: string): Map<string, Metric> {
   const metrics = new Map<string, Metric>();
 
   for (const row of doc.querySelectorAll("table.itg tr")) {
-    const gid = galleryIdentity(anchorHref(row.querySelector("a[href*='/g/']"), url))?.gid;
-    const cell = row.querySelector("td");
-    if (!gid || !cell) {
+    // linkedom rows have no `cells`; children keep the same order and cells in a real DOM.
+    const tableRow = row as unknown as { cells?: HTMLCollection };
+    let cell: Element | undefined;
+    for (const candidate of tableRow.cells ?? row.children) {
+      if (candidate.tagName === "TD") {
+        cell = candidate;
+        break;
+      }
+    }
+    if (!cell) {
       continue;
     }
-    const lines = [...cell.querySelectorAll("p")].map((line) => cleanText(line.textContent));
-    metrics.set(gid, {
-      rank: parseNumber(lines[0]) ?? metrics.size + 1,
-      score: lines[1] || null,
-    });
+    const gid = resolveAnchor(row.querySelector("a[href*='/g/']"), url).gid;
+    if (!gid) {
+      continue;
+    }
+    let rank: number | null = null;
+    let score: string | null = null;
+    let index = 0;
+    for (const line of cell.querySelectorAll("p")) {
+      const text = cleanText(line.textContent);
+      if (index === 0) {
+        rank = parseNumber(text);
+      } else if (index === 1) {
+        score = text || null;
+        break;
+      }
+      index++;
+    }
+    metrics.set(gid, { rank: rank ?? metrics.size + 1, score });
   }
 
   return metrics;
@@ -201,20 +240,29 @@ function userEntries(doc: Document, url: string): ToplistEntry[] {
   const entries: ToplistEntry[] = [];
 
   for (const row of doc.querySelectorAll("table.itg tr")) {
-    const ranks = [...row.querySelectorAll("td.dr")];
-    const scores = [...row.querySelectorAll("td.ds")];
-    const links = [...row.querySelectorAll("td.du a[href]")];
+    const ranks: Element[] = [];
+    const scores: Element[] = [];
+    const links: (Element | null)[] = [];
+    for (const cell of row.children) {
+      if (cell.classList.contains("dr")) {
+        ranks.push(cell);
+      } else if (cell.classList.contains("ds")) {
+        scores.push(cell);
+      } else if (cell.classList.contains("du")) {
+        links.push(cell.querySelector("a[href]"));
+      }
+    }
 
     for (const [index, cell] of ranks.entries()) {
       const rank = parseNumber(cell.textContent);
       if (rank === null) {
         continue;
       }
-      const anchor = links[index];
+      const anchor = links[index] ?? null;
       entries.push({
         rank,
         label: cleanText(anchor?.textContent) || cleanText(cell.textContent),
-        href: anchorHref(anchor ?? null, url),
+        href: resolveAnchor(anchor, url).href,
         gid: null,
         score: cleanText(scores[index]?.textContent) || null,
         uploader: null,
@@ -235,10 +283,12 @@ function parsePager(doc: Document, url: string): ToplistPager | null {
   if (!table) {
     return null;
   }
+  const data = pagerData(table, url);
   return {
-    page: pagerCurrent(table) ?? 1,
-    pages: pagerPages(table).reduce((max, page) => Math.max(max, page), 1),
-    ...pagerArrows(table, url),
+    page: data.current ?? 1,
+    pages: data.pages.reduce((max, page) => Math.max(max, page), 1),
+    prevHref: data.prevHref,
+    nextHref: data.nextHref,
   };
 }
 
@@ -246,25 +296,41 @@ function parseEntries(block: Element, url: string): ToplistEntry[] {
   const entries: ToplistEntry[] = [];
 
   for (const row of block.querySelectorAll("tr")) {
-    const rankNode = row.querySelector("td.pso");
-    const anchor = row.querySelector("div.tun a[href]") ?? row.querySelector("td a[href]");
+    // linkedom rows have no `cells`; children keep the same order and cells in a real DOM.
+    const tableRow = row as unknown as { cells?: HTMLCollection };
+    const cells = tableRow.cells ?? row.children;
+    let rankNode: Element | null = null;
+    let anyAnchor: Element | null = null;
+    let tunAnchor: Element | null = null;
+    for (const cell of cells) {
+      if (cell.tagName !== "TD") {
+        continue;
+      }
+      if (rankNode === null && cell.classList.contains("pso")) {
+        rankNode = cell;
+      }
+      anyAnchor ??= cell.querySelector("a[href]");
+      tunAnchor ??= cell.querySelector("div.tun a[href]");
+    }
+    const anchor = tunAnchor ?? anyAnchor;
     if (!rankNode && !anchor) {
       continue;
     }
 
-    const href = anchorHref(anchor, url);
+    const resolved = resolveAnchor(anchor, url);
+    const lastCell = cells[cells.length - 1];
     const label =
-      cleanText(anchor?.textContent) || cleanText(row.querySelector("td:last-child")?.textContent);
-    if (label === "" && href === null) {
+      cleanText(anchor?.textContent) ||
+      cleanText(lastCell?.tagName === "TD" ? lastCell.textContent : undefined);
+    if (label === "" && resolved.href === null) {
       continue;
     }
 
-    const gid = galleryIdentity(href)?.gid ?? null;
     entries.push({
       rank: parseNumber(rankNode?.textContent) ?? entries.length + 1,
       label,
-      href,
-      gid,
+      href: resolved.href,
+      gid: resolved.gid,
       score: null,
       uploader: null,
       uploaderHref: null,
@@ -280,8 +346,13 @@ function parseEntries(block: Element, url: string): ToplistEntry[] {
 
 function parseOverview(doc: Document, url: string): ToplistOverview {
   const sections: ToplistSection[] = [];
+  const anchors: Element[] = [];
   for (const block of doc.querySelectorAll(".tdo")) {
-    const title = cleanText(block.querySelector("p a[href]")?.textContent);
+    const blockAnchors = block.querySelectorAll("p a[href]");
+    for (const anchor of blockAnchors) {
+      anchors.push(anchor);
+    }
+    const title = cleanText(blockAnchors[0]?.textContent);
     const entries = parseEntries(block, url);
     if (title === "" && entries.length === 0) {
       continue;
@@ -290,11 +361,11 @@ function parseOverview(doc: Document, url: string): ToplistOverview {
   }
 
   const sources: TabSource[] = [];
-  for (const anchor of doc.querySelectorAll(".tdo p a[href]")) {
-    const href = anchorHref(anchor, url);
-    const key = toplistKey(href);
-    if (href !== null && key !== null) {
-      sources.push({ key, href, label: cleanText(anchor.textContent) });
+  for (const anchor of anchors) {
+    const resolved = resolveAnchor(anchor, url);
+    const key = toplistKey(resolved.href);
+    if (resolved.href !== null && key !== null) {
+      sources.push({ key, href: resolved.href, label: cleanText(anchor.textContent) });
     }
   }
 
@@ -309,14 +380,18 @@ function categoryTitle(doc: Document): string {
 
 function parseCategory(doc: Document, url: string): ToplistCategory {
   const tabs = buildTabs(catalogueSources(url), toplistKey(url));
-  const entries = galleryEntries(doc, url);
+  // Gallery rows carry gallery links; uploader-style rows only have rank/score/name cells. Picking
+  // the layout here keeps the list parser from walking a table it cannot contribute to.
+  const entries = doc.querySelector("table.itg a[href*='/g/']")
+    ? galleryEntries(doc, url)
+    : userEntries(doc, url);
 
   return {
     kind: "category",
     url,
     tabs,
     title: categoryTitle(doc),
-    entries: entries.length > 0 ? entries : userEntries(doc, url),
+    entries,
     pager: parsePager(doc, url),
   };
 }

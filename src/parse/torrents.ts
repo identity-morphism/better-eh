@@ -1,6 +1,6 @@
 import { parsePageRange } from "./gallery";
 import { anchorHref, cleanText, parseNumber } from "./helpers";
-import { pagerArrows, pagerPages, pagerTable } from "./pager";
+import { pagerData, pagerTable } from "./pager";
 import { galleryGid, safeUrl } from "./url";
 
 /** Status filter the site expresses through the `s` query parameter. */
@@ -69,14 +69,53 @@ function parseSummary(doc: Document): string | null {
   return null;
 }
 
-function rowCells(row: Element): Element[] {
-  return [...row.children].filter((child) => child.classList.contains("itd"));
-}
-
 function parseRow(row: Element, base: string): TorrentRow | null {
-  const cells = rowCells(row);
-  const [addedCell, nameCell, galleryCell, sizeCell, seedsCell, peersCell, downloadsCell] = cells;
-  const uploaderCell = cells[7];
+  let addedCell: Element | undefined;
+  let nameCell: Element | undefined;
+  let galleryCell: Element | undefined;
+  let sizeCell: Element | undefined;
+  let seedsCell: Element | undefined;
+  let peersCell: Element | undefined;
+  let downloadsCell: Element | undefined;
+  let uploaderCell: Element | undefined;
+  let index = 0;
+  for (const child of row.children) {
+    if (!child.classList.contains("itd")) {
+      continue;
+    }
+    switch (index) {
+      case 0:
+        addedCell = child;
+        break;
+      case 1:
+        nameCell = child;
+        break;
+      case 2:
+        galleryCell = child;
+        break;
+      case 3:
+        sizeCell = child;
+        break;
+      case 4:
+        seedsCell = child;
+        break;
+      case 5:
+        peersCell = child;
+        break;
+      case 6:
+        downloadsCell = child;
+        break;
+      case 7:
+        uploaderCell = child;
+        break;
+      default:
+        break;
+    }
+    index++;
+    if (index > 7) {
+      break;
+    }
+  }
   if (
     !addedCell ||
     !nameCell ||
@@ -137,6 +176,7 @@ export function parseTorrents(doc: Document, url: string): TorrentPage {
   const summary = parseSummary(doc);
 
   const uploader = parsedUrl?.searchParams.get("u")?.trim() ?? "";
+  const paging = pagerData(pager, url);
 
   return {
     url,
@@ -147,7 +187,8 @@ export function parseTorrents(doc: Document, url: string): TorrentPage {
     sort: parsedUrl?.searchParams.get("o")?.trim() || null,
     summary,
     page: pageFromUrl(parsedUrl),
-    pages: pagerPages(pager),
-    ...pagerArrows(pager, url),
+    pages: paging.pages,
+    prevHref: paging.prevHref,
+    nextHref: paging.nextHref,
   };
 }

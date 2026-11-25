@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { createAppShell, isFragmentOnlyChange } from "../../src/app-shell";
 import type { ShellEnvironment } from "../../src/app-shell";
 import type { DocumentOptions, HtmlResponse, ViewerPageOptions } from "../../src/fetch/loader";
-import { nativeUrl } from "../../src/router";
+import type { Route } from "../../src/router";
+import { nativeUrl, parseRoute } from "../../src/router";
 import { createRouteViews } from "../../src/routes";
+import type { LoadOptions } from "../../src/routes/types";
 import { updateSettings } from "../../src/settings";
 import type { PageData } from "../../src/types";
 import { loadFixture } from "../dom";
@@ -44,6 +46,8 @@ interface Harness {
   go(href: string, state: unknown): void;
   /** Requests the route loader made, in order. */
   loads: string[];
+  /** Load a route through the same adapters the shell uses, with optional cache options. */
+  load(route: Route, options?: LoadOptions): Promise<unknown>;
   setRespond(respond: Respond): void;
   setOnline(online: boolean): void;
 }
@@ -154,6 +158,9 @@ function construct(): Harness {
       view.dispatchEvent(event);
     },
     loads,
+    load(route, options) {
+      return views.routeView(route).load(route, new AbortController().signal, options);
+    },
     setRespond(next) {
       active = next;
     },
@@ -226,6 +233,8 @@ describe("boot shell", () => {
     expect(requireNode(document, "a.eh-skip").getAttribute("href")).toBe("#eh-view");
     expect(host.querySelectorAll(".card").length).toBeGreaterThan(0);
     expect(host.querySelector(".topbar-search input")).not.toBeNull();
+    const preconnect = document.querySelector('link[rel="preconnect"][href="https://ehgt.org"]');
+    expect(preconnect?.getAttribute("crossorigin")).toBe("");
     expect(document.title).toContain("E-Hentai");
     expect(document.documentElement.style.getPropertyValue("visibility")).toBe("");
 
@@ -345,8 +354,27 @@ describe("boot shell", () => {
     harness.go(LIST_URL, { eh: true, scrollY: 0 });
     await waitForNode(document, harness.view, () => host.querySelector(".card"));
     expect(harness.url()).toBe(LIST_URL);
-    expect(harness.loads.filter((url) => url === LIST_URL).length).toBe(listLoads + 1);
+    // The boot's parsed page is seeded, so going back re-renders it instead of refetching.
+    expect(harness.loads.filter((url) => url === LIST_URL).length).toBe(listLoads);
     expect(host.querySelector(".gallery-title")).toBeNull();
+  });
+
+  test("a fresh load bypasses the data parsed at boot", async () => {
+    const harness = construct();
+    harness.setRespond((requested) =>
+      Promise.resolve({
+        doc: requested === LIST_URL ? pristineList : galleryDoc,
+        url: requested,
+      }),
+    );
+    const route = parseRoute(LIST_URL, LIST_URL);
+    const listLoads = (): number => harness.loads.filter((url) => url === LIST_URL).length;
+
+    await harness.load(route);
+    expect(listLoads()).toBe(0);
+
+    await harness.load(route, { fresh: true });
+    expect(listLoads()).toBe(1);
   });
 });
 

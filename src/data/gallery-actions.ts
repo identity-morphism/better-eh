@@ -1,5 +1,6 @@
 import { LoginRequiredError } from "../fetch/errors";
-import { postForm, postJson as postJsonRequest } from "../net/http";
+import type { HtmlResponse } from "../fetch/loader";
+import { isHtmlResponse, postForm, postJson as postJsonRequest } from "../net/http";
 import { isSiteHost } from "../site";
 import type { GalleryApiConfig } from "../types";
 
@@ -28,15 +29,22 @@ export interface GalleryActionDeps {
 
 /** Comment transports; the view passes overrides and the UI resolves the site defaults. */
 export interface CommentTransports extends GalleryActionDeps {
-  /** Submit the native comment form; defaults to the real endpoint. */
-  postComment?: (url: string, text: string, signal?: AbortSignal) => Promise<void>;
-  /** Save an edited comment; defaults to the native edit endpoint. */
+  /**
+   * Submit the native comment form; defaults to the real endpoint. Resolves with the gallery page
+   * the POST answers with, or `undefined` when the body is not a usable page.
+   */
+  postComment?: (
+    url: string,
+    text: string,
+    signal?: AbortSignal,
+  ) => Promise<HtmlResponse | undefined>;
+  /** Save an edited comment; same response contract as {@link postComment}. */
   editComment?: (
     url: string,
     commentId: number,
     text: string,
     signal?: AbortSignal,
-  ) => Promise<void>;
+  ) => Promise<HtmlResponse | undefined>;
 }
 
 /** Vote and batch-add actions the per-tag menu runs. */
@@ -165,25 +173,52 @@ export async function voteComment(
   return { id, score, vote: nextVote };
 }
 
+/**
+ * Read the gallery page a comment POST answers with.
+ *
+ * `postForm` already consumed a clone for its login-wall check, so the body is still readable here
+ * and is read exactly once. A non-HTML body (rate-limit notice and the like) is not a page the
+ * comment section can render, so it resolves `undefined` and the caller refetches.
+ */
+async function readCommentPage(
+  response: Response,
+  fallbackUrl: string,
+): Promise<HtmlResponse | undefined> {
+  const text = await response.text();
+  if (!isHtmlResponse(response, text)) {
+    return undefined;
+  }
+  return {
+    doc: new DOMParser().parseFromString(text, "text/html"),
+    url: response.url === "" ? fallbackUrl : response.url,
+  };
+}
+
 /** Replace an existing comment's body through the same native form endpoint. */
 export async function editComment(
   url: string,
   commentId: number,
   text: string,
   signal?: AbortSignal,
-): Promise<void> {
-  await postForm(
+): Promise<HtmlResponse | undefined> {
+  const response = await postForm(
     url,
     new URLSearchParams({ commenttext_edit: text, edit_comment: String(commentId) }),
     { tag: "gallery-comment", failure: "Comment edit failed", signal },
   );
+  return readCommentPage(response, url);
 }
 
 /** Post a gallery comment through the native form endpoint. */
-export async function postComment(url: string, text: string, signal?: AbortSignal): Promise<void> {
-  await postForm(url, new URLSearchParams({ commenttext_new: text }), {
+export async function postComment(
+  url: string,
+  text: string,
+  signal?: AbortSignal,
+): Promise<HtmlResponse | undefined> {
+  const response = await postForm(url, new URLSearchParams({ commenttext_new: text }), {
     tag: "gallery-comment",
     failure: "Comment post failed",
     signal,
   });
+  return readCommentPage(response, url);
 }

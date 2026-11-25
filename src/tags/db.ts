@@ -23,7 +23,7 @@ import { cleanTagKey, fold, TAG_NAMESPACES } from "./model";
 import type { CachedSnapshot } from "./snapshot";
 import { createSnapshot } from "./snapshot";
 import type { TagCounts } from "./tag-counts-codec";
-import { tagKeyId } from "./tag-counts-codec";
+import { tagKeyIdFromFolded } from "./tag-counts-codec";
 import { vocabularyGroups } from "./vocabulary";
 
 const CACHE_KEY = "eh:tag-index:v2";
@@ -125,14 +125,31 @@ export function tagId(ns: string, key: string): string {
  * Write the snapshot's counts onto the entries, in place, and return the snapshot's maximum.
  *
  * This is the one popularity attachment: a freshly built index and a refreshed snapshot use the
- * same join, and an index in use keeps its maps while only its counts change.
+ * same join, and an index in use keeps its maps while only its counts change. Entries start at
+ * zero, so an absent or empty snapshot costs no work at all. `entry.folded` is already
+ * `normaliseTagKey(entry.key)`, so the join hashes it without normalising it again.
  */
 function attachCounts(entries: readonly TagEntry[], counts: TagCounts | undefined): number {
-  const max = counts?.max ?? 0;
+  if (!counts || counts.max <= 0) {
+    return 0;
+  }
+  const { counts: byId, max } = counts;
   for (const entry of entries) {
-    entry.count = max > 0 ? (counts?.counts.get(tagKeyId(entry.folded)) ?? 0) : 0;
+    entry.count = byId.get(tagKeyIdFromFolded(entry.folded)) ?? 0;
   }
   return max;
+}
+
+/** True when a namespace's entries already ascend by key, the order every source produces. */
+function keysAreSorted(entries: readonly TagEntry[]): boolean {
+  for (let index = 1; index < entries.length; index++) {
+    const previous = entries[index - 1];
+    const current = entries[index];
+    if (previous !== undefined && current !== undefined && previous.key > current.key) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function buildIndex(
@@ -142,7 +159,6 @@ function buildIndex(
 ): TagIndex {
   const entries: TagEntry[] = [];
   const byNamespace = new Map<string, TagEntry[]>();
-  const lookup = new Map<string, TagEntry>();
 
   for (const namespace of TAG_NAMESPACES) {
     const keys = groups.get(namespace.id);
@@ -155,14 +171,34 @@ function buildIndex(
       const entry: TagEntry = { ns: namespace, key, folded, count: 0 };
       entries.push(entry);
       scoped.push(entry);
-      lookup.set(tagId(namespace.id, key), entry);
     }
-    scoped.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    // Every producer (the asset codec, the stored payload, the upstream vocabulary) hands keys
+    // over sorted; sorting 45k keys again costs about as much as building the rest of the index.
+    if (!keysAreSorted(scoped)) {
+      scoped.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    }
     byNamespace.set(namespace.id, scoped);
   }
 
   const maxCount = attachCounts(entries, counts);
-  return { entries, updated, lookup, byNamespace, maxCount };
+  // Building this 45k-entry map costs more than the rest of the index, and only the user's own
+  // recents and completions ever read it. Pay for it on that first read, not on every page load.
+  let lookup: Map<string, TagEntry> | null = null;
+  return {
+    entries,
+    updated,
+    byNamespace,
+    maxCount,
+    get lookup(): ReadonlyMap<string, TagEntry> {
+      if (lookup === null) {
+        lookup = new Map<string, TagEntry>();
+        for (const entry of entries) {
+          lookup.set(tagId(entry.ns.id, entry.key), entry);
+        }
+      }
+      return lookup;
+    },
+  };
 }
 
 /** Build an index from already-cleaned namespace groups. */
@@ -201,13 +237,17 @@ function decodeIndex(
   const groups = new Map<string, readonly string[]>();
   for (const [id, keys] of Object.entries(payload)) {
     if (Array.isArray(keys)) {
-      groups.set(
-        id,
-        keys
-          .filter((key): key is string => typeof key === "string")
-          .map(cleanTagKey)
-          .filter((key) => key !== ""),
-      );
+      const cleaned: string[] = [];
+      for (const key of keys) {
+        if (typeof key !== "string") {
+          continue;
+        }
+        const value = cleanTagKey(key);
+        if (value !== "") {
+          cleaned.push(value);
+        }
+      }
+      groups.set(id, cleaned);
     }
   }
 
@@ -221,7 +261,18 @@ function withTagCounts(current: TagIndex, counts: TagCounts | undefined): TagInd
     return current;
   }
   const maxCount = attachCounts(current.entries, counts);
-  return { ...current, maxCount };
+  // Rebuild field by field: spreading would invoke the enumerable lazy `lookup` getter and
+  // materialise the whole map on every popularity refresh. Delegating to the previous index's
+  // getter keeps one shared lazy cell, so the map is built at most once and only when read.
+  return {
+    entries: current.entries,
+    updated: current.updated,
+    byNamespace: current.byNamespace,
+    maxCount,
+    get lookup(): ReadonlyMap<string, TagEntry> {
+      return current.lookup;
+    },
+  };
 }
 
 function readIndexCache(): CachedSnapshot<BoundIndex> | null {

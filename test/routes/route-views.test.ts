@@ -185,6 +185,37 @@ describe("home route", () => {
   });
 });
 
+describe("route data cache", () => {
+  test("serves the seeded boot page to a history move until a fresh load", async () => {
+    const { views, docCalls } = harness();
+    const view = views.routeView(homeRoute);
+    const seeded = view.parse(homeDoc, homeRoute);
+    view.seed?.(homeRoute, seeded);
+
+    const signal = new AbortController().signal;
+    expect(await view.load(homeRoute, signal)).toBe(seeded);
+    expect(docCalls).toHaveLength(0);
+
+    const fresh = await view.load(homeRoute, signal, { fresh: true });
+    expect(fresh).not.toBe(seeded);
+    expect(docCalls).toHaveLength(1);
+  });
+
+  test("keeps always-fresh pages out of the cache", async () => {
+    const route = {
+      kind: "settings",
+      url: "https://e-hentai.org/uconfig.php",
+    } satisfies RouteOf<"settings">;
+    const { views, docCalls } = harness();
+    const signal = new AbortController().signal;
+
+    await views.routeView(route).load(route, signal);
+    await views.routeView(route).load(route, signal);
+
+    expect(docCalls).toHaveLength(2);
+  });
+});
+
 describe("settings route", () => {
   test("loads past the document cache, because a save changes this page", async () => {
     const route = {

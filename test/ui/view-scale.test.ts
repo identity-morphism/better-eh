@@ -73,7 +73,7 @@ function flushFrame(): void {
 }
 
 describe("bindViewScale", () => {
-  test("applies on mount and again when settings change", () => {
+  test("applies on mount and coalesces settings changes into one frame", () => {
     const gaps: number[] = [];
     const controller = new AbortController();
     bindViewScale({ signal: controller.signal, apply: (settings) => gaps.push(settings.gap) });
@@ -81,7 +81,13 @@ describe("bindViewScale", () => {
     expect(gaps).toEqual([DEFAULT_SETTINGS.gap]);
 
     updateSetting("gap", 40);
-    expect(gaps).toEqual([DEFAULT_SETTINGS.gap, 40]);
+    expect(gaps).toEqual([DEFAULT_SETTINGS.gap]);
+    expect(frames.size).toBe(1);
+
+    updateSetting("gap", 24);
+    expect(frames.size).toBe(1);
+    flushFrame();
+    expect(gaps).toEqual([DEFAULT_SETTINGS.gap, 24]);
 
     controller.abort();
   });
@@ -101,6 +107,20 @@ describe("bindViewScale", () => {
     expect(gaps).toEqual([DEFAULT_SETTINGS.gap]);
   });
 
+  test("cancels a pending settings frame when aborted", () => {
+    const gaps: number[] = [];
+    const controller = new AbortController();
+    bindViewScale({ signal: controller.signal, apply: (settings) => gaps.push(settings.gap) });
+
+    updateSetting("gap", 40);
+    expect(frames.size).toBe(1);
+
+    controller.abort();
+    expect(frames.size).toBe(0);
+    flushFrame();
+    expect(gaps).toEqual([DEFAULT_SETTINGS.gap]);
+  });
+
   test("coalesces a resize burst into one animation frame", () => {
     const gaps: number[] = [];
     const controller = new AbortController();
@@ -112,6 +132,20 @@ describe("bindViewScale", () => {
 
     flushFrame();
     expect(gaps).toEqual([DEFAULT_SETTINGS.gap, DEFAULT_SETTINGS.gap]);
+    controller.abort();
+  });
+
+  test("runs one apply for settings and resize in the same frame", () => {
+    const gaps: number[] = [];
+    const controller = new AbortController();
+    bindViewScale({ signal: controller.signal, apply: (settings) => gaps.push(settings.gap) });
+
+    updateSetting("gap", 40);
+    dispatchResize();
+    expect(frames.size).toBe(1);
+
+    flushFrame();
+    expect(gaps).toEqual([DEFAULT_SETTINGS.gap, 40]);
     controller.abort();
   });
 });

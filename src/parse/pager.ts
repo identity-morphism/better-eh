@@ -8,56 +8,47 @@
 
 import { anchorHref, cleanText, parseNumber } from "./helpers";
 
+/** Everything one pager table says, read in a single walk over its cells and anchors. */
+export interface PagerData {
+  /** Page numbers shown, in display order. */
+  pages: number[];
+  /** The page the pager marks as current, or null when it marks none. */
+  current: number | null;
+  prevHref: string | null;
+  nextHref: string | null;
+}
+
 /** The pager table on a page, in document order. */
 export function pagerTable(doc: Document): Element | null {
   return doc.querySelector("table.ptt, table.ptb");
 }
 
-/** Page numbers shown in the pager, in display order. */
-export function pagerPages(table: Element | null): number[] {
+/** Read page numbers, the current page and both arrows in one pass over the pager table. */
+export function pagerData(table: Element | null, base: string): PagerData {
+  const data: PagerData = { pages: [], current: null, prevHref: null, nextHref: null };
   if (!table) {
-    return [];
+    return data;
   }
-  const pages: number[] = [];
-  for (const cell of table.querySelectorAll("td")) {
-    const text = cleanText(cell.textContent);
-    if (/^\d+$/.test(text)) {
-      pages.push(Number.parseInt(text, 10));
-    }
-  }
-  return pages;
-}
 
-/** The page the pager marks as current, or null when it marks none. */
-export function pagerCurrent(table: Element | null): number | null {
-  if (!table) {
-    return null;
-  }
-  for (const cell of table.querySelectorAll("td.ptds")) {
-    const page = parseNumber(cleanText(cell.textContent));
-    if (page !== null) {
-      return page;
+  for (const node of table.querySelectorAll("td, a[href]")) {
+    if (node.tagName === "TD") {
+      const text = cleanText(node.textContent);
+      if (/^\d+$/.test(text)) {
+        data.pages.push(Number.parseInt(text, 10));
+      }
+      if (data.current === null && node.classList.contains("ptds")) {
+        data.current = parseNumber(text);
+      }
+      continue;
     }
-  }
-  return null;
-}
 
-/** The previous and next page links, resolved against `base`. */
-export function pagerArrows(
-  table: Element | null,
-  base: string,
-): { prevHref: string | null; nextHref: string | null } {
-  const arrows = { prevHref: null as string | null, nextHref: null as string | null };
-  if (!table) {
-    return arrows;
-  }
-  for (const anchor of table.querySelectorAll("a[href]")) {
-    const label = cleanText(anchor.textContent);
-    if (label === "<" && arrows.prevHref === null) {
-      arrows.prevHref = anchorHref(anchor, base);
-    } else if (label === ">" && arrows.nextHref === null) {
-      arrows.nextHref = anchorHref(anchor, base);
+    const label = cleanText(node.textContent);
+    if (label === "<" && data.prevHref === null) {
+      data.prevHref = anchorHref(node, base);
+    } else if (label === ">" && data.nextHref === null) {
+      data.nextHref = anchorHref(node, base);
     }
   }
-  return arrows;
+
+  return data;
 }

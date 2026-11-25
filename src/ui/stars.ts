@@ -13,13 +13,36 @@ export function halfClass(half: number): string {
   return `rating-half ${half % 2 === 1 ? "rating-half-left" : "rating-half-right"}`;
 }
 
-/** Filled and outline glyph pair shared by the rating control and read-only star rows. */
-export function starGlyphs(): [SVGSVGElement, SVGSVGElement] {
+/**
+ * Prototype glyphs per document, keyed by document so tests that install a fresh DOM never clone
+ * nodes owned by an earlier one.
+ */
+const GLYPH_PROTOTYPES = new WeakMap<Document, readonly [SVGSVGElement, SVGSVGElement]>();
+
+function glyphPrototypes(): readonly [SVGSVGElement, SVGSVGElement] {
+  const doc = document;
+  const cached = GLYPH_PROTOTYPES.get(doc);
+  if (cached !== undefined) {
+    return cached;
+  }
   const outline = icon("star", false);
   outline.classList.add("rating-half-off");
   const filled = icon("star", true);
   filled.classList.add("rating-half-on");
-  return [outline, filled];
+  const pair = [outline, filled] as const;
+  GLYPH_PROTOTYPES.set(doc, pair);
+  return pair;
+}
+
+/**
+ * Filled and outline glyph pair shared by the rating control and read-only star rows.
+ *
+ * Every caller gets its own elements; they are cheap clones of one prototype per document instead
+ * of a fresh SVG rebuilt from attribute strings.
+ */
+export function starGlyphs(): [SVGSVGElement, SVGSVGElement] {
+  const [outline, filled] = glyphPrototypes();
+  return [outline.cloneNode(true) as SVGSVGElement, filled.cloneNode(true) as SVGSVGElement];
 }
 
 /**

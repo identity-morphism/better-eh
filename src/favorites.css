@@ -13,7 +13,14 @@
 }
 
 .favorites-tab {
-  @apply flex h-8 min-w-[132px] items-center justify-between gap-3 rounded-control border border-line bg-panel px-3 text-control text-fg no-underline transition-colors;
+  @apply flex min-w-[132px] items-center justify-between gap-3 rounded-control bg-panel text-control text-fg no-underline;
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--color-line);
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .favorites-tab:hover {
@@ -26,7 +33,8 @@
 }
 
 .favorites-tab-name {
-  @apply truncate font-semibold;
+  @apply truncate;
+  font-weight: 600;
 }
 
 .favorites-tab-count {
@@ -52,7 +60,10 @@
 }
 
 .favorites-select {
-  @apply absolute top-2 left-2 flex cursor-pointer items-center rounded-row p-1.5 backdrop-blur-sm;
+  @apply absolute flex cursor-pointer items-center rounded-row;
+  top: 8px;
+  left: 8px;
+  padding: 6px;
   background: var(--scrim-control);
 }
 
@@ -77,15 +88,20 @@
 }
 
 .favorites-note {
-  @apply mt-1 line-clamp-3 border-l-2 border-line-strong pl-2 text-meta text-muted;
+  @apply mt-1 line-clamp-3 pl-2 text-meta text-muted;
+  border-left: 2px solid var(--color-line-strong);
 }
 
 .favorites-bulk {
-  @apply fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[60] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center gap-2 rounded-card border border-line-strong bg-panel px-3 py-2 shadow-float;
+  @apply fixed left-1/2 z-[60] flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 rounded-card bg-panel px-3 py-2 shadow-float;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  border: 1px solid var(--color-line-strong);
+  transform: translateX(-50%);
 }
 
 .favorites-bulk-count {
-  @apply px-1 text-control font-semibold text-fg;
+  @apply px-1 text-control text-fg;
+  font-weight: 600;
 }
 
 .favorites-bulk-status {

@@ -287,6 +287,29 @@ describe("renderSettings", () => {
     expect(option(co, 1).selected).toBe(false);
   });
 
+  test("reads a select's live selection even when the selected attribute is stale", async () => {
+    const calls: URLSearchParams[] = [];
+    renderSettings(host, data, viewContext(), {
+      save: (body) => {
+        calls.push(body);
+        return Promise.resolve();
+      },
+    });
+
+    const co = host.querySelector<HTMLSelectElement>('select[name="co"]');
+    if (!co) {
+      throw new Error("missing select");
+    }
+    option(co, 1).selected = true;
+    touch();
+
+    button(".settings-apply").click();
+    await flushMicrotasks(8);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.get("co")).toBe("EU");
+  });
+
   test("Apply saves userscript settings without posting the site form", async () => {
     const calls: URLSearchParams[] = [];
     const save: Save = (body) => {

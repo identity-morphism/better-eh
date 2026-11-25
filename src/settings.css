@@ -9,14 +9,17 @@
 /* Sections */
 
 .settings-section {
-  @apply border border-line bg-surface px-4 py-3;
+  @apply bg-surface;
+  padding: 12px 16px;
+  border: 1px solid var(--color-line);
   /* The sticky topbar and the sticky jump row own the top of the viewport. */
   scroll-margin-top: var(--sticky-reading-line, 96px);
   border-radius: var(--radius-card);
 }
 
 .settings-title {
-  @apply m-0 border-b border-line pb-2 text-section font-bold text-fg;
+  @apply m-0 pb-2 text-section font-bold text-fg;
+  border-bottom: 1px solid var(--color-line);
 }
 
 /* ---------------------------------------------------------- groups and rows
@@ -32,7 +35,8 @@
 
 /* One heading recipe for a fieldset legend and a panel subheading. */
 .settings-subhead {
-  @apply m-0 mb-2 p-0 text-control font-semibold text-fg;
+  @apply m-0 mb-2 p-0 text-control text-fg;
+  font-weight: 600;
 }
 
 .settings-rows {
@@ -45,7 +49,14 @@
 }
 
 .settings-row {
-  @apply flex min-h-7 cursor-pointer items-start gap-2 rounded-row px-2 py-1 text-control text-muted transition-colors;
+  @apply flex cursor-pointer items-start rounded-row text-control text-muted;
+  min-height: 28px;
+  gap: 8px;
+  padding: 4px 8px;
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .settings-row:hover {
@@ -104,8 +115,9 @@
 /* Sticky action bar */
 
 .settings-actions {
-  @apply sticky bottom-0 z-30 mt-2 flex flex-wrap items-center gap-2 border-t border-line bg-canvas px-1 py-3;
-  backdrop-filter: blur(8px);
+  @apply sticky bottom-0 z-30 mt-2 flex flex-wrap items-center gap-2 bg-canvas;
+  padding: 12px 4px;
+  border-top: 1px solid var(--color-line);
 }
 
 .settings-action-buttons {
@@ -113,17 +125,20 @@
 }
 
 .settings-error {
-  @apply m-0 flex-1 text-control font-semibold text-danger-text;
+  @apply m-0 flex-1 text-control text-danger-text;
+  font-weight: 600;
 }
 
 .settings-dirty {
-  @apply text-meta font-semibold text-accent-text;
+  @apply text-meta text-accent-text;
+  font-weight: 600;
 }
 
 /* Userscript settings panel ("Better EH") */
 
 .settings-panel-group {
-  @apply mt-4 border-t border-line pt-3;
+  @apply mt-4 pt-3;
+  border-top: 1px solid var(--color-line);
 }
 
 .settings-number-grid {
@@ -163,7 +178,7 @@
 }
 
 .settings-key-name {
-  @apply font-semibold;
+  font-weight: 600;
   font-family: ui-monospace, monospace;
 }
 

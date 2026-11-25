@@ -24,7 +24,7 @@ import { advancePage } from "./ui/page-advance";
 import { restoreScrollWhenReady } from "./ui/scroll-restore";
 import { nativePageAction, statePanel } from "./ui/state-panel";
 import { trackStickyChrome } from "./ui/sticky";
-import { injectStyles } from "./ui/styles";
+import { injectStyles, isAppStyle } from "./ui/styles";
 import { siteNav } from "./ui/topbar";
 import { createViewLifecycle } from "./view-lifecycle";
 import { resetViewMode } from "./view-mode";
@@ -111,6 +111,7 @@ export function createAppShell(env: ShellEnvironment): AppShell {
   let hiding = true;
   let stopScrollRestore: (() => void) | null = null;
   let stopNativeErrorGuard: (() => void) | null = null;
+  let stopSiteAds: (() => void) | null = null;
 
   function historyState(): Record<string, unknown> {
     const state = env.history.state;
@@ -125,19 +126,37 @@ export function createAppShell(env: ShellEnvironment): AppShell {
    */
   function restoreScroll(y: number): () => void {
     stopScrollRestore?.();
-    const restore = restoreScrollWhenReady(y, {
+    const controller = new AbortController();
+    let stopped = false;
+    let stopRestore = (): void => undefined;
+
+    const stop = (): void => {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      stopRestore();
+      controller.abort();
+      if (stopScrollRestore === stop) {
+        stopScrollRestore = null;
+      }
+    };
+
+    stopRestore = restoreScrollWhenReady(y, {
       advance: advancePage,
       scrollTo: (target) => viewWindow.scrollTo(0, target),
       scrollY: () => viewWindow.scrollY,
       scrollHeight: () => doc.documentElement.scrollHeight,
       frame: (callback) => viewWindow.requestAnimationFrame(callback),
       cancelFrame: (handle) => viewWindow.cancelAnimationFrame(handle),
+      // Drop the input listeners as soon as the restore is done, not on the next mount.
+      onDone: stop,
     });
-    const controller = new AbortController();
-    const stop = (): void => {
-      controller.abort();
-      restore();
-    };
+    // A restore that finished without waiting for a frame has nothing to listen for.
+    const isStopped = (): boolean => stopped;
+    if (isStopped()) {
+      return stop;
+    }
     const options: AddEventListenerOptions = {
       once: true,
       passive: true,
@@ -265,9 +284,12 @@ export function createAppShell(env: ShellEnvironment): AppShell {
       return;
     }
 
-    // We own the document now; EH's stylesheet would only fight our layout.
+    // We own the document now; EH's stylesheet would only fight our layout. The app's own sheet was
+    // injected before the route parse, so the sweep must spare it.
     for (const node of doc.head.querySelectorAll('link[rel="stylesheet"], style')) {
-      node.remove();
+      if (!isAppStyle(node)) {
+        node.remove();
+      }
     }
 
     // The legacy site has no viewport meta, so mobile browsers would lay out at 980px and ignore
@@ -278,10 +300,21 @@ export function createAppShell(env: ShellEnvironment): AppShell {
       );
     }
 
+    // Thumbnails come from a separate image host; opening the connection alongside the shell saves
+    // a handshake before the first page's images arrive.
+    if (!doc.querySelector('link[rel="preconnect"][href="https://ehgt.org"]')) {
+      doc.head.append(el("link", { rel: "preconnect", href: "https://ehgt.org", crossorigin: "" }));
+    }
+
     // The parsed data is in hand and the native DOM is about to go: retire the site's handlers and
     // its pending images first, so a late load/error cannot act on nodes that no longer exist.
     stopNativeErrorGuard?.();
     detachNativePage();
+
+    // The site's own document and scripts are gone with the body below; keeping the document-wide
+    // observer would inspect every change the app makes for the rest of its life.
+    stopSiteAds?.();
+    stopSiteAds = null;
 
     doc.body.replaceChildren();
     doc.body.className = "eh-body";
@@ -306,7 +339,6 @@ export function createAppShell(env: ShellEnvironment): AppShell {
     startLinkInterception(navigate, doc);
     viewWindow.addEventListener("popstate", onPopState);
     registerMenuCommands();
-    injectStyles();
   }
 
   function setLoading(active: boolean): void {
@@ -540,8 +572,24 @@ export function createAppShell(env: ShellEnvironment): AppShell {
     void transition(prepared.route, state?.scrollY ?? 0);
   }
 
+  /** Run a warm-up once the browser is idle; engines without the API get a task instead. */
+  function whenIdle(callback: () => void): void {
+    // Safari (and test doubles) can lack the API even though the DOM types require it.
+    const idle = Reflect.get(viewWindow, "requestIdleCallback") as
+      ((run: () => void) => number) | undefined;
+    if (idle !== undefined) {
+      idle.call(viewWindow, callback);
+      return;
+    }
+    env.setTimeout(callback, 0);
+  }
+
   function startOwned(initialRoute: Route): void {
     const view = routeView(initialRoute);
+
+    // Start the app's sheet parsing before the parse and render below; `ensureShell` spares it when
+    // it removes the site's own sheets.
+    injectStyles();
 
     if (isLoginPage(doc)) {
       throw new LoginRequiredError();
@@ -556,6 +604,7 @@ export function createAppShell(env: ShellEnvironment): AppShell {
     }
 
     const initial = view.parse(doc, initialRoute);
+    view.seed?.(initialRoute, initial);
     ensureShell();
     env.history.replaceState({ eh: true, scrollY: 0 }, "", env.location.href);
     try {
@@ -566,8 +615,11 @@ export function createAppShell(env: ShellEnvironment): AppShell {
     }
     revealDocument();
     // Warm the full vocabulary so the first focus on the search field is not limited to the core.
+    // The download is large, so it waits until the boot render has the browser's idle time.
     if (getSettings().tagSuggestions) {
-      void loadTagIndex().catch((error: unknown) => log("tag index prefetch failed", error));
+      whenIdle(() => {
+        void loadTagIndex().catch((error: unknown) => log("tag index prefetch failed", error));
+      });
     }
     log("ready", getSettings().fitHeight ? "fit-height" : "natural-width");
   }
@@ -580,7 +632,7 @@ export function createAppShell(env: ShellEnvironment): AppShell {
       }
 
       // Native routes keep the site's own page, ads included; owned routes do not need its loader.
-      blockSiteAds();
+      stopSiteAds = blockSiteAds();
       hideDocument();
       guardAgainstNativeImageErrors();
 

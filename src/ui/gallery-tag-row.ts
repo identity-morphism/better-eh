@@ -26,8 +26,6 @@ export interface TagRow {
   readonly element: HTMLElement;
   /** Recompute every link and applied state against the current draft query. */
   refresh: () => void;
-  /** Rebuild the chips from a freshly parsed page, returning focus to the same chip or the composer. */
-  update: (data: GalleryData) => void;
 }
 
 /** The tag plus the site's editorial note, for screen readers and the full-string tooltip. */
@@ -55,14 +53,9 @@ function tagHint(match: SearchTerm | undefined, actionsHint: string): string {
   return `${termStateLabel(match)} · ${click} · ${alt} · Middle-click for results${actionsHint}`;
 }
 
-interface FocusRestore {
-  tag: string | null;
-  composer: boolean;
-}
-
 /**
  * The gallery's tag section: chips, their hover hints and context menus, the touch trigger and the
- * add-tags composer. It owns chip state and focus return, so the gallery only composes it.
+ * add-tags composer. It owns the chip state, so the gallery only composes it.
  */
 export function createTagRow(
   data: GalleryData,
@@ -75,30 +68,58 @@ export function createTagRow(
 
   const section = el("section", { class: "tag-section", "aria-label": "Tags" });
   const title = el("h2", { class: "tag-title", text: "Tags" });
-  let source = data;
-  let links: Array<{
+  const links: Array<{
     chip: HTMLAnchorElement;
     token: string;
-    target: SearchTerm | null;
+    /** Canonical term identity, parsed once; null when the link has no search token. */
+    targetIdentity: string | null;
     tag: TagRef;
+    /** Last rendered state; `undefined` forces the first refresh to write every attribute. */
+    applied: TagSign | null | undefined;
   }> = [];
 
   const actionsHint = actions.config === null ? "" : " · Right-click for tag actions";
 
   const refresh = (): void => {
-    const terms = parseSearchTerms(actions.text());
-    for (const { chip, token, target, tag } of links) {
-      chip.setAttribute("href", actions.href(token, ""));
-      if (target === null) {
+    // One parse of the draft feeds every chip, and one href per token serves the whole pass.
+    const byIdentity = new Map<string, SearchTerm>();
+    for (const term of parseSearchTerms(actions.text())) {
+      const identity = termIdentity(term);
+      if (!byIdentity.has(identity)) {
+        byIdentity.set(identity, term);
+      }
+    }
+    const hrefs = new Map<string, string>();
+    const hrefFor = (token: string, sign: TagSign): string => {
+      const key = `${sign}\u0000${token}`;
+      let href = hrefs.get(key);
+      if (href === undefined) {
+        href = actions.href(token, sign);
+        hrefs.set(key, href);
+      }
+      return href;
+    };
+
+    for (const link of links) {
+      const href = hrefFor(link.token, "");
+      if (link.chip.getAttribute("href") !== href) {
+        link.chip.setAttribute("href", href);
+      }
+      if (link.targetIdentity === null) {
         continue;
       }
-      const match = terms.find((term) => termIdentity(term) === termIdentity(target));
-      chip.classList.toggle("is-added", match !== undefined);
-      chip.classList.toggle("is-excluded", match?.sign === "-");
-      chip.classList.toggle("is-or", match?.sign === "~");
-      chip.title = tagTitle(tag, tagHint(match, actionsHint));
-      const label = tagLabel(tag);
-      chip.setAttribute(
+      const match = byIdentity.get(link.targetIdentity);
+      const applied = match?.sign ?? null;
+      if (link.applied === applied) {
+        continue;
+      }
+      link.applied = applied;
+      link.chip.classList.toggle("is-added", match !== undefined);
+      link.chip.classList.toggle("is-excluded", match?.sign === "-");
+      link.chip.classList.toggle("is-or", match?.sign === "~");
+      link.chip.title = tagTitle(link.tag, tagHint(match, actionsHint));
+      const label = tagLabel(link.tag);
+      link.chip.setAttribute(
         "aria-label",
         match === undefined ? label : `${label} — ${termState(match)}`,
       );
@@ -155,7 +176,7 @@ export function createTagRow(
     const nsClass = group.ns.replace(/[^a-z0-9_-]/gi, "");
 
     for (const tag of group.tags) {
-      const token = tagTokenFromHref(tag.href, source.url);
+      const token = tagTokenFromHref(tag.href, data.url);
       const target = token === null ? null : (parseSearchTerms(token)[0] ?? null);
       const chip = el(
         "a",
@@ -178,7 +199,13 @@ export function createTagRow(
       }
 
       if (token) {
-        links.push({ chip, token, target, tag });
+        links.push({
+          chip,
+          token,
+          targetIdentity: target === null ? null : termIdentity(target),
+          tag,
+          applied: undefined,
+        });
         const sign = (event: MouseEvent): TagSign => (event.altKey ? "-" : "");
         // Modified clicks open a new tab; refresh the href first so it carries draft tags.
         chip.addEventListener(
@@ -252,60 +279,15 @@ export function createTagRow(
     );
   };
 
-  /** Capture where focus is before a rebuild; the menu anchor wins over the active descendant. */
-  const captureFocus = (): FocusRestore => {
-    const openChip = section.querySelector<HTMLElement>('.tag-chip[aria-expanded="true"]');
-    if (openChip?.dataset.tag !== undefined) {
-      return { tag: openChip.dataset.tag, composer: false };
-    }
+  section.append(title);
+  for (const group of data.tags) {
+    section.append(buildGroup(group));
+  }
+  const addRow = composer();
+  if (addRow !== null) {
+    section.append(addRow);
+  }
+  refresh();
 
-    const active = section.ownerDocument.activeElement;
-    if (active === null || !section.contains(active)) {
-      return { tag: null, composer: false };
-    }
-    const chip = active.closest<HTMLElement>(".tag-chip");
-    if (chip?.dataset.tag !== undefined) {
-      return { tag: chip.dataset.tag, composer: false };
-    }
-    return { tag: null, composer: active.closest(".tag-add") !== null };
-  };
-
-  const restoreFocus = (focus: FocusRestore): void => {
-    const chip =
-      focus.tag === null
-        ? undefined
-        : [...section.querySelectorAll<HTMLElement>(".tag-chip")].find(
-            (node) => node.dataset.tag === focus.tag,
-          );
-    if (chip !== undefined) {
-      chip.focus();
-    } else if (focus.tag !== null || focus.composer) {
-      section.querySelector<HTMLElement>(".tag-add-input")?.focus();
-    }
-  };
-
-  const rebuild = (next: GalleryData): void => {
-    source = next;
-    section.replaceChildren(title);
-    links = [];
-    for (const group of next.tags) {
-      section.append(buildGroup(group));
-    }
-    const addRow = composer();
-    if (addRow !== null) {
-      section.append(addRow);
-    }
-    refresh();
-  };
-
-  rebuild(data);
-  return {
-    element: section,
-    refresh,
-    update(next) {
-      const focus = captureFocus();
-      rebuild(next);
-      restoreFocus(focus);
-    },
-  };
+  return { element: section, refresh };
 }

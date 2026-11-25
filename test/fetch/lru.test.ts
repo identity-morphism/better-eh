@@ -44,6 +44,27 @@ describe("createLru", () => {
     expect(evicted).toEqual([["a", 1]]);
   });
 
+  test("delete removes an entry without reporting an eviction", () => {
+    const evicted: string[] = [];
+    const lru = createLru<string, number>(3, (_value, key) => evicted.push(key));
+    lru.set("a", 1);
+    lru.set("b", 2);
+
+    expect(lru.delete("a")).toBe(true);
+    expect(lru.delete("missing")).toBe(false);
+
+    expect(lru.get("a")).toBeUndefined();
+    expect(lru.get("b")).toBe(2);
+    expect(evicted).toEqual([]);
+
+    // The freed slot is available: three live entries fit without dropping one.
+    lru.set("c", 3);
+    lru.set("d", 4);
+    expect(evicted).toEqual([]);
+    lru.set("e", 5);
+    expect(evicted).toEqual(["b"]);
+  });
+
   test("setLimit shrinks, grows and applies to later inserts", () => {
     const evicted: Array<[string, number]> = [];
     const lru = createLru<string, number>(4, (value, key) => evicted.push([key, value]));

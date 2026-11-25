@@ -16,11 +16,13 @@ import { anchorHref, categoryFromNode, cleanText, parseNumber, parseSignedNumber
 import { parseTitle } from "./title";
 import { galleryIdentity, safeUrl } from "./url";
 
+const BACKGROUND_URL = /url\(["']?(.*?)["']?\)/;
+
 function backgroundUrl(node: Element | null): string | null {
   if (!node || !("style" in node)) {
     return null;
   }
-  const match = /url\(["']?(.*?)["']?\)/.exec((node as HTMLElement).style.backgroundImage);
+  const match = BACKGROUND_URL.exec((node as HTMLElement).style.backgroundImage);
   return match?.[1] ?? null;
 }
 
@@ -34,23 +36,68 @@ function inlineSize(node: Element | null): { width: number; height: number } | n
   return parsed.width > 0 && parsed.height > 0 ? parsed : null;
 }
 
-/** Read a string or numeric literal assigned in an inline script. */
-function scriptValue(doc: Document, name: string): string | null {
-  const pattern = new RegExp(
-    `(?:^|[;\\s])${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(-?\\d+(?:\\.\\d+)?))`,
-    "m",
-  );
+const SCRIPT_VALUE_NAMES = [
+  "api_url",
+  "apiuid",
+  "apikey",
+  "gid",
+  "token",
+  "base_url",
+  "display_rating",
+] as const;
+
+/**
+ * Every inline assignment the gallery parser reads, in one alternation.
+ *
+ * Scoping the names into a single pattern keeps document order: the first match for a name wins,
+ * just as the previous per-name scan did.
+ */
+const SCRIPT_ASSIGNMENT = new RegExp(
+  `(?:^|[;\\s])(${SCRIPT_VALUE_NAMES.join("|")})` +
+    `\\s*=\\s*(?:"([^"]*)"|'([^']*)'|(-?\\d+(?:\\.\\d+)?))`,
+  "gm",
+);
+
+const scriptValueCache = new WeakMap<Document, Map<string, string | null>>();
+
+/** Scan the document's inline scripts once and cache every known assignment. */
+function scriptValues(doc: Document): Map<string, string | null> {
+  const cached = scriptValueCache.get(doc);
+  if (cached) {
+    return cached;
+  }
+
+  const values = new Map<string, string | null>();
+  for (const name of SCRIPT_VALUE_NAMES) {
+    values.set(name, null);
+  }
+
   for (const script of doc.querySelectorAll("script")) {
     if (script.getAttribute("src") !== null) {
       continue;
     }
-    const match = pattern.exec(script.textContent);
-    const value = match?.[1] ?? match?.[2] ?? match?.[3];
-    if (value !== undefined) {
-      return value;
+    const text = script.textContent;
+    SCRIPT_ASSIGNMENT.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = SCRIPT_ASSIGNMENT.exec(text)) !== null) {
+      const name = match[1];
+      if (name === undefined || values.get(name) !== null) {
+        continue;
+      }
+      const value = match[2] ?? match[3] ?? match[4];
+      if (value !== undefined) {
+        values.set(name, value);
+      }
     }
   }
-  return null;
+
+  scriptValueCache.set(doc, values);
+  return values;
+}
+
+/** Read a string or numeric literal assigned in an inline script. */
+function scriptValue(doc: Document, name: string): string | null {
+  return scriptValues(doc).get(name) ?? null;
 }
 
 /** Inline-script credentials every mutation API expects. */
@@ -114,6 +161,8 @@ function parseTags(doc: Document, url: string): TagGroup[] {
   return groups;
 }
 
+const PAGE_LABEL = /Page\s+(\d+)/i;
+
 function parseThumbs(doc: Document, url: string): GalleryThumb[] {
   const grid = doc.getElementById("gdt");
   if (!grid) {
@@ -122,26 +171,28 @@ function parseThumbs(doc: Document, url: string): GalleryThumb[] {
 
   const thumbs: GalleryThumb[] = [];
   const spriteCounts = new Map<string, number>();
+  const children = grid.children;
 
-  [...grid.children].forEach((node, index) => {
-    if (node.localName !== "a") {
-      return;
+  for (let index = 0; index < children.length; index++) {
+    const node = children[index];
+    if (node?.localName !== "a") {
+      continue;
     }
     const tile = node.querySelector<HTMLElement>("div[style]");
     if (!tile) {
-      return;
+      continue;
     }
 
     const sprite = backgroundUrl(tile);
     if (!sprite) {
-      return;
+      continue;
     }
 
     const width = Number.parseFloat(tile.style.width) || 100;
     const height = Number.parseFloat(tile.style.height) || 100;
     const x =
       Number.parseFloat(tile.style.backgroundPositionX || tile.style.backgroundPosition) || 0;
-    const labelMatch = /Page\s+(\d+)/i.exec(tile.title);
+    const labelMatch = PAGE_LABEL.exec(tile.title);
     const label = labelMatch?.[1] ? Number.parseInt(labelMatch[1], 10) : index + 1;
 
     thumbs.push({
@@ -154,7 +205,7 @@ function parseThumbs(doc: Document, url: string): GalleryThumb[] {
       spriteCount: 1,
     });
     spriteCounts.set(sprite, (spriteCounts.get(sprite) ?? 0) + 1);
-  });
+  }
 
   for (const thumb of thumbs) {
     thumb.spriteCount = spriteCounts.get(thumb.sprite) ?? 1;
@@ -168,41 +219,108 @@ function bodyText(node: Node | null): string {
   if (!node) {
     return "";
   }
-  if (node.nodeType === 3) {
-    return node.textContent ?? "";
+
+  let text = "";
+  const stack: Node[] = [node];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    if (current.nodeType === 3) {
+      text += current.textContent ?? "";
+      continue;
+    }
+    if (current.nodeName === "BR") {
+      text += "\n";
+      continue;
+    }
+    const children = current.childNodes;
+    for (let index = children.length - 1; index >= 0; index--) {
+      const child = children[index];
+      if (child !== undefined) {
+        stack.push(child);
+      }
+    }
   }
-  if (node.nodeName === "BR") {
-    return "\n";
-  }
-  return [...node.childNodes].map((child) => bodyText(child)).join("");
+  return text;
 }
+
+const CRLF = /\r\n?/g;
+const TRAILING_SPACE = /[ \t]+\n/g;
+const EXTRA_BLANK_LINES = /\n{3,}/g;
 
 function normalizeBody(text: string): string {
   return text
-    .replace(/\r\n?/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
+    .replace(CRLF, "\n")
+    .replace(TRAILING_SPACE, "\n")
+    .replace(EXTRA_BLANK_LINES, "\n\n")
     .trim();
 }
 
-/** The site prints Edit only on the signed-in author's comments, so its presence is the flag. */
-function commentIsEditable(block: Element, id: number): boolean {
-  if (block.querySelector(`#comment_edit_${id}, [data-comment-edit="${id}"]`)) {
-    return true;
-  }
-  for (const control of block.querySelectorAll("a, button")) {
-    if (/^edit$/iu.test(cleanText(control.textContent))) {
-      return true;
+const POSTED_AT = /Posted on\s+(.+?)\s+by:/i;
+const EDIT_LABEL = /^edit$/iu;
+const COMMENT_EDIT_ID = /^comment_edit_(\d+)$/;
+
+interface CommentFields {
+  id: number;
+  body: Element | null;
+  author: HTMLAnchorElement | null;
+  posted: string;
+  score: number | null;
+  votes: string | null;
+  uploader: boolean;
+}
+
+/**
+ * The site prints Edit only on the signed-in author's comments, so its presence is the flag.
+ *
+ * Collection happens once for the document: a per-comment scan of anchors and buttons was the
+ * dominant cost on galleries with many comments.
+ */
+function collectEditableComments(doc: Document, ids: Map<Element, number>): Set<string> {
+  const editable = new Set<string>();
+  const candidates = doc.querySelectorAll(
+    "#cdiv a, #cdiv button, #cdiv [data-comment-edit], #cdiv [id^='comment_edit_']",
+  );
+  for (const node of candidates) {
+    let id: number | undefined;
+    for (let block = node.parentElement; block !== null; block = block.parentElement) {
+      id = ids.get(block);
+      if (id !== undefined) {
+        break;
+      }
+    }
+    if (id === undefined) {
+      continue;
+    }
+    const key = String(id);
+
+    if (
+      (node.localName === "a" || node.localName === "button") &&
+      EDIT_LABEL.test(cleanText(node.textContent))
+    ) {
+      editable.add(key);
+      continue;
+    }
+
+    const declared = node.getAttribute("data-comment-edit");
+    if (declared !== null && declared === key) {
+      editable.add(key);
+    }
+    if (COMMENT_EDIT_ID.exec(node.id)?.[1] === key) {
+      editable.add(key);
     }
   }
-  return false;
+  return editable;
 }
 
 function parseComments(doc: Document, url: string): GalleryComment[] {
-  const comments: GalleryComment[] = [];
+  const fields: CommentFields[] = [];
+  const blockIds = new Map<Element, number>();
 
   for (const block of doc.querySelectorAll("#cdiv .c1")) {
-    const body = block.querySelector<HTMLElement>(".c6[id^='comment_']");
+    const body = block.querySelector(".c6[id^='comment_']");
     const idText = body?.id.startsWith("comment_") ? body.id.slice("comment_".length) : "";
     const id = Number.parseInt(idText, 10);
     if (!Number.isFinite(id)) {
@@ -210,27 +328,37 @@ function parseComments(doc: Document, url: string): GalleryComment[] {
     }
 
     const header = block.querySelector(".c3");
-    const authorAnchor = header?.querySelector<HTMLAnchorElement>("a[href*='/uploader/']");
     const postedText = cleanText(header?.textContent);
-    const posted = /Posted on\s+(.+?)\s+by:/i.exec(postedText)?.[1] ?? postedText;
-    const scoreNode = block.querySelector<HTMLElement>("[id^='comment_score_']");
-    const voteNode = block.querySelector<HTMLElement>("[id^='cvotes_']");
-    const marker = block.querySelector(".c4 a[name='ulcomment']");
-
-    comments.push({
+    fields.push({
       id,
-      author: cleanText(authorAnchor?.textContent),
-      authorHref: anchorHref(authorAnchor ?? null, url),
-      posted,
-      body: normalizeBody(bodyText(body)),
-      score: parseSignedNumber(scoreNode?.textContent),
-      votes: cleanText(voteNode?.textContent) || null,
-      uploader: marker !== null,
-      editable: commentIsEditable(block, id),
+      body,
+      author: header?.querySelector<HTMLAnchorElement>("a[href*='/uploader/']") ?? null,
+      posted: POSTED_AT.exec(postedText)?.[1] ?? postedText,
+      score: parseSignedNumber(
+        block.querySelector<HTMLElement>("[id^='comment_score_']")?.textContent,
+      ),
+      votes: cleanText(block.querySelector<HTMLElement>("[id^='cvotes_']")?.textContent) || null,
+      uploader: block.querySelector(".c4 a[name='ulcomment']") !== null,
     });
+    blockIds.set(block, id);
   }
 
-  return comments;
+  if (fields.length === 0) {
+    return [];
+  }
+
+  const editable = collectEditableComments(doc, blockIds);
+  return fields.map((comment): GalleryComment => ({
+    id: comment.id,
+    author: cleanText(comment.author?.textContent),
+    authorHref: anchorHref(comment.author, url),
+    posted: comment.posted,
+    body: normalizeBody(bodyText(comment.body)),
+    score: comment.score,
+    votes: comment.votes,
+    uploader: comment.uploader,
+    editable: editable.has(String(comment.id)),
+  }));
 }
 
 function popupTarget(doc: Document, fragment: string, url: string): string | null {
@@ -347,6 +475,19 @@ function parsePaging(doc: Document, url: string): PagingInfo {
     summary,
     pageRange,
   };
+}
+
+/**
+ * Parse a gallery page fetched for an infinite-scroll append.
+ *
+ * An append only needs the thumbnail rows and the next-page link, so this skips the tag, comment,
+ * action and credential work the full parser does.
+ */
+export function parseGalleryThumbPage(
+  doc: Document,
+  url: string,
+): { items: GalleryThumb[]; next: string | null } {
+  return { items: parseThumbs(doc, url), next: parsePaging(doc, url).nextHref };
 }
 
 /**

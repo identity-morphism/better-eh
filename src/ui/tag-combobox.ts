@@ -23,6 +23,8 @@ import { removeTerm, replaceTerm } from "../tags/model";
 import { buildSuggestions, effectiveSign, suggestionInsertion } from "../tags/suggest";
 import type { Suggestion, SuggestResult } from "../tags/suggest";
 import { buttonEl, el } from "./dom";
+import type { FrameHandle } from "./frame";
+import { cancelFrame, requestFrame } from "./frame";
 import { openPopover } from "./popover";
 import type { Popover } from "./popover";
 import { countText } from "./text";
@@ -93,6 +95,23 @@ function nsClass(ns: string): string {
   return `ns-${ns.replace(/[^a-z0-9_-]/giu, "")}`;
 }
 
+type CountRecord = ReadonlyMap<string, { readonly count: number; readonly lastUsed: number }>;
+
+/**
+ * A cheap revision for the ranking inputs. The maps are small (the storage limit is 200), and the
+ * suggestion build that follows reads far more data than this hash.
+ */
+function countsRevision(counts: CountRecord): number {
+  let revision = counts.size;
+  for (const [id, value] of counts) {
+    revision = (Math.imul(revision, 31) + value.count + value.lastUsed) | 0;
+    for (let index = 0; index < id.length; index += 1) {
+      revision = (Math.imul(revision, 31) + id.charCodeAt(index)) | 0;
+    }
+  }
+  return revision;
+}
+
 /**
  * Attach the combobox to an input. Returns the open/refresh controller; the `signal` option also
  * tears down every listener and the portal panel.
@@ -127,10 +146,16 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
   let composing = false;
   let destroyed = false;
   let stopIndexWatch: (() => void) | null = null;
+  let indexRevision = 0;
+  let lastRenderKey: string | null = null;
+  let renderFrame: FrameHandle = null;
 
   // Parse the local cache at mount so the first focus renders without a visible stall. This never
-  // touches the network.
-  deps.getIndex();
+  // touches the network. With suggestions off, decoding the index would be work nobody asked for;
+  // `open()` still parses it if the setting is turned back on.
+  if (enabled()) {
+    deps.getIndex();
+  }
 
   // A refreshed popularity snapshot rebuilds the index in the background. Refresh the open panel
   // when it lands; the next open reads the rebuilt index anyway.
@@ -140,14 +165,14 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     }
     const latest = deps.getIndex();
     if (latest) {
-      index = latest;
+      adoptIndex(latest);
       if (state === "idle") {
         state = "ready";
       }
     }
-    if (isOpen()) {
-      render();
-    }
+    // A change event can also carry counts mutated in place, so always invalidate.
+    indexRevision += 1;
+    scheduleRender();
   });
 
   function enabled(): boolean {
@@ -156,6 +181,40 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
 
   function isOpen(): boolean {
     return popover !== null;
+  }
+
+  function adoptIndex(next: TagIndex | null): void {
+    if (next === index) {
+      return;
+    }
+    index = next;
+    indexRevision += 1;
+  }
+
+  function cancelScheduledRender(): void {
+    cancelFrame(renderFrame);
+    renderFrame = null;
+  }
+
+  /** Coalesce a burst of input, caret and modifier changes into one panel render. */
+  function scheduleRender(): void {
+    if (!isOpen() || renderFrame !== null) {
+      return;
+    }
+    renderFrame = requestFrame(() => {
+      renderFrame = null;
+      render();
+    });
+  }
+
+  /** Keyboard handling must see the current list, not the one before the last keystroke. */
+  function flushScheduledRender(): void {
+    if (renderFrame === null) {
+      return;
+    }
+    cancelFrame(renderFrame);
+    renderFrame = null;
+    render();
   }
 
   function excludeActive(): boolean {
@@ -309,14 +368,17 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     }
 
     const latest = deps.getIndex();
-    if (latest) {
-      index = latest;
-      if (state === "idle") {
-        state = "ready";
-      }
+    adoptIndex(latest);
+    if (latest && state === "idle") {
+      state = "ready";
     }
 
+    const stateKey = `${state}\u0000${indexRevision}\u0000${excludeActive() ? "1" : "0"}`;
     if (state === "loading" && !index) {
+      if (lastRenderKey === stateKey) {
+        return;
+      }
+      lastRenderKey = stateKey;
       list.setAttribute("aria-busy", "true");
       renderMessage("Loading tags…", "The tag vocabulary is downloaded once and cached.", false);
       if (countLabel) {
@@ -325,8 +387,12 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       return;
     }
 
-    list.removeAttribute("aria-busy");
     if (state === "error" && !index) {
+      if (lastRenderKey === stateKey) {
+        return;
+      }
+      lastRenderKey = stateKey;
+      list.removeAttribute("aria-busy");
       renderMessage(
         "Tag suggestions unavailable",
         "Search still works: type a tag and press Enter.",
@@ -339,19 +405,32 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     }
 
     if (!index) {
+      if (lastRenderKey === stateKey) {
+        return;
+      }
+      lastRenderKey = stateKey;
+      list.removeAttribute("aria-busy");
       renderMessage("Tag suggestions unavailable", "Type a tag and press Enter.", false);
       return;
     }
 
     const caret = inputCaret(input);
-    result = buildSuggestions(
-      index,
+    const usage = deps.getUsage();
+    const completions = deps.getCompletions();
+    const key = [
+      stateKey,
       input.value,
       caret,
-      deps.getUsage(),
-      LIMIT,
-      deps.getCompletions(),
-    );
+      countsRevision(usage),
+      countsRevision(completions),
+    ].join("\u0000");
+    if (lastRenderKey === key) {
+      return;
+    }
+    lastRenderKey = key;
+
+    list.removeAttribute("aria-busy");
+    result = buildSuggestions(index, input.value, caret, usage, LIMIT, completions);
     const sign = effectiveSign(result.term, excludeActive());
 
     optionEls = [];
@@ -461,27 +540,21 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     }
     const cached = deps.getIndex();
     if (cached) {
-      index = cached;
+      adoptIndex(cached);
       state = "ready";
       // Resolves immediately with the cached vocabulary, then refreshes the vocabulary in the
       // background. A rejection leaves the cached index usable.
       void deps.loadIndex().catch(() => {
         // Keep the cached vocabulary; the next focus retries.
       });
-      if (isOpen()) {
-        render();
-      }
       return;
     }
 
     state = "loading";
-    if (isOpen()) {
-      render();
-    }
     loading = deps
       .loadIndex()
       .then((built) => {
-        index = built;
+        adoptIndex(built);
         state = "ready";
       })
       .catch(() => {
@@ -489,9 +562,7 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       })
       .finally(() => {
         loading = null;
-        if (isOpen()) {
-          render();
-        }
+        scheduleRender();
       });
   }
 
@@ -502,6 +573,7 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       return;
     }
 
+    lastRenderKey = null;
     list = el("div", {
       class: "tag-combobox-list",
       id: listId,
@@ -543,6 +615,7 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     retryButton.addEventListener("click", () => {
       state = "idle";
       startLoad();
+      render();
     });
 
     const footer = el(
@@ -578,7 +651,6 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     });
     setInputAttributes(true);
     startLoad();
-    render();
   }
 
   function open(): void {
@@ -594,6 +666,8 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
    * both by `close()` and by the popover's own dismissal, so it never touches the handle.
    */
   function clearPanel(): void {
+    cancelScheduledRender();
+    lastRenderKey = null;
     list = null;
     countLabel = null;
     excludeButton = null;
@@ -639,7 +713,7 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       return;
     }
     if (isOpen()) {
-      render();
+      scheduleRender();
     } else {
       open();
     }
@@ -666,10 +740,12 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       return;
     }
 
+    flushScheduledRender();
+
     if (event.key === "Control" || event.key === "Meta") {
       if (!modifierExclude) {
         modifierExclude = true;
-        render();
+        scheduleRender();
       }
       return;
     }
@@ -741,12 +817,12 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     if (event.key === "Control" || event.key === "Meta") {
       if (modifierExclude) {
         modifierExclude = false;
-        render();
+        scheduleRender();
       }
       return;
     }
     if (isOpen() && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-      render();
+      scheduleRender();
     }
   }
 
@@ -758,7 +834,6 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     composing = false;
     if (enabled()) {
       open();
-      render();
     }
   }
 
@@ -767,7 +842,6 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       return;
     }
     open();
-    render();
   }
 
   input.addEventListener("input", onInput, { signal });
@@ -783,9 +857,7 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
     () => {
       if (modifierExclude) {
         modifierExclude = false;
-        if (isOpen()) {
-          render();
-        }
+        scheduleRender();
       }
     },
     { signal },
@@ -796,10 +868,6 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
 
   return {
     open,
-    refresh: () => {
-      if (isOpen()) {
-        render();
-      }
-    },
+    refresh: scheduleRender,
   };
 }

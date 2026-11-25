@@ -6,10 +6,12 @@ import { getSettings } from "../settings";
 import { FRONT_PATH, POPULAR_PATH, SITE_PATHS, WATCHED_PATH } from "../site";
 import { toggleExpressionInSearch } from "../tags/model";
 import { buttonEl, el, icon, isEditableTarget, searchInput } from "./dom";
+import type { FrameHandle } from "./frame";
+import { cancelFrame, requestFrame } from "./frame";
 import { syncScrollEdges, trackScrollEdges } from "./jump-row";
 import { bindPopover } from "./popover";
 import type { ChipAction } from "./search-chips";
-import { renderSearchChips } from "./search-chips";
+import { createSearchChips } from "./search-chips";
 import { searchHistoryButton } from "./search-history";
 import { attachTagCombobox } from "./tag-combobox";
 import type { TagCombobox } from "./tag-combobox";
@@ -228,11 +230,7 @@ function revealActiveTab(nav: HTMLElement, signal?: AbortSignal): void {
     row.scrollLeft = Math.max(0, start - (row.clientWidth - active.offsetWidth) / 2);
     syncScrollEdges(row);
   };
-  if (typeof requestAnimationFrame === "function") {
-    requestAnimationFrame(apply);
-  } else {
-    apply();
-  }
+  requestFrame(apply);
 }
 
 /**
@@ -385,6 +383,8 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
 
   const filters = el("div", { class: "topbar-filters", hidden: "hidden" });
   let renderedText = "";
+  let filtersFrame: FrameHandle = null;
+  let pendingText: string | null = null;
 
   /**
    * Gallery pages keep chip edits in the draft, so their chips are a view of the draft. Everywhere
@@ -395,10 +395,18 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
   // The chips describe the committed query (or the draft on gallery pages), and the shortcut hint
   // only teaches while the field is idle and empty. Chips disappear while the field differs from
   // the text they describe, since their edits would rewrite the draft from stale state.
-  function syncInputChrome(): void {
-    filters.hidden = input.value !== renderedText || filters.childElementCount === 0;
+  function syncChromeVisibility(): void {
+    // A queued draw already describes the field's text; hiding the row until the frame would flash
+    // it out on every gallery keystroke. An empty queued query still clears the row at once.
+    const described = pendingText ?? renderedText;
+    const clearing = pendingText !== null && pendingText.trim() === "";
+    filters.hidden = input.value !== described || filters.childElementCount === 0 || clearing;
     clear.hidden = input.value === "";
     hint.hidden = document.activeElement === input || input.value !== "";
+  }
+
+  function syncInputChrome(): void {
+    syncChromeVisibility();
     // A row rendered while hidden had no width to measure; sync its fades when it becomes visible.
     const row = filters.firstElementChild;
     if (!filters.hidden && row !== null) {
@@ -413,16 +421,18 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
     options.onSearch(text);
   };
 
+  // Chip edits flush the scheduled draw before focus moves: the button that was activated is gone,
+  // and the focus target only exists after the row has reconciled.
   const applyChip = (text: string, action: ChipAction): void => {
     if (chipsFromDraft) {
       setSearchDraftText(text);
     } else {
       submit(text);
     }
+    flushFilters();
 
-    // The row may have been rebuilt, so the button that was activated no longer exists. Put focus
-    // on the chip that took its place, or the one before it when the last chip was removed; only
-    // an empty row falls back to the field.
+    // Put focus on the chip that took the activated one's place, or the one before it when the
+    // last chip was removed; only an empty row falls back to the field.
     if (action.type === "clear") {
       input.focus();
       return;
@@ -431,14 +441,55 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
     (nodes[action.index] ?? nodes[action.index - 1] ?? input).focus();
   };
 
-  function renderFilters(text: string): void {
+  const chips = createSearchChips(applyChip, options.signal);
+
+  function drawFilters(text: string): void {
     renderedText = text;
-    const row = renderSearchChips(text, applyChip, options.signal);
-    filters.replaceChildren();
-    if (row !== null) {
-      filters.append(row);
+    if (chips.update(text)) {
+      if (filters.firstElementChild !== chips.element) {
+        filters.replaceChildren(chips.element);
+      }
+    } else if (filters.childElementCount !== 0) {
+      filters.replaceChildren();
     }
     syncInputChrome();
+  }
+
+  function cancelFiltersDraw(): void {
+    cancelFrame(filtersFrame);
+    filtersFrame = null;
+    pendingText = null;
+  }
+
+  function runFiltersDraw(): void {
+    filtersFrame = null;
+    const text = pendingText;
+    pendingText = null;
+    if (text !== null && text !== renderedText) {
+      drawFilters(text);
+    } else {
+      syncInputChrome();
+    }
+  }
+
+  /** Coalesce every draft notification in a frame into one chip reconciliation. */
+  function scheduleFilters(text: string): void {
+    pendingText = text;
+    // Hide a now-stale row at once without measuring it; the chips catch up before the next paint.
+    syncChromeVisibility();
+    if (filtersFrame !== null) {
+      return;
+    }
+    filtersFrame = requestFrame(runFiltersDraw);
+  }
+
+  function flushFilters(): void {
+    if (pendingText === null) {
+      return;
+    }
+    cancelFrame(filtersFrame);
+    filtersFrame = null;
+    runFiltersDraw();
   }
 
   function applyState(state: Readonly<SearchDraft>): void {
@@ -448,8 +499,16 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
     }
     const text = chipsFromDraft ? state.text : state.query.text;
     if (text !== renderedText) {
-      renderFilters(text);
+      // Draft chips follow every keystroke, so they wait for the frame; committed chips change on
+      // submit (or another discrete action) and can update in place.
+      if (chipsFromDraft) {
+        scheduleFilters(text);
+      } else {
+        cancelFiltersDraw();
+        drawFilters(text);
+      }
     } else {
+      cancelFiltersDraw();
       syncInputChrome();
     }
   }
@@ -490,15 +549,20 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
   const nav = renderNav(location.pathname, isLoggedIn(), options.signal);
   revealActiveTab(nav, options.signal);
   const element = el("header", { class: "topbar" }, main, filters, nav);
-  renderFilters(chipsFromDraft ? initial.text : initial.query.text);
+  drawFilters(chipsFromDraft ? initial.text : initial.query.text);
 
   const unsubscribe = subscribeSearchDraft(applyState);
   const signal = options.signal;
+  const cleanup = (): void => {
+    unsubscribe();
+    cancelFiltersDraw();
+    chips.destroy();
+  };
   if (signal !== undefined) {
     if (signal.aborted) {
-      unsubscribe();
+      cleanup();
     } else {
-      signal.addEventListener("abort", unsubscribe, { once: true });
+      signal.addEventListener("abort", cleanup, { once: true });
     }
   }
 

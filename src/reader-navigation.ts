@@ -112,6 +112,136 @@ function makeSurface(
   };
 }
 
+/** `1,234 KB :: 800 x 1200` — width x height, in CSS pixels, at the end of the info bar. */
+const FILE_INFO_DIMENSIONS = /::\s*(\d+)\s*x\s*(\d+)/;
+
+/** Pages measured around the current index while the cached geometry is stale. */
+const GEOMETRY_SCAN = 3;
+
+/** One page node and its document-space position; only tops and heights are needed. */
+interface PageGeometry {
+  readonly top: number;
+  readonly height: number;
+}
+
+interface PageNode {
+  readonly node: HTMLElement;
+}
+
+/** A nearby scan that can be reused until layout or the scroll position changes again. */
+interface NearbyScan {
+  readonly revision: number;
+  readonly scroll: number;
+  readonly viewport: number;
+  readonly count: number;
+  /** The page the scan chose; the current index is the cache key. */
+  readonly index: number;
+}
+
+function pageAspect(data: PageData): number | null {
+  const match = FILE_INFO_DIMENSIONS.exec(data.fileInfo);
+  const width = Number(match?.[1]);
+  const height = Number(match?.[2]);
+  return match !== null && width > 0 && height > 0 ? height / width : null;
+}
+
+function nearestGeometryIndex(geometry: readonly PageGeometry[], point: number): number {
+  // Last page whose top is at or above `point`; nearest-centre refinement only needs its
+  // neighbours even when a page is much taller than the viewport.
+  let low = 0;
+  let high = geometry.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    const entry = geometry[middle];
+    if (entry !== undefined && entry.top <= point) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  const pivot = low > 0 ? low - 1 : 0;
+  return nearestInRange(
+    geometry,
+    point,
+    Math.max(0, pivot - GEOMETRY_SCAN),
+    Math.min(geometry.length - 1, pivot + GEOMETRY_SCAN),
+  );
+}
+
+function nearestInRange(
+  geometry: readonly PageGeometry[],
+  point: number,
+  from: number,
+  to: number,
+): number {
+  let best = from;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let position = from; position <= to; position += 1) {
+    const entry = geometry[position];
+    if (entry === undefined) {
+      continue;
+    }
+    const distance = Math.abs(entry.top + entry.height / 2 - point);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = position;
+    }
+  }
+  return best;
+}
+
+/**
+ * Read only the pages around the current index.
+ *
+ * Returns null when the viewport centre left their combined vertical span, which is the signal to
+ * measure every page once instead of trusting a stale cache.
+ */
+function nearestNearbyIndex(
+  pages: readonly PageNode[],
+  current: number,
+  viewportCenter: number,
+): number | null {
+  const from = Math.max(0, current - GEOMETRY_SCAN);
+  const to = Math.min(pages.length - 1, current + GEOMETRY_SCAN);
+  let best = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (let position = from; position <= to; position += 1) {
+    const entry = pages[position];
+    if (entry === undefined) {
+      continue;
+    }
+    const rect = entry.node.getBoundingClientRect();
+    const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = position;
+    }
+    top = Math.min(top, rect.top);
+    bottom = Math.max(bottom, rect.top + rect.height);
+  }
+  return best >= 0 && viewportCenter >= top && viewportCenter <= bottom ? best : null;
+}
+
+function measureGeometry(pages: readonly PageNode[]): PageGeometry[] {
+  const scroll = window.scrollY;
+  return pages.map((entry) => {
+    const rect = entry.node.getBoundingClientRect();
+    return { top: rect.top + scroll, height: rect.height };
+  });
+}
+
+function sameHud(previous: ReaderHudState, next: ReaderHudState): boolean {
+  return (
+    previous.page === next.page &&
+    previous.first === next.first &&
+    previous.prev === next.prev &&
+    previous.next === next.next &&
+    previous.last === next.last
+  );
+}
+
 /**
  * The reader's movement seam: one adapter per mode, chosen when the mode is mounted, with HUD,
  * click, swipe, keyboard and layout sync all asking this module instead of re-reading the setting.
@@ -422,6 +552,24 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
     let aspect = 1.4;
     let frame: number | undefined;
     let surface: ReaderSurface | null = null;
+    /** Document-space page tops/heights; null until a full measure is due. */
+    let geometry: PageGeometry[] | null = null;
+    /** Reused nearby scan, so an unchanged frame does not reread the same rects. */
+    let nearbyScan: NearbyScan | null = null;
+    /** Bumped whenever a page joins, loads, fails or the window resizes. */
+    let layoutRevision = 0;
+    let hudState: ReaderHudState | null = null;
+
+    const invalidateGeometry = (): void => {
+      geometry = null;
+      nearbyScan = null;
+      layoutRevision += 1;
+    };
+
+    const onResize = (): void => {
+      invalidateGeometry();
+    };
+    window.addEventListener("resize", onResize, { passive: true });
 
     const renderPage = (
       data: PageData,
@@ -434,6 +582,7 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
         class: "reader-page-img",
         alt: `${data.galleryTitle.primary} — page ${data.counterText}`,
         loading: "lazy",
+        decoding: "async",
       });
       const retry = buttonEl({
         class: "btn btn-small reader-page-retry",
@@ -443,8 +592,17 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
       retry.hidden = true;
       node.append(img, retry);
       // Lazy images have no intrinsic height before they load, which makes a fast scroll jump as
-      // each page arrives. Reserve the previous page's aspect until this one can measure itself.
-      node.style.minHeight = `${Math.round(window.innerWidth * aspect)}px`;
+      // each page arrives. Reserve this page's declared aspect from the info bar; without one,
+      // fall back to the last measured/declared aspect against the viewport.
+      const declared = pageAspect(data);
+      if (declared !== null) {
+        aspect = declared;
+        const containerWidth = options.continuousContainer.clientWidth;
+        const reserveWidth = containerWidth > 0 ? containerWidth : window.innerWidth;
+        node.style.minHeight = `${Math.round(reserveWidth * declared)}px`;
+      } else {
+        node.style.minHeight = `${Math.round(window.innerWidth * aspect)}px`;
+      }
 
       const loadGeneration = generation;
       const slot = slotFactory.create(img, data, {
@@ -452,6 +610,7 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
         onGiveUp: () => {
           node.classList.add("is-failed");
           retry.hidden = false;
+          invalidateGeometry();
         },
         onLoaded: () => {
           node.classList.remove("is-failed");
@@ -460,6 +619,7 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
           if (img.naturalWidth > 0) {
             aspect = img.naturalHeight / img.naturalWidth;
           }
+          invalidateGeometry();
         },
       });
       retry.addEventListener(
@@ -467,6 +627,7 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
         () => {
           retry.hidden = true;
           node.classList.remove("is-failed");
+          invalidateGeometry();
           slot.show();
         },
         { signal: options.signal },
@@ -482,12 +643,18 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
       const pages = stack?.pages() ?? [];
       const visible = pages[index]?.view.page ?? base;
       const state = stack?.state();
-      reportHud(
-        visible,
-        base,
-        !((state === undefined || state.done) && index >= pages.length - 1),
-        index > 0,
-      );
+      const next: ReaderHudState = {
+        page: visible,
+        first: base.firstHref !== null,
+        prev: index > 0,
+        next: !((state === undefined || state.done) && index >= pages.length - 1),
+        last: base.lastHref !== null,
+      };
+      if (hudState !== null && sameHud(hudState, next)) {
+        return;
+      }
+      hudState = next;
+      options.onHud(next);
     };
 
     const setSurface = (
@@ -516,6 +683,9 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
       stack = null;
       index = 0;
       surface = null;
+      geometry = null;
+      nearbyScan = null;
+      hudState = null;
       options.continuousContainer.replaceChildren();
     };
 
@@ -541,6 +711,7 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
           })),
         render: renderPage,
         onChange: hud,
+        onAppend: invalidateGeometry,
       });
       index = 0;
       setSurface(stack.pages()[0]);
@@ -552,22 +723,49 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
       if (pages.length === 0) {
         return;
       }
-      const midpoint = window.innerHeight / 2;
-      let best = 0;
-      let bestDistance = Number.POSITIVE_INFINITY;
-      pages.forEach((entry, position) => {
-        const rect = entry.node.getBoundingClientRect();
-        const distance = Math.abs(rect.top + rect.height / 2 - midpoint);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = position;
+      const viewportCenter = window.innerHeight / 2;
+      const scroll = window.scrollY;
+      const documentCenter = scroll + viewportCenter;
+      let best: number;
+
+      if (geometry !== null && geometry.length === pages.length) {
+        best = nearestGeometryIndex(geometry, documentCenter);
+      } else if (
+        nearbyScan !== null &&
+        nearbyScan.revision === layoutRevision &&
+        nearbyScan.scroll === scroll &&
+        nearbyScan.viewport === window.innerHeight &&
+        nearbyScan.count === pages.length &&
+        nearbyScan.index === index
+      ) {
+        // An image load, a resize or an append invalidated the geometry, but nothing moved since
+        // the last nearby scan. Reuse it rather than reading or measuring again.
+        best = nearbyScan.index;
+      } else {
+        const nearby = nearestNearbyIndex(pages, index, viewportCenter);
+        if (nearby !== null) {
+          best = nearby;
+          nearbyScan = {
+            revision: layoutRevision,
+            scroll,
+            viewport: window.innerHeight,
+            count: pages.length,
+            index: nearby,
+          };
+        } else {
+          // The centre left the neighbourhood: pay for one full measure, then binary search.
+          geometry = measureGeometry(pages);
+          nearbyScan = null;
+          best = nearestGeometryIndex(geometry, documentCenter);
         }
-      });
+      }
+
       const previous = index;
       index = best;
       if (best !== previous) {
         setSurface(pages[best]);
       }
+      // The HUD memo makes this a no-op unless the page or its flags actually changed.
       hud();
       if (best !== previous) {
         surface?.upgrade(options.zoomLevel());
@@ -647,6 +845,7 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
       },
       retryMain: () => undefined,
       stop: () => {
+        window.removeEventListener("resize", onResize);
         if (frame !== undefined) {
           window.cancelAnimationFrame(frame);
           frame = undefined;

@@ -113,6 +113,9 @@ describe("quick tags", () => {
 
     handle.refresh("other");
     expect(pill?.getAttribute("aria-pressed")).toBe("false");
+    // A repaint with the same draft leaves the button untouched.
+    handle.refresh("other");
+    expect(pill?.getAttribute("aria-pressed")).toBe("false");
   });
 
   test("offers tag suggestions while editing a quick tag", () => {

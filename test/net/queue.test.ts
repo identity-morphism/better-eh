@@ -97,6 +97,37 @@ describe("RequestQueue cancellation", () => {
 });
 
 describe("RequestQueue purge", () => {
+  test("spares critical work and drops speculative work by priority", async () => {
+    const calls: string[] = [];
+    const blocking = deferred<Response>();
+    stubFetch((url) => {
+      calls.push(url);
+      return url.endsWith("/running") ? blocking.promise : Promise.resolve(new Response("ok"));
+    });
+
+    const queue = new RequestQueue();
+    void queue.fetch("https://example.test/running");
+    const post = queue.fetch("https://example.test/post", {
+      priority: priorityOf("critical"),
+      tag: "favorite",
+      init: { method: "POST" },
+    });
+    const warm = queue.fetch("https://example.test/warm", {
+      priority: priorityOf("prefetch"),
+      tag: "prefetch",
+    });
+
+    // The predicate sees the real priority, so a caller no longer depends on a tag producer.
+    queue.purge((task) => task.priority < priorityOf("critical"));
+
+    const purged = await failure(() => warm);
+    expect(purged.name).toBe("RequestPurgedError");
+
+    blocking.resolve(new Response("ok"));
+    await post;
+    expect(calls).toEqual(["https://example.test/running", "https://example.test/post"]);
+  });
+
   test("does not disguise purged work as a caller abort", async () => {
     stubFetch(() => new Promise<Response>(() => {}));
 

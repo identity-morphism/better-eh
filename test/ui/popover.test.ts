@@ -96,6 +96,60 @@ describe("openPopover", () => {
     expect(document.querySelectorAll(".eh-popover").length).toBe(0);
   });
 
+  test("coalesces scroll and resize into one placement and ignores panel scrolls", () => {
+    const pending = new Map<number, FrameRequestCallback>();
+    const originalFrame = globalThis.requestAnimationFrame;
+    const originalCancel = globalThis.cancelAnimationFrame;
+    let nextId = 0;
+    globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+      nextId += 1;
+      pending.set(nextId, callback);
+      return nextId;
+    };
+    globalThis.cancelAnimationFrame = (id: number): void => {
+      pending.delete(id);
+    };
+    try {
+      const popover = openPopover({
+        content: content(document),
+        anchor: anchorWith(document, true),
+        minWidth: 120,
+      });
+      // The opening placement is immediate; only changes coalesce.
+      expect(pending.size).toBe(0);
+      expect(popover.element.style.left).not.toBe("");
+
+      window.dispatchEvent(new Event("resize"));
+      window.dispatchEvent(new Event("resize"));
+      expect(pending.size).toBe(1);
+
+      const inner = document.createElement("div");
+      popover.element.append(inner);
+      inner.dispatchEvent(new Event("scroll", { bubbles: true }));
+      expect(pending.size).toBe(1);
+
+      const queued = [...pending][0];
+      if (!queued) {
+        throw new Error("expected a queued placement");
+      }
+      const [id, callback] = queued;
+      pending.delete(id);
+      callback(0);
+      expect(pending.size).toBe(0);
+
+      inner.dispatchEvent(new Event("scroll", { bubbles: true }));
+      expect(pending.size).toBe(0);
+      window.dispatchEvent(new Event("scroll"));
+      expect(pending.size).toBe(1);
+
+      popover.close();
+      expect(pending.size).toBe(0);
+    } finally {
+      globalThis.requestAnimationFrame = originalFrame;
+      globalThis.cancelAnimationFrame = originalCancel;
+    }
+  });
+
   test("an aborted view signal closes the panel", () => {
     const controller = new AbortController();
     const popover = openPopover({

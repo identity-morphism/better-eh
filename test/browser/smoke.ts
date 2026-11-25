@@ -138,9 +138,15 @@ try {
     fail("site tab bar did not render");
   }
 
-  // The combobox loads the compact asset through the network and must produce suggestions.
+  // The combobox loads the compact asset through the network and must produce suggestions. It
+  // coalesces typing into one frame, so wait for the list to reflect the typed value rather than
+  // for the (possibly stale) first option to exist.
   await list.fill(".topbar-search input", "big b");
-  await list.waitForSelector(".tag-option", { timeout: 15_000 });
+  await list.waitForFunction(
+    () => (document.querySelector(".tag-option")?.textContent ?? "").toLowerCase().includes("big"),
+    undefined,
+    { timeout: 15_000 },
+  );
   const firstOption = await list.locator(".tag-option").first().innerText();
   if (!/big/i.test(firstOption)) {
     fail(`unexpected first tag suggestion: ${firstOption}`);

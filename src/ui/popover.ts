@@ -11,6 +11,8 @@
 
 import { placePanel as placeAnchoredPanel } from "./anchor";
 import { el } from "./dom";
+import type { FrameHandle } from "./frame";
+import { cancelFrame, requestFrame } from "./frame";
 
 type PopoverRole = "dialog" | "menu" | "listbox";
 
@@ -139,14 +141,21 @@ export function openPopover(request: PopoverRequest): Popover {
   panel.append(content);
 
   let open = true;
+  let frame: FrameHandle = null;
   const controller = new AbortController();
   const { signal } = controller;
+
+  const cancelPosition = (): void => {
+    cancelFrame(frame);
+    frame = null;
+  };
 
   const close = (restoreFocus = true): void => {
     if (!open) {
       return;
     }
     open = false;
+    cancelPosition();
     controller.abort();
     const index = stack.findIndex((entry) => entry.panel === panel);
     if (index >= 0) {
@@ -166,10 +175,24 @@ export function openPopover(request: PopoverRequest): Popover {
     request.onClose?.();
   };
 
-  const reposition = (): void => {
+  const place = (): void => {
     if (open) {
       placeAnchoredPanel(panel, { anchor, align, minWidth, fit: { floor: 120 } });
     }
+  };
+
+  /**
+   * Coalesce a burst of scroll/resize events into one placement. A frame that is already queued
+   * reads the geometry that matters, so the next event has nothing new to apply.
+   */
+  const reposition = (): void => {
+    if (!open || frame !== null) {
+      return;
+    }
+    frame = requestFrame(() => {
+      frame = null;
+      place();
+    });
   };
 
   stack.push({ panel, anchor, close: () => close() });
@@ -261,17 +284,32 @@ export function openPopover(request: PopoverRequest): Popover {
     anchor.setAttribute("aria-expanded", "true");
   }
 
+  const repositionOnScroll = (event: Event): void => {
+    const target = event.target;
+    // Scrolling the panel's own list does not move the panel.
+    if (target instanceof Node && panel.contains(target)) {
+      return;
+    }
+    reposition();
+  };
+
   window.addEventListener("resize", reposition, { signal });
-  window.addEventListener("scroll", reposition, { capture: true, passive: true, signal });
+  window.addEventListener("scroll", repositionOnScroll, {
+    capture: true,
+    passive: true,
+    signal,
+  });
   if (typeof window !== "undefined" && window.visualViewport) {
     window.visualViewport.addEventListener("resize", reposition, { signal });
-    window.visualViewport.addEventListener("scroll", reposition, { signal });
+    window.visualViewport.addEventListener("scroll", repositionOnScroll, { signal });
   }
   if (request.signal !== undefined) {
     request.signal.addEventListener("abort", () => close(false), { once: true, signal });
   }
 
-  reposition();
+  // The initial placement must precede the first paint; later content changes go through the
+  // coalesced `reposition()` above.
+  place();
 
   return {
     element: panel,

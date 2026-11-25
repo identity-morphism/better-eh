@@ -127,11 +127,13 @@ export function createPrefetcher(deps: PrefetcherDeps): Prefetcher {
         if (generation !== mine || signal.aborted) {
           return;
         }
-        void deps.retryWithNl(page, { signal }).then((retried) => {
-          if (retried !== null && retried.imgSrc !== "" && generation === mine) {
-            deps.preloadImage(retried.imgSrc);
-          }
-        });
+        void deps
+          .retryWithNl(page, { signal, priority: priorityOf("prefetch") })
+          .then((retried) => {
+            if (retried !== null && retried.imgSrc !== "" && generation === mine) {
+              deps.preloadImage(retried.imgSrc);
+            }
+          });
       },
       { once: true },
     );

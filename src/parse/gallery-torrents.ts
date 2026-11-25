@@ -38,20 +38,22 @@ function galleryHrefFrom(url: string): string | null {
 }
 
 /**
- * One labelled value from a form, e.g. `Posted: 2026-11-18 08:17`.
+ * Every labelled value in a form, keyed by its label with the value cleaned once.
  *
- * The live page puts the label and value in one table cell (separate spans), so reading the cell
- * text is steadier than pairing child nodes.
+ * The live page puts the label and value in one table cell (separate spans), so splitting each
+ * cell's text on its first colon avoids rescanning the form for every field.
  */
-function fieldText(form: Element, label: string): string {
-  const prefix = `${label}:`;
+function fieldMap(form: Element): Map<string, string> {
+  const fields = new Map<string, string>();
   for (const cell of form.querySelectorAll("td")) {
     const text = cleanText(cell.textContent);
-    if (text.startsWith(prefix)) {
-      return cleanText(text.slice(prefix.length));
+    const colon = text.indexOf(":");
+    if (colon <= 0 || fields.has(text.slice(0, colon))) {
+      continue;
     }
+    fields.set(text.slice(0, colon), cleanText(text.slice(colon + 1)));
   }
-  return "";
+  return fields;
 }
 
 function parseTorrent(form: Element, base: string): GalleryTorrent | null {
@@ -61,15 +63,16 @@ function parseTorrent(form: Element, base: string): GalleryTorrent | null {
   }
 
   const link = form.querySelector(DOWNLOAD_LINK);
+  const fields = fieldMap(form);
   return {
     gtid,
     name: cleanText(link?.textContent),
-    posted: fieldText(form, "Posted"),
-    size: fieldText(form, "Size"),
-    seeds: parseNumber(fieldText(form, "Seeds")) ?? 0,
-    peers: parseNumber(fieldText(form, "Peers")) ?? 0,
-    downloads: parseNumber(fieldText(form, "Downloads")) ?? 0,
-    uploader: fieldText(form, "Uploader"),
+    posted: fields.get("Posted") ?? "",
+    size: fields.get("Size") ?? "",
+    seeds: parseNumber(fields.get("Seeds")) ?? 0,
+    peers: parseNumber(fields.get("Peers")) ?? 0,
+    downloads: parseNumber(fields.get("Downloads")) ?? 0,
+    uploader: fields.get("Uploader") ?? "",
     downloadHref: anchorHref(link, base),
   };
 }

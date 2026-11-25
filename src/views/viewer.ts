@@ -22,6 +22,15 @@ import { requireShell } from "./shell";
 const HIDE_CURSOR_AFTER = 3000;
 const SWIPE_MIN = 50;
 
+/** The last HUD payload written to the DOM, so identical frames cost no writes. */
+interface WrittenHud {
+  page: PageData;
+  first: boolean;
+  prev: boolean;
+  next: boolean;
+  last: boolean;
+}
+
 /** Mount the full-screen reader for one viewer page. */
 export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewContext): void {
   host.innerHTML = shellHtml;
@@ -81,6 +90,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
   let resumeTimer: number | undefined;
   let resumePage: PageData | null = null;
   let hudPage: PageData | null = null;
+  let hudWritten: WrittenHud | null = null;
 
   const flushResume = (): void => {
     if (resumePage === null) {
@@ -126,12 +136,40 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     spreadWrap: ui.elWrap,
     continuousContainer: ui.elContinuous,
     onHud: (state: ReaderHudState) => {
-      ui.elFirst.disabled = !state.first;
-      ui.elPrev.disabled = !state.prev;
-      ui.elNext.disabled = !state.next;
-      ui.elLast.disabled = !state.last;
-      ui.elCounter.textContent = state.page.counterText;
-      ui.elFileInfo.textContent = state.page.fileInfo;
+      const previous = hudWritten;
+      if (
+        previous !== null &&
+        previous.page === state.page &&
+        previous.first === state.first &&
+        previous.prev === state.prev &&
+        previous.next === state.next &&
+        previous.last === state.last
+      ) {
+        return;
+      }
+      if (previous?.page !== state.page) {
+        ui.elCounter.textContent = state.page.counterText;
+        ui.elFileInfo.textContent = state.page.fileInfo;
+      }
+      if (previous?.first !== state.first) {
+        ui.elFirst.disabled = !state.first;
+      }
+      if (previous?.prev !== state.prev) {
+        ui.elPrev.disabled = !state.prev;
+      }
+      if (previous?.next !== state.next) {
+        ui.elNext.disabled = !state.next;
+      }
+      if (previous?.last !== state.last) {
+        ui.elLast.disabled = !state.last;
+      }
+      hudWritten = {
+        page: state.page,
+        first: state.first,
+        prev: state.prev,
+        next: state.next,
+        last: state.last,
+      };
       if (state.page !== hudPage) {
         hudPage = state.page;
         rememberPosition(state.page);

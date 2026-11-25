@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { parseListPage } from "../../src/parse/list";
-import { loadFixture } from "../dom";
+import { loadFixture, parseDocument } from "../dom";
 
 const LIST_URL = "https://e-hentai.org/?f_search=foo&p=2";
 
@@ -72,6 +72,35 @@ describe("parseListPage", () => {
     expect(data.resultText).toBe("Found 1,234 results.");
     expect(data.nextHref).toBe("https://e-hentai.org/?f_search=foo&p=1");
     expect(data.prevHref).toBe("https://e-hentai.org/?f_search=foo&p=0");
+  });
+});
+
+describe("parseListPage page counts", () => {
+  /** One table row around a category/title cell and an arbitrary pages cell. */
+  function row(pagesCell: string): Document {
+    return parseDocument(`
+      <table class="itg"><tbody><tr>
+        <td class="gl3c"><a class="glink" href="/g/111/aaaa/">Alpha</a></td>
+        <td class="gl4c">${pagesCell}</td>
+      </tr></tbody></table>
+    `);
+  }
+
+  test("reads a count split across nodes through the ancestor scan", () => {
+    const split = row("<span>42</span> pages");
+    expect(parseListPage(split, LIST_URL).items[0]?.pages).toBe(42);
+  });
+
+  test("takes a leaf count over an ancestor whose glued text is not one", () => {
+    const glued = row("<div>alice7410 pages</div><div>7 pages</div>");
+    expect(parseListPage(glued, LIST_URL).items[0]?.pages).toBe(7);
+  });
+
+  test("keeps thousands separators and singular wording", () => {
+    const commas = row("<div>1,234 pages</div>");
+    expect(parseListPage(commas, LIST_URL).items[0]?.pages).toBe(1234);
+    const single = row("<div>1 page</div>");
+    expect(parseListPage(single, LIST_URL).items[0]?.pages).toBe(1);
   });
 });
 

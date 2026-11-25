@@ -1,6 +1,12 @@
 import appStyles from "../../.cache/app.css" with { type: "text" };
 import viewerStyles from "../style.css" with { type: "text" };
 
+/** Marks the manager-injected sheet so the shell can tell it from the site's own styles. */
+const APP_STYLE_ATTRIBUTE = "data-better-eh";
+
+/** Fallback marker for managers whose `GM_addStyle` returns no element to mark. */
+const APP_STYLE_SENTINEL = "/* better-eh-style */";
+
 let injected = false;
 
 /**
@@ -20,5 +26,18 @@ export function injectStyles(): void {
     return;
   }
   injected = true;
-  GM_addStyle(viewerStyles + appStyles);
+  // Tampermonkey and Violentmonkey return the inserted element; other managers return nothing
+  // despite the type, so the sentinel in the text lets the shell identify the sheet either way.
+  const style = GM_addStyle(APP_STYLE_SENTINEL + viewerStyles + appStyles) as unknown as
+    Element | undefined;
+  if (style !== undefined) {
+    style.setAttribute(APP_STYLE_ATTRIBUTE, "");
+  }
+}
+
+/** True for the sheet `injectStyles` added, so a native-stylesheet sweep leaves it in place. */
+export function isAppStyle(node: Element): boolean {
+  return (
+    node.getAttribute(APP_STYLE_ATTRIBUTE) !== null || node.textContent.includes(APP_STYLE_SENTINEL)
+  );
 }

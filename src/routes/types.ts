@@ -68,6 +68,11 @@ export interface RouteView<D, R extends Route = Route> {
   render(host: HTMLElement, data: D, ctx: ViewContext, route: R): void;
   title(data: D): string;
   /**
+   * Keep the data parsed from the entry document so a history move back to it does not refetch a
+   * page the app already has; `load` serves it until the caller asks for a fresh load.
+   */
+  seed?(route: R, data: D): void;
+  /**
    * The append feed for this route, after the row's own paging policy (e.g. a client-side date
    * range). Absent on routes that do not paginate.
    */
