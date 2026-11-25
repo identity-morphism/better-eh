@@ -155,8 +155,55 @@ function relaxedCount(query: SearchQuery): number {
   return count;
 }
 
+/** Human labels for the active filters, so the collapsed panel says what the count means. */
+function activeFilterLabels(query: SearchQuery): string[] {
+  const labels: string[] = [];
+  if (query.rating > 0) {
+    labels.push(`${query.rating}★ minimum`);
+  }
+  const pageFrom = query.pageFrom.trim();
+  const pageTo = query.pageTo.trim();
+  if (pageFrom !== "" || pageTo !== "") {
+    labels.push(
+      pageFrom !== "" && pageTo !== ""
+        ? `${pageFrom}–${pageTo} pages`
+        : pageFrom !== ""
+          ? `${pageFrom}+ pages`
+          : `≤${pageTo} pages`,
+    );
+  }
+  if (isDateRangeActive({ since: query.since, until: query.until })) {
+    const since = query.since.trim();
+    const until = query.until.trim();
+    labels.push(
+      since !== "" && until !== ""
+        ? `Posted ${since} – ${until}`
+        : since !== ""
+          ? `Posted from ${since}`
+          : `Posted until ${until}`,
+    );
+  }
+  if (query.expunged) {
+    labels.push("Expunged included");
+  }
+  if (query.torrent) {
+    labels.push("Torrent required");
+  }
+  if (query.disableLanguage) {
+    labels.push("Language filter off");
+  }
+  if (query.disableUploader) {
+    labels.push("Uploader filter off");
+  }
+  if (query.disableTags) {
+    labels.push("Tag filter off");
+  }
+  return labels;
+}
+
 function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
   const activeCount = narrowCount(query) + relaxedCount(query);
+  const activeLabels = activeFilterLabels(query);
 
   const rating = createSelect({
     class: "field-select",
@@ -322,6 +369,13 @@ function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
       icon("filter"),
       el("span", { text: "Filters" }),
       activeCount > 0 ? el("span", { class: "filters-count", text: String(activeCount) }) : "",
+      activeLabels.length > 0
+        ? el("span", {
+            class: "filters-active",
+            text: activeLabels.join(" · "),
+            title: activeLabels.join(" · "),
+          })
+        : "",
     ),
     form,
   );

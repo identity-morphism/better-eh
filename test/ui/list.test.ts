@@ -67,6 +67,7 @@ describe("renderList", () => {
     render("");
 
     expect(host.querySelector(".empty-state button")).toBeNull();
+    expect(host.querySelector(".filters-active")).toBeNull();
   });
 
   test("keeps the filter panel open across a re-render", () => {
@@ -216,6 +217,17 @@ describe("renderList", () => {
 
     const badges = [...host.querySelectorAll(".list-summary .badge")].map((b) => b.textContent);
     expect(badges).toEqual(["1 filter", "1 relaxed filter"]);
+    expect(host.querySelector(".filters-active")?.textContent).toBe(
+      "4★ minimum · Language filter off",
+    );
+  });
+
+  test("names every active filter in the collapsed summary", () => {
+    render("f_search=test&f_srdd=4&f_spf=15&f_spt=30&f_sh=on&f_sto=on");
+
+    expect(host.querySelector(".filters-active")?.textContent).toBe(
+      "4★ minimum · 15–30 pages · Expunged included · Torrent required",
+    );
   });
 
   test("describes an unknown favorite state without claiming the gallery is unfavorited", () => {
