@@ -7,6 +7,7 @@ import {
   DIST_PATH,
   isBump,
   isSemver,
+  newestReleaseTag,
   readHeaderVersion,
 } from "./version.ts";
 
@@ -71,6 +72,14 @@ async function main(): Promise<void> {
 
   const pkg = (await Bun.file(join(ROOT, PACKAGE_PATH)).json()) as PackageJson;
   const current = pkg.version;
+  const tags = git(["tag", "--merged", "HEAD", "--list", "v*"]);
+  const newest = newestReleaseTag(tags.split("\n").filter(Boolean));
+  if (newest !== null && newest !== `v${current}`) {
+    fail(
+      `package.json is ${current} but the newest merged release tag is ${newest}; ` +
+        "this script bumps, commits and tags together, so a version committed on its own is drift",
+    );
+  }
   const next = isBump(bumpArg) ? bumpVersion(current, bumpArg) : bumpArg;
 
   if (compareVersions(next, current) <= 0) {

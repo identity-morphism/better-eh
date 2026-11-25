@@ -53,7 +53,9 @@ bun run test:browser  # built userscript in Chromium, then axe; needs playwright
   ```
 
   `version` in `package.json` belongs to releases. `bun run release <patch|minor|major>` bumps it,
-  rebuilds, commits and tags, and CI fails a pull request that moves it.
+  rebuilds, commits and tags, and CI fails a pull request that moves it. On `master`,
+  `bun run check:release-tag` fails any version that is not the newest merged `vX.Y.Z` tag, so a
+  version bump committed on its own is not releasable either.
 
 - Keep the bundle unminified. Sleazy Fork rejects minified listings, so `build.ts` publishes Bun's
   output verbatim and no formatter runs over it.

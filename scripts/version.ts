@@ -59,3 +59,23 @@ export function bumpVersion(current: string, bump: Bump): string {
       return `${major}.${minor}.${patch + 1}`;
   }
 }
+
+/**
+ * The highest `vX.Y.Z` tag among `tags`, or null when none is a release tag.
+ *
+ * Compares versions, not names, so `v1.10.0` outranks `v1.9.0`; tags that are not strict semver
+ * releases are ignored. Both the release script and the drift check use this one rule.
+ */
+export function newestReleaseTag(tags: readonly string[]): string | null {
+  let newest: string | null = null;
+  for (const tag of tags) {
+    const version = tag.startsWith("v") ? tag.slice(1) : "";
+    if (!isSemver(version)) {
+      continue;
+    }
+    if (newest === null || compareVersions(version, newest.slice(1)) > 0) {
+      newest = tag;
+    }
+  }
+  return newest;
+}
