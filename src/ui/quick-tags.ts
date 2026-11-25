@@ -22,8 +22,8 @@ export interface QuickTagsHandle {
  * Render the quick tags as buttons.
  *
  * A click adds the tag's expression to the current draft, or removes its terms when all are
- * present. The editor is the shared one, so a name or query changed there is reflected here
- * immediately.
+ * present. It never submits the search: the user decides when to run the edited draft. The editor
+ * is the shared one, so a name or query changed there is reflected here immediately.
  */
 export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
   const { signal } = options;
