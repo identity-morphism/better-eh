@@ -8,6 +8,7 @@ import type { ListScope } from "../router";
 import {
   getSearchDraft,
   isDocumentReload,
+  setSearchDraftText,
   setSearchQuery,
   subscribeSearchDraft,
 } from "../search-draft";
@@ -439,7 +440,7 @@ export function renderList(
 
   quickTags = renderQuickTags({
     getText: () => getSearchDraft().text,
-    search,
+    apply: setSearchDraftText,
     signal: ctx.signal,
   });
 

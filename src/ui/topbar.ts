@@ -364,9 +364,7 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
       submit(text);
     },
     onToggle: (text) => {
-      const next = toggleExpressionInSearch(getSearchDraft().text, text);
-      setSearchDraftText(next);
-      submit(next);
+      setSearchDraftText(toggleExpressionInSearch(getSearchDraft().text, text));
     },
     signal: options.signal ?? new AbortController().signal,
   });

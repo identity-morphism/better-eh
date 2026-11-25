@@ -7,7 +7,8 @@ import { openQuickTagEditor } from "./quick-tags-editor";
 interface QuickTagsOptions {
   /** The user's current draft, so a click toggles against what the field shows. */
   getText: () => string;
-  search: (text: string) => void;
+  /** Replace the draft with the toggled text; this never submits a search. */
+  apply: (text: string) => void;
   signal: AbortSignal;
 }
 
@@ -52,7 +53,7 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
       node.addEventListener(
         "click",
         () => {
-          options.search(toggleExpressionInSearch(options.getText(), tag.query));
+          options.apply(toggleExpressionInSearch(options.getText(), tag.query));
         },
         { signal },
       );

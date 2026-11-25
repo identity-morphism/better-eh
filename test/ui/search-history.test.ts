@@ -144,7 +144,8 @@ describe("search history panel", () => {
     panel
       .querySelector<HTMLButtonElement>(".search-history-quick-tag .search-history-query")
       ?.click();
-    expect(searched).toEqual(["cat f:artbook$"]);
+    expect(input().value).toBe("cat f:artbook$");
+    expect(searched).toEqual([]);
   });
 
   test("persists the seeded row when it is saved without a name", () => {
@@ -185,7 +186,7 @@ describe("search history panel", () => {
     expect(panel.querySelector(".search-history-empty")).not.toBeNull();
   });
 
-  test("quick tags add and remove their terms instead of running a search", () => {
+  test("quick tags add and remove their terms without submitting a search", () => {
     input().value = "f:lolicon$";
     input().dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -201,14 +202,14 @@ describe("search history panel", () => {
     panel
       .querySelector<HTMLButtonElement>(".search-history-quick-tag .search-history-query")
       ?.click();
-    expect(searched).toEqual(["cat f:lolicon$"]);
+    expect(input().value).toBe("cat f:lolicon$");
+    expect(searched).toEqual([]);
 
-    input().value = "cat f:lolicon$";
-    input().dispatchEvent(new Event("input", { bubbles: true }));
     panel = openHistory();
     panel
       .querySelector<HTMLButtonElement>(".search-history-quick-tag .search-history-query")
       ?.click();
-    expect(searched).toEqual(["cat f:lolicon$", "cat"]);
+    expect(input().value).toBe("cat");
+    expect(searched).toEqual([]);
   });
 });

@@ -30,10 +30,10 @@ function submit(form: Element): void {
 
 describe("quick tags", () => {
   test("saves an edited quick tag and applies it to the draft", () => {
-    const searched: string[] = [];
+    const applied: string[] = [];
     const handle = renderQuickTags({
       getText: () => "cat",
-      search: (text) => searched.push(text),
+      apply: (text) => applied.push(text),
       signal: new AbortController().signal,
     });
 
@@ -76,17 +76,17 @@ describe("quick tags", () => {
     expect(pill?.getAttribute("aria-pressed")).toBe("false");
 
     pill?.click();
-    expect(searched).toEqual(["cat f:lolicon$"]);
+    expect(applied).toEqual(["cat f:lolicon$"]);
   });
 
   test("a click toggles the terms in and back out", () => {
     replaceQuickTags([tag()]);
-    const searched: string[] = [];
+    const applied: string[] = [];
     let draft = "cat";
     const handle = renderQuickTags({
       getText: () => draft,
-      search: (text) => {
-        searched.push(text);
+      apply: (text) => {
+        applied.push(text);
         draft = text;
       },
       signal: new AbortController().signal,
@@ -98,7 +98,7 @@ describe("quick tags", () => {
     pill?.click();
     pill?.click();
 
-    expect(searched).toEqual(["cat f:lolicon$", "cat"]);
+    expect(applied).toEqual(["cat f:lolicon$", "cat"]);
   });
 
   test("restores quick tags in a later view and marks them active", () => {
@@ -106,7 +106,7 @@ describe("quick tags", () => {
 
     const handle = renderQuickTags({
       getText: () => "f:lolicon$ other",
-      search: () => undefined,
+      apply: () => undefined,
       signal: new AbortController().signal,
     });
 
@@ -123,7 +123,7 @@ describe("quick tags", () => {
     replaceQuickTags([tag()]);
     const handle = renderQuickTags({
       getText: () => "",
-      search: () => undefined,
+      apply: () => undefined,
       signal: new AbortController().signal,
     });
 
@@ -154,7 +154,7 @@ describe("quick tags", () => {
     replaceQuickTags([tag()]);
     const handle = renderQuickTags({
       getText: () => "",
-      search: () => undefined,
+      apply: () => undefined,
       signal: new AbortController().signal,
     });
 

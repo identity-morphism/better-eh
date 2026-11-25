@@ -5,8 +5,10 @@ import {
   saveListFilters,
   setListPanelOpen,
 } from "../../src/data/list-filters";
+import { replaceQuickTags } from "../../src/data/quick-tags";
 import { emptySearchQuery, parseSearchQuery } from "../../src/parse/query";
 import { parseRoute } from "../../src/router";
+import { getSearchDraft } from "../../src/search-draft";
 import type { ListPageData } from "../../src/types";
 import { renderList } from "../../src/views/list";
 import { installDom, mountHost, viewContext } from "./dom";
@@ -43,6 +45,7 @@ beforeEach(() => {
   installDom();
   saveListFilters(emptySearchQuery());
   setListPanelOpen(false);
+  GM_setValue("eh:saved-expressions:v1", []);
   host = mountHost();
   navigations = [];
 });
@@ -104,6 +107,20 @@ describe("renderList", () => {
     expect(url.searchParams.get("f_search")).toBe("test");
     expect(url.searchParams.get("f_srdd")).toBe("4");
     expect(url.searchParams.get("f_spf")).toBe("10");
+  });
+
+  test("a quick tag edits the draft without submitting a search", () => {
+    replaceQuickTags([{ name: "LOLI", query: "f:lolicon$", savedAt: 1 }]);
+    render("f_search=cat");
+
+    const pill = host.querySelector<HTMLButtonElement>(".quick-tag");
+    pill?.click();
+
+    expect(getSearchDraft().text).toBe("cat f:lolicon$");
+    expect(host.querySelector<HTMLInputElement>('input[name="f_search"]')?.value).toBe(
+      "cat f:lolicon$",
+    );
+    expect(navigations).toEqual([]);
   });
 
   test("names a category listing and marks only that category enabled", () => {
