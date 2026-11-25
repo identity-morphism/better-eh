@@ -29,15 +29,18 @@ export interface SelectControl {
 /**
  * The value of the selected option, falling back to the first option like the browser does.
  *
- * The test DOM (linkedom) has no live `selected` properties, so the attribute is the fallback; in a
- * real DOM the live property wins.
+ * A browser keeps the `selected` attribute on the original default option after the user picks
+ * another one, so the live selectedness has to win. The test DOM (linkedom) has no live `selected`
+ * properties, so the attribute is the fallback; in a real DOM the live property wins.
  */
 function selectedValue(select: HTMLSelectElement): string {
   const options = [...select.querySelectorAll<HTMLOptionElement>("option")];
-  const selected = options.find(
-    (option) => option.selected === true || option.hasAttribute("selected"),
-  );
-  return selected?.value ?? options[0]?.value ?? "";
+  const live = options.find((option) => option.selected === true);
+  if (live !== undefined) {
+    return live.value;
+  }
+  const attributed = options.find((option) => option.hasAttribute("selected"));
+  return attributed?.value ?? options[0]?.value ?? "";
 }
 
 /** Select one option by value, moving the `selected` attribute and the live selection together. */
