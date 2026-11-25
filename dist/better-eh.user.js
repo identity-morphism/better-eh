@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better EH
 // @namespace    https://github.com/identity-morphism/better-eh
-// @version      1.0.6
+// @version      1.0.7
 // @description  A userscript that reskins E-Hentai and ExHentai into one consistent, image-first interface: galleries, listings, favorites, toplists, torrents and the reader, with tag autocomplete and prefetching.
 // @author       identity-morphism
 // @icon         https://api.iconify.design/ph/book-open-bold.svg
