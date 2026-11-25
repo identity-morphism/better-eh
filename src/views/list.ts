@@ -22,7 +22,7 @@ import {
 import { FRONT_PATH } from "../site";
 import type { ListItem, ListPageData } from "../types";
 import { createCardGrid } from "../ui/card-grid";
-import { el, icon } from "../ui/dom";
+import { buttonEl, el, icon } from "../ui/dom";
 import { createSelect } from "../ui/form-controls";
 import { listHeader } from "../ui/list-header";
 import type { PageSource } from "../ui/page-cursor";
@@ -86,9 +86,8 @@ export function listLabels(
 function categoryChips(query: SearchQuery, ctx: ViewContext): HTMLElement {
   const row = el("div", { class: "cat-row", role: "group", "aria-label": "Categories" });
 
-  const all = el("button", {
+  const all = buttonEl({
     class: "cat-chip",
-    type: "button",
     "aria-pressed": String(query.cats === 0),
     title: "Enable every category",
     text: "All",
@@ -106,9 +105,8 @@ function categoryChips(query: SearchQuery, ctx: ViewContext): HTMLElement {
 
   for (const category of CATEGORIES) {
     const enabled = (query.cats & category.bit) === 0;
-    const chip = el("button", {
+    const chip = buttonEl({
       class: `cat-chip ${category.cls}`,
-      type: "button",
       "aria-pressed": String(enabled),
       title: enabled ? `Disable ${category.name}` : `Enable ${category.name}`,
       text: category.name,
@@ -295,13 +293,13 @@ function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
     ctx.navigate(buildSearchUrl(next));
   };
 
-  const applyButton = el("button", {
+  const applyButton = buttonEl({
     class: "btn btn-small",
     type: "submit",
     text: "Apply",
   });
 
-  const reset = el("button", { class: "btn btn-ghost btn-small", type: "button", text: "Reset" });
+  const reset = buttonEl({ class: "btn btn-ghost btn-small", text: "Reset" });
   reset.addEventListener(
     "click",
     () => {

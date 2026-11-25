@@ -1,3 +1,5 @@
+import type { Unsubscribe } from "./emitter";
+import { createEmitter } from "./emitter";
 import { isRecord } from "./guards";
 import { copyKeymap, defaultKeymap, freezeKeymap, isKeyMapPatch } from "./keymap-schema";
 import { applyScalar, defaultScalars, SCALAR_KEYS } from "./settings-schema";
@@ -8,10 +10,9 @@ import type { UserSettings } from "./types";
 const STORAGE_KEY = "eh:settings:v2";
 const VERSION = 2;
 
-type Listener = (settings: Readonly<UserSettings>) => void;
 type SettingsReader = (key: string) => unknown;
 
-const listeners = new Set<Listener>();
+const settingsChanged = createEmitter<Readonly<UserSettings>>();
 
 export const DEFAULT_SETTINGS: UserSettings = Object.freeze({
   ...defaultScalars(),
@@ -85,18 +86,15 @@ export function updateSettings(patch: Partial<UserSettings>): void {
   }
   current = Object.freeze(next);
   store.write(current);
-  for (const listener of listeners) {
-    listener(current);
-  }
+  settingsChanged.emit(current);
 }
 
 export function updateSetting<K extends keyof UserSettings>(key: K, value: UserSettings[K]): void {
   updateSettings({ [key]: value });
 }
 
-export function onSettingsChange(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+export function onSettingsChange(
+  listener: (settings: Readonly<UserSettings>) => void,
+): Unsubscribe {
+  return settingsChanged.subscribe(listener);
 }

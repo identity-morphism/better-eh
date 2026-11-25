@@ -39,6 +39,17 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * A `<button>` that cannot submit a form by accident.
+ *
+ * A button inside a form defaults to `type=submit`, so every non-submitting control used to repeat
+ * the attribute at its call site. `props` wins, so the site's own forms still pass `type:
+ * "submit"`.
+ */
+export function buttonEl(props: Props = {}, ...children: Child[]): HTMLButtonElement {
+  return el("button", { type: "button", ...props }, ...children);
+}
+
 export function appendChildren(parent: ParentNode, children: readonly Child[]): void {
   for (const child of children) {
     if (child === null || child === undefined || child === false) {

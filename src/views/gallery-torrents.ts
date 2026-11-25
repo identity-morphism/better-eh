@@ -1,11 +1,11 @@
 import type { TorrentInfo } from "../data/gallery-torrents";
 import { loadTorrentInfo } from "../data/gallery-torrents";
 import type { GalleryTorrent, GalleryTorrentsPage } from "../parse/gallery-torrents";
-import { el } from "../ui/dom";
+import { buttonEl, el } from "../ui/dom";
 import { errorText } from "../ui/error-text";
 import { factRow } from "../ui/fact-row";
 import { listHeader } from "../ui/list-header";
-import { nativePageAction, statePanel } from "../ui/state-panel";
+import { nativeEmptyPanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
 import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
@@ -89,9 +89,8 @@ function torrentCard(
         });
 
   const detailsSlot = el("div", { class: "gallery-torrent-details-slot", hidden: "" });
-  const button = el("button", {
+  const button = buttonEl({
     class: "btn btn-small gallery-torrent-details-button",
-    type: "button",
     "aria-expanded": "false",
     text: "Details",
   });
@@ -211,12 +210,7 @@ export function renderGalleryTorrents(
   }
 
   if (data.torrents.length === 0) {
-    root.append(
-      statePanel({
-        text: "No torrents were found for this gallery.",
-        actions: [nativePageAction()],
-      }),
-    );
+    root.append(nativeEmptyPanel("No torrents were found for this gallery."));
   } else {
     const list = el("div", { class: "gallery-torrent-list" });
     for (const torrent of data.torrents) {

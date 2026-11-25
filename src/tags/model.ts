@@ -10,6 +10,39 @@ import { collapseWhitespace } from "../strings";
 
 export type TagSign = "" | "~" | "-";
 
+/** Signs in menu order: included first, then excluded, then optional. */
+export const TAG_SIGNS: readonly TagSign[] = Object.freeze(["", "-", "~"]);
+
+/**
+ * How one sign reads on every search surface: the chip's glyph and class, the word in its
+ * accessible name, and the action-menu label that switches a term to it.
+ *
+ * The chip row and the gallery tag menu present the same three choices, so the wording lives here
+ * once instead of drifting between the two call sites.
+ */
+export interface SignPresentation {
+  readonly glyph: string;
+  readonly state: string;
+  readonly chipClass: string;
+  readonly action: string;
+}
+
+export const SIGN_PRESENTATION: Readonly<Record<TagSign, SignPresentation>> = Object.freeze({
+  "": { glyph: "+", state: "included", chipClass: "term-chip", action: "Include in search" },
+  "-": {
+    glyph: "−",
+    state: "excluded",
+    chipClass: "term-chip is-excluded",
+    action: "Exclude from search",
+  },
+  "~": {
+    glyph: "~",
+    state: "optional",
+    chipClass: "term-chip is-or",
+    action: "Make optional (OR)",
+  },
+});
+
 export interface TagNamespace {
   readonly id: string;
   readonly label: string;

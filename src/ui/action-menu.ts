@@ -1,4 +1,4 @@
-import { el } from "./dom";
+import { buttonEl, el } from "./dom";
 import type { Popover } from "./popover";
 import { closePopovers, openPopover } from "./popover";
 import { openPopup } from "./popup-window";
@@ -39,9 +39,8 @@ export function openActionMenu({ anchor, label, items, signal }: ActionMenuReque
   for (const item of items) {
     const node =
       item.href === undefined
-        ? el("button", {
+        ? buttonEl({
             class: "action-menu-item",
-            type: "button",
             role: "menuitem",
             text: item.label,
             onclick: () => {

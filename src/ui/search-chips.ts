@@ -6,48 +6,25 @@
  * search or only updates a draft.
  */
 
-import type { SearchTerm, TagSign } from "../tags/model";
-import { parseSearchTerms, removeTerm, setTermSign, termLabel } from "../tags/model";
+import type { SearchTerm } from "../tags/model";
+import {
+  parseSearchTerms,
+  removeTerm,
+  setTermSign,
+  SIGN_PRESENTATION,
+  TAG_SIGNS,
+  termLabel,
+} from "../tags/model";
 import type { ActionMenuItem } from "./action-menu";
 import { bindContextMenu, openActionMenu } from "./action-menu";
-import { el } from "./dom";
+import { buttonEl, el } from "./dom";
 import { trackScrollEdges } from "./jump-row";
-
-function signGlyph(term: SearchTerm): string {
-  if (term.sign === "-") {
-    return "−";
-  }
-  if (term.sign === "~") {
-    return "~";
-  }
-  return "+";
-}
-
-function chipClass(term: SearchTerm): string {
-  if (term.sign === "-") {
-    return "term-chip is-excluded";
-  }
-  if (term.sign === "~") {
-    return "term-chip is-or";
-  }
-  return "term-chip";
-}
 
 /** What a chip edit did, so the caller can put focus back where it was. */
 export type ChipAction =
   { type: "toggle"; index: number } | { type: "remove"; index: number } | { type: "clear" };
 
 type ChipHandler = (text: string, action: ChipAction) => void;
-
-function stateLabel(term: SearchTerm): string {
-  if (term.sign === "-") {
-    return "excluded";
-  }
-  if (term.sign === "~") {
-    return "optional";
-  }
-  return "included";
-}
 
 /** Sign choices for one term; the active sign is left out. */
 function signItems(
@@ -57,17 +34,15 @@ function signItems(
   onSearch: ChipHandler,
 ): ActionMenuItem[] {
   const items: ActionMenuItem[] = [];
-  const set = (sign: TagSign, label: string): void => {
-    if (term.sign !== sign) {
-      items.push({
-        label,
-        run: () => onSearch(setTermSign(text, term, sign), { type: "toggle", index }),
-      });
+  for (const sign of TAG_SIGNS) {
+    if (term.sign === sign) {
+      continue;
     }
-  };
-  set("", "Include in search");
-  set("-", "Exclude from search");
-  set("~", "Make optional (OR)");
+    items.push({
+      label: SIGN_PRESENTATION[sign].action,
+      run: () => onSearch(setTermSign(text, term, sign), { type: "toggle", index }),
+    });
+  }
   items.push({
     label: "Remove",
     run: () => onSearch(removeTerm(text, term), { type: "remove", index }),
@@ -83,18 +58,23 @@ function chip(
   signal?: AbortSignal,
 ): HTMLElement {
   const node = el("span", {
-    class: chipClass(term),
+    class: SIGN_PRESENTATION[term.sign].chipClass,
   });
 
-  const toggle = el("button", {
+  const toggle = buttonEl({
     class: "term-toggle",
-    type: "button",
-    "aria-label": `${termLabel(term)}, ${stateLabel(term)}. Remove from search. Right-click to include, exclude or make optional.`,
+    "aria-label": `${termLabel(term)}, ${SIGN_PRESENTATION[term.sign].state}. Remove from search. Right-click to include, exclude or make optional.`,
     title: "Click to remove · Right-click to include, exclude or make optional",
     "aria-haspopup": "menu",
     "aria-expanded": "false",
   });
-  toggle.append(el("span", { class: "term-sign", "aria-hidden": "true", text: signGlyph(term) }));
+  toggle.append(
+    el("span", {
+      class: "term-sign",
+      "aria-hidden": "true",
+      text: SIGN_PRESENTATION[term.sign].glyph,
+    }),
+  );
   if (term.ns) {
     toggle.append(
       el("span", {
@@ -144,12 +124,7 @@ export function renderSearchChips(
     row.append(chip(term, text, index, onSearch, signal));
   });
 
-  const clear = el("button", {
-    class: "search-filters-clear",
-    type: "button",
-    text: "Clear",
-    title: "Clear search",
-  });
+  const clear = buttonEl({ class: "search-filters-clear", text: "Clear", title: "Clear search" });
   clear.addEventListener("click", () => {
     onSearch("", { type: "clear" });
   });

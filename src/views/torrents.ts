@@ -1,7 +1,7 @@
 import type { TorrentPage, TorrentRow, TorrentStatus } from "../parse/torrents";
 import { memberId } from "../session";
 import { SITE_PATHS } from "../site";
-import { el, searchInput } from "../ui/dom";
+import { buttonEl, el, searchInput } from "../ui/dom";
 import { listHeader } from "../ui/list-header";
 import { numberedPager } from "../ui/pager";
 import { nativePageAction, statePanel } from "../ui/state-panel";
@@ -79,7 +79,7 @@ function searchForm(data: TorrentPage, ctx: ViewContext): HTMLElement {
     placeholder: "Search torrents",
     "aria-label": "Search torrents",
   });
-  const submit = el("button", { class: "btn btn-small", type: "submit", text: "Search" });
+  const submit = buttonEl({ class: "btn btn-small", type: "submit", text: "Search" });
   const form = el("form", { class: "torrent-search", role: "search" }, input, submit);
   form.addEventListener(
     "submit",
@@ -96,9 +96,8 @@ function statusFilter(data: TorrentPage, ctx: ViewContext): HTMLElement {
   const group = el("div", { class: "torrent-status", role: "group", "aria-label": "Status" });
 
   for (const option of STATUS_OPTIONS) {
-    const button = el("button", {
+    const button = buttonEl({
       class: "btn btn-small torrent-filter-btn",
-      type: "button",
       "aria-pressed": String(data.status === option.status),
       text: option.label,
     });
@@ -154,11 +153,7 @@ function uploaderFilterNote(data: TorrentPage, ctx: ViewContext): HTMLElement | 
   if (data.uploaderFilter === null || mineActive(data)) {
     return null;
   }
-  const clear = el("button", {
-    class: "btn btn-ghost btn-small",
-    type: "button",
-    text: "Clear",
-  });
+  const clear = buttonEl({ class: "btn btn-ghost btn-small", text: "Clear" });
   clear.addEventListener("click", () => ctx.navigate(filterUrl(data.url, { mine: false })), {
     signal: ctx.signal,
   });

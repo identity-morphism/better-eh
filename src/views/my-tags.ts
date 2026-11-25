@@ -15,7 +15,7 @@ import { isChecked } from "../parse/helpers";
 import type { MyTagsPage, TagsetState, UserTagState } from "../parse/my-tags";
 import { normalizeColor } from "../parse/my-tags";
 import { nativeUrl } from "../routes/identity";
-import { el, searchInput, textInput } from "../ui/dom";
+import { buttonEl, el, searchInput, textInput } from "../ui/dom";
 import { errorText } from "../ui/error-text";
 import { listHeader } from "../ui/list-header";
 import { countText } from "../ui/text";
@@ -92,16 +92,11 @@ function tagsetPanel(
   const hasEnable = tagset.fields.some((field) => field.name === "tagset_enable");
   const error = el("p", { class: "my-tags-tagset-error", role: "alert" });
   error.hidden = true;
-  const saveButton = el("button", {
+  const saveButton = buttonEl({
     class: "btn btn-primary my-tags-tagset-save",
-    type: "button",
     text: "Save tag set",
   });
-  const renameButton = el("button", {
-    class: "btn my-tags-tagset-rename",
-    type: "button",
-    text: "Rename tag set",
-  });
+  const renameButton = buttonEl({ class: "btn my-tags-tagset-rename", text: "Rename tag set" });
 
   let busy = false;
   const submit = async (change: TagsetChange, message: string): Promise<void> => {
@@ -435,7 +430,7 @@ export function renderMyTags(
     const inputs = tagInputs(null, false, ctx.signal);
     const error = el("p", { class: "my-tags-error", role: "alert" });
     error.hidden = true;
-    const submit = el("button", {
+    const submit = buttonEl({
       class: "btn btn-primary my-tags-add-submit",
       type: "submit",
       text: "Add tag",
@@ -537,11 +532,7 @@ export function renderMyTags(
     );
 
     if (credentials !== null) {
-      const save = el("button", {
-        class: "btn btn-small my-tags-save",
-        type: "button",
-        text: "Save",
-      });
+      const save = buttonEl({ class: "btn btn-small my-tags-save", text: "Save" });
       const actions = el("div", { class: "my-tags-row-actions" }, save);
       row.append(actions);
       let busy = false;

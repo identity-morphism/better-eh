@@ -2,7 +2,7 @@
 
 import { quickTags, removeQuickTag } from "../data/quick-tags";
 import { clearRecentQueries, recentQueries } from "../data/search-history";
-import { el, icon } from "./dom";
+import { buttonEl, el, icon } from "./dom";
 import { bindPopover } from "./popover";
 import { openQuickTagEditor } from "./quick-tags-editor";
 
@@ -17,9 +17,8 @@ export interface SearchHistoryOptions {
 }
 
 function queryButton(text: string, label: string, onPick: () => void): HTMLElement {
-  return el(
-    "button",
-    { class: "search-history-query", type: "button", title: text, onclick: onPick },
+  return buttonEl(
+    { class: "search-history-query", title: text, onclick: onPick },
     el("span", { class: "search-history-name", text: label }),
     label === text ? null : el("span", { class: "search-history-text", text: text }),
   );
@@ -32,9 +31,8 @@ function queryButton(text: string, label: string, onPick: () => void): HTMLEleme
  * (or in another tab) is reflected without keeping a second in-memory copy.
  */
 export function searchHistoryButton(options: SearchHistoryOptions): HTMLButtonElement {
-  const button = el("button", {
+  const button = buttonEl({
     class: "topbar-history",
-    type: "button",
     "aria-label": "Search history",
     title: "Recent searches and quick tags",
     "aria-haspopup": "dialog",
@@ -60,11 +58,7 @@ export function searchHistoryButton(options: SearchHistoryOptions): HTMLButtonEl
         );
       }
       container.append(list);
-      const clear = el("button", {
-        class: "search-history-clear",
-        type: "button",
-        text: "Clear recent",
-      });
+      const clear = buttonEl({ class: "search-history-clear", text: "Clear recent" });
       clear.addEventListener("click", () => {
         clearRecentQueries();
         renderInto(container, close);
@@ -84,9 +78,8 @@ export function searchHistoryButton(options: SearchHistoryOptions): HTMLButtonEl
             options.onToggle(entry.query);
           }),
         );
-        const remove = el("button", {
+        const remove = buttonEl({
           class: "search-history-remove",
-          type: "button",
           text: "×",
           "aria-label": `Remove quick tag ${entry.name}`,
           title: `Remove ${entry.name}`,
@@ -99,9 +92,8 @@ export function searchHistoryButton(options: SearchHistoryOptions): HTMLButtonEl
         list.append(row);
       }
       container.append(list);
-      const edit = el("button", {
+      const edit = buttonEl({
         class: "search-history-edit",
-        type: "button",
         text: "Edit quick tags",
         title: "Edit quick tags",
       });
@@ -122,9 +114,8 @@ export function searchHistoryButton(options: SearchHistoryOptions): HTMLButtonEl
       );
     }
 
-    const saveCurrent = el("button", {
+    const saveCurrent = buttonEl({
       class: "btn btn-small search-history-save-current",
-      type: "button",
       text: "Save current as quick tag",
       title: "Save the current search as a quick tag",
       "aria-haspopup": "dialog",

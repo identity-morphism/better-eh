@@ -1,7 +1,7 @@
 import type { GalleryPost } from "../data/gallery-actions";
 import { rateGallery } from "../data/gallery-actions";
 import type { GalleryApiConfig, GalleryRating } from "../types";
-import { el } from "./dom";
+import { buttonEl, el } from "./dom";
 import { errorText } from "./error-text";
 import { HALF_STEPS, halfClass, litHalves, starGlyphs } from "./stars";
 import { countText } from "./text";
@@ -157,9 +157,8 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
     // paints halves -- the average and the user's own rating -- but a tap rates whole stars.
     for (let star = 1; star <= 5; star++) {
       const text = `Rate ${star} ${star === 1 ? "star" : "stars"}`;
-      const button = el("button", {
+      const button = buttonEl({
         class: "rating-star",
-        type: "button",
         title: text,
         "aria-label": text,
         "aria-pressed": "false",
@@ -183,9 +182,8 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
     for (let half = 1; half <= HALF_STEPS; half++) {
       const value = half / 2;
       const text = `Rate ${halfText(half)} ${value === 1 ? "star" : "stars"}`;
-      const button = el("button", {
+      const button = buttonEl({
         class: halfClass(half),
-        type: "button",
         title: text,
         "aria-label": text,
         "aria-pressed": "false",

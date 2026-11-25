@@ -4,7 +4,7 @@ import { categorySwitchShown, categorySwitchValue, uconfigBody } from "../parse/
 import { nativePath } from "../routes/identity";
 import { SITE_PATHS, siteUrl } from "../site";
 import type { Child } from "../ui/dom";
-import { el } from "../ui/dom";
+import { buttonEl, el } from "../ui/dom";
 import { errorText } from "../ui/error-text";
 import { createCheckbox, createChoice, createSelect } from "../ui/form-controls";
 import type { CheckedControl } from "../ui/form-controls";
@@ -303,9 +303,8 @@ function categoryChips(
       continue;
     }
     const input = el("input", { type: "hidden", name: field.name, value: field.value });
-    const chip = el("button", {
+    const chip = buttonEl({
       class: `cat-chip ${category.cls}`,
-      type: "button",
       text: category.name,
       title: "Show this category by default",
     });
@@ -448,16 +447,8 @@ export function renderSettings(
   jumpLinks.push(jumpLink(USERSCRIPT_SETTINGS_SECTION_ID, "Better EH", sections.length));
 
   const errorNode = el("p", { class: "settings-error", role: "alert", hidden: "" });
-  const apply = el("button", {
-    class: "btn btn-primary settings-apply",
-    type: "button",
-    text: "Apply",
-  });
-  const reset = el("button", {
-    class: "btn btn-ghost settings-reset",
-    type: "button",
-    text: "Reset",
-  });
+  const apply = buttonEl({ class: "btn btn-primary settings-apply", text: "Apply" });
+  const reset = buttonEl({ class: "btn btn-ghost settings-reset", text: "Reset" });
   const dirtyLabel = el("span", {
     class: "settings-dirty",
     role: "status",

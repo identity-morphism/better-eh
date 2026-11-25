@@ -9,6 +9,7 @@
  * for their callers.
  */
 
+import { createEmitter } from "../emitter";
 import { warn } from "../log";
 
 /** A value read from storage together with the time it was stored. */
@@ -68,7 +69,7 @@ export function createSnapshot<T>(options: SnapshotOptions<T>): Snapshot<T> {
   /** Identifies the newest download, so a superseded one cannot publish or clear it. */
   let generation = 0;
   let lastAttempt = 0;
-  const listeners = new Set<(value: T) => void>();
+  const listeners = createEmitter<T>();
 
   /**
    * The synchronous cache read shared by every reader. An empty storage read is retried, so a value
@@ -84,9 +85,7 @@ export function createSnapshot<T>(options: SnapshotOptions<T>): Snapshot<T> {
   }
 
   function notify(value: T): void {
-    for (const listener of listeners) {
-      listener(value);
-    }
+    listeners.emit(value);
   }
 
   function start(background: boolean): Promise<T | null> {
@@ -172,10 +171,7 @@ export function createSnapshot<T>(options: SnapshotOptions<T>): Snapshot<T> {
     load: loadFromCache,
 
     onChange(listener: (value: T) => void): () => void {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return listeners.subscribe(listener);
     },
 
     publish(value: T): void {

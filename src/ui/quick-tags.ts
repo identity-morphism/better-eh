@@ -1,7 +1,7 @@
 import type { QuickTag } from "../data/quick-tags";
 import { quickTags, subscribeQuickTags } from "../data/quick-tags";
 import { containsExpression, toggleExpressionInSearch } from "../tags/model";
-import { el } from "./dom";
+import { buttonEl, el } from "./dom";
 import { openQuickTagEditor } from "./quick-tags-editor";
 
 interface QuickTagsOptions {
@@ -45,9 +45,8 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
     entries.length = 0;
     row.replaceChildren();
     for (const tag of tags) {
-      const node = el(
-        "button",
-        { class: "quick-tag", type: "button", "aria-pressed": "false" },
+      const node = buttonEl(
+        { class: "quick-tag", "aria-pressed": "false" },
         el("span", { class: "quick-tag-label", text: tag.name }),
       );
       node.addEventListener(
@@ -61,9 +60,8 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
       entries.push({ tag, node });
     }
 
-    const edit = el("button", {
+    const edit = buttonEl({
       class: "quick-tag-edit",
-      type: "button",
       text: tags.length === 0 ? "+ Quick tags" : "Edit tags",
       title: "Edit quick tags",
       "aria-haspopup": "dialog",

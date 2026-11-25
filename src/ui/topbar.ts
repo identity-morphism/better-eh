@@ -5,7 +5,7 @@ import { isLoggedIn } from "../session";
 import { getSettings } from "../settings";
 import { FRONT_PATH, POPULAR_PATH, SITE_PATHS, WATCHED_PATH } from "../site";
 import { toggleExpressionInSearch } from "../tags/model";
-import { el, icon, isEditableTarget, searchInput } from "./dom";
+import { buttonEl, el, icon, isEditableTarget, searchInput } from "./dom";
 import { syncScrollEdges, trackScrollEdges } from "./jump-row";
 import { bindPopover } from "./popover";
 import type { ChipAction } from "./search-chips";
@@ -266,9 +266,8 @@ function renderNav(pathname: string, signedIn: boolean, signal?: AbortSignal): H
   }
 
   // Closing on activation keeps the panel from outliving the route change it starts.
-  const moreButton = el("button", {
+  const moreButton = buttonEl({
     class: "topbar-more btn btn-ghost btn-small",
-    type: "button",
     text: "More",
     "aria-haspopup": "menu",
     "aria-expanded": "false",
@@ -307,11 +306,9 @@ function renderNav(pathname: string, signedIn: boolean, signal?: AbortSignal): H
 }
 
 function backButton(): HTMLElement {
-  return el(
-    "button",
+  return buttonEl(
     {
       class: "icon-btn",
-      type: "button",
       "aria-label": "Go back",
       title: "Back",
       onclick: () => {
@@ -343,11 +340,9 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
     "aria-keyshortcuts": "Control+K Meta+K",
   });
 
-  const clear = el(
-    "button",
+  const clear = buttonEl(
     {
       class: "topbar-clear",
-      type: "button",
       "aria-label": "Clear search",
       title: "Clear search",
       hidden: "hidden",
@@ -381,8 +376,7 @@ export function renderTopbar(options: TopbarOptions): HTMLElement {
     clear,
     hint,
     history,
-    el(
-      "button",
+    buttonEl(
       { class: "topbar-search-submit", type: "submit", "aria-label": "Search" },
       el("span", { class: "topbar-search-submit-icon" }, icon("search")),
       el("span", { class: "topbar-search-submit-label", text: "Search" }),

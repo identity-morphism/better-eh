@@ -1,4 +1,4 @@
-import { el, icon } from "./dom";
+import { buttonEl, el, icon } from "./dom";
 
 /** Numeric page strip data; omitted for single-page or unknown-length listings. */
 interface PagerPages {
@@ -87,7 +87,7 @@ function jumpForm(label: string, input: HTMLInputElement, onSubmit: () => void):
     { class: "pager-jump" },
     el("label", { class: "pager-jump-label", text: label }),
     input,
-    el("button", { class: "btn btn-small", type: "submit", text: "Go" }),
+    buttonEl({ class: "btn btn-small", type: "submit", text: "Go" }),
   );
   form.addEventListener("submit", (event) => {
     event.preventDefault();

@@ -9,7 +9,7 @@ import { el } from "../ui/dom";
 import { trackJumpRow } from "../ui/jump-row";
 import { listHeader } from "../ui/list-header";
 import { numberedPager } from "../ui/pager";
-import { nativePageAction, statePanel } from "../ui/state-panel";
+import { nativeEmptyPanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
 import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
@@ -167,10 +167,7 @@ function summary(data: ToplistPage): string {
 }
 
 function emptyState(): HTMLElement {
-  return statePanel({
-    text: "No toplists were found on this page.",
-    actions: [nativePageAction()],
-  });
+  return nativeEmptyPanel("No toplists were found on this page.");
 }
 
 function categoryBody(data: ToplistCategory, ctx: ViewContext): readonly HTMLElement[] {

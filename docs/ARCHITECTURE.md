@@ -29,7 +29,8 @@
   `my-tags` (tagset save/rename plus watch/hide/colour/weight changes and the add path), `search-history` (recent queries),
   and `quick-tags` (named toggle expressions). `gallery-actions` and `my-tags` also declare the
   comment, tag-vote and My Tags transport contracts the gallery view and its UI panels share.
-- **`src/tags/`**: `model` (search-expression grammar and tag toggling), `db` (compact index,
+- **`src/tags/`**: `model` (search-expression grammar, tag toggling, and the sign presentation table
+  the chips and the gallery tag menu share), `db` (compact index,
   popularity attachment, storage cache, download, usage and prefix-completion history, with the
   generated core vocabulary as the synchronous fallback until the full asset's background upgrade
   lands), `core-vocabulary` (the generated embedded core, built from `assets/`), `counts` +
@@ -43,6 +44,9 @@
   list, gallery and top bar.
 - **`src/store.ts`**: one persistence seam over userscript value storage and session storage —
   versioned envelope, shape guard, swallowed failures; tests use an in-memory adapter.
+- **`src/emitter.ts`**: one listener seam (`subscribe`/`emit`) behind every in-app change
+  notification — settings, quick tags, the search draft, a favorites selection and cached
+  snapshots — so unsubscribe and notify order are written once.
 - **`src/strings.ts`**: string primitives shared below the UI (`collapseWhitespace`), so storage,
   parsers and tag normalization fold whitespace the same way.
 - **`src/session.ts`**: the site's signed-in session (member id, login check), the one place other
@@ -53,7 +57,8 @@
   `toplist`, `torrents`, `home`, `my-tags` and `settings` render modules; `shell.ts` names the viewer shell's
   element contract.
 - **`src/view-mode.ts`**: the one owner of the body view-mode classes.
-- **`src/ui/`**: DOM helpers, top bar and site tabs, popover primitive (every panel, including the
+- **`src/ui/`**: DOM helpers (`el`, the non-submitting `buttonEl`, inputs, icons), top bar and site
+  tabs, popover primitive (every panel, including the
   tag combobox), login gate, active filter chips, quick-tag buttons and editor, parsed title
   renderer, favorite popover, gallery rating/comments/tag menu, banner/toast, the result-card
   assembly, label/value fact rows, form-control state helpers, live-region helpers, shared pager

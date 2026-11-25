@@ -6,6 +6,8 @@
  * original `saved-expressions` name so quick tags saved under it keep loading.
  */
 
+import type { Unsubscribe } from "../emitter";
+import { createEmitter } from "../emitter";
 import { isUnknownArray } from "../guards";
 import { createStore, gmStorage } from "../store";
 import { collapseWhitespace } from "../strings";
@@ -38,34 +40,31 @@ const store = createStore<unknown[]>(
   gmStorage(),
 );
 
-type Listener = () => void;
-const listeners = new Set<Listener>();
+const quickTagsChanged = createEmitter<void>();
 
 /** Notify every quick-tag surface after a write so the chip row and history panel agree. */
-export function subscribeQuickTags(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+export function subscribeQuickTags(listener: () => void): Unsubscribe {
+  return quickTagsChanged.subscribe(listener);
 }
 
 function notify(): void {
-  for (const listener of listeners) {
-    listener();
-  }
+  quickTagsChanged.emit();
 }
 
-/** Every quick tag, newest first. */
-export function quickTags(): QuickTag[] {
-  return store
-    .read()
-    .filter(isQuickTag)
+/** Stored entries reduced to the shape the app shows: trimmed, and never blank. */
+function cleanTags(values: readonly QuickTag[]): QuickTag[] {
+  return values
     .map((entry) => ({
       name: collapseWhitespace(entry.name),
       query: collapseWhitespace(entry.query),
       savedAt: entry.savedAt,
     }))
-    .filter((entry) => entry.name !== "" && entry.query !== "")
+    .filter((entry) => entry.name !== "" && entry.query !== "");
+}
+
+/** Every quick tag, newest first. */
+export function quickTags(): QuickTag[] {
+  return cleanTags(store.read().filter(isQuickTag))
     .sort((a, b) => b.savedAt - a.savedAt)
     .slice(0, QUICK_TAG_LIMIT);
 }
@@ -79,14 +78,6 @@ export function removeQuickTag(name: string): void {
 
 /** Replace the whole list, as the editor does after adding, renaming and removing rows. */
 export function replaceQuickTags(tags: readonly QuickTag[]): void {
-  const next = tags
-    .map((entry) => ({
-      name: collapseWhitespace(entry.name),
-      query: collapseWhitespace(entry.query),
-      savedAt: entry.savedAt,
-    }))
-    .filter((entry) => entry.name !== "" && entry.query !== "")
-    .slice(0, QUICK_TAG_LIMIT);
-  store.write(next);
+  store.write(cleanTags(tags).slice(0, QUICK_TAG_LIMIT));
   notify();
 }

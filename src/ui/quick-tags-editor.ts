@@ -9,7 +9,7 @@
 import type { QuickTag } from "../data/quick-tags";
 import { quickTags, replaceQuickTags } from "../data/quick-tags";
 import { getSettings } from "../settings";
-import { el, textInput } from "./dom";
+import { buttonEl, el, textInput } from "./dom";
 import type { Popover } from "./popover";
 import { openPopover } from "./popover";
 import { attachTagCombobox } from "./tag-combobox";
@@ -75,9 +75,8 @@ export function openQuickTagEditor(
           attachTagCombobox({ input: query, signal: rows.signal });
         }
 
-        const remove = el("button", {
+        const remove = buttonEl({
           class: "quick-tag-remove",
-          type: "button",
           text: "×",
           title: "Remove quick tag",
           "aria-label": `Remove quick tag ${index + 1}`,
@@ -95,22 +94,14 @@ export function openQuickTagEditor(
     }
   };
 
-  const add = el("button", {
-    class: "btn btn-ghost btn-small",
-    type: "button",
-    text: "+ Add",
-  });
+  const add = buttonEl({ class: "btn btn-ghost btn-small", text: "+ Add" });
   add.addEventListener("click", () => {
     draft.push({ name: "", query: "", savedAt: Date.now() });
     renderRows(draft.length - 1);
   });
 
-  const save = el("button", { class: "btn btn-small", type: "submit", text: "Save" });
-  const cancel = el("button", {
-    class: "btn btn-ghost btn-small",
-    type: "button",
-    text: "Cancel",
-  });
+  const save = buttonEl({ class: "btn btn-small", type: "submit", text: "Save" });
+  const cancel = buttonEl({ class: "btn btn-ghost btn-small", text: "Cancel" });
   cancel.addEventListener("click", () => {
     panel?.close();
   });
