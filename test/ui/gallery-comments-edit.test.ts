@@ -36,7 +36,7 @@ describe("comment editing", () => {
     expect(host.querySelector(".comment-edit")).toBeNull();
   });
 
-  test("saves through the native endpoint and re-renders the updated body and score", async () => {
+  test("saves through the native endpoint and re-renders the page the edit answered with", async () => {
     const calls: Array<[string, number, string]> = [];
     const updatedDoc = await loadFixture("gallery-comments.html");
     const updatedBody = updatedDoc.querySelector("#comment_9001");
@@ -51,7 +51,7 @@ describe("comment editing", () => {
     render({
       editComment: (url, commentId, text) => {
         calls.push([url, commentId, text]);
-        return Promise.resolve();
+        return Promise.resolve({ doc: updatedDoc, url: GALLERY_URL });
       },
       loadDocument: () => {
         loads++;
@@ -69,15 +69,14 @@ describe("comment editing", () => {
     }
     submit(host.querySelector<HTMLFormElement>(".comment-edit-form"));
 
-    await until(() => loads === 1, 100);
-    expect(calls).toEqual([[GALLERY_URL, 9001, "Revised body"]]);
-
     await until(
       () =>
         host.querySelector('.comment[data-comment-id="9001"] .comment-body')?.textContent ===
         "Revised body",
       100,
     );
+    expect(calls).toEqual([[GALLERY_URL, 9001, "Revised body"]]);
+    expect(loads).toBe(0);
     expect(host.querySelector('.comment[data-comment-id="9001"] .comment-score')?.textContent).toBe(
       "+9",
     );
@@ -88,7 +87,7 @@ describe("comment editing", () => {
     render({
       editComment: (_url, commentId) => {
         calls.push(commentId);
-        return Promise.resolve();
+        return Promise.resolve(undefined);
       },
     });
 

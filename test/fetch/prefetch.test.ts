@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { RateLimitedError } from "../../src/fetch/errors";
-import type { ViewerPageOptions } from "../../src/fetch/loader";
+import type { RetryWithNlOptions, ViewerPageOptions } from "../../src/fetch/loader";
 import type { Prefetcher, PrefetcherClock, PreloadedImage } from "../../src/fetch/prefetch";
 import { createPrefetcher, PREFETCH_IDLE_MS } from "../../src/fetch/prefetch";
 import { priorityOf } from "../../src/net/priority";
@@ -255,6 +255,7 @@ interface Rig {
   readonly images: ImageSink;
   readonly controls: Controls;
   readonly retries: PageData[];
+  readonly retryOptions: (RetryWithNlOptions | undefined)[];
   readonly prefetcher: Prefetcher;
 }
 
@@ -266,6 +267,7 @@ function createRig(name: string, total: number, depth = 1): Rig {
   const clock = new FakeClock();
   const images = imageSink();
   const retries: PageData[] = [];
+  const retryOptions: (RetryWithNlOptions | undefined)[] = [];
   const controls: Controls = {
     activeCount: 0,
     concurrency: 2,
@@ -277,8 +279,9 @@ function createRig(name: string, total: number, depth = 1): Rig {
     viewerPage: pages.viewerPage,
     preloadImage: (src) => images.preloadImage(src),
     touchImage: (src) => images.touchImage(src),
-    retryWithNl: (page) => {
+    retryWithNl: (page, options) => {
       retries.push(page);
+      retryOptions.push(options);
       return Promise.resolve(controls.retryResult);
     },
     activeCount: () => controls.activeCount,
@@ -287,7 +290,7 @@ function createRig(name: string, total: number, depth = 1): Rig {
     clock,
   });
 
-  const rig: Rig = { pages, clock, images, controls, retries, prefetcher };
+  const rig: Rig = { pages, clock, images, controls, retries, retryOptions, prefetcher };
   rigs.push(rig);
   return rig;
 }
@@ -484,6 +487,7 @@ describe("prefetch scheduling", () => {
 
     expect(rig.retries).toHaveLength(1);
     expect(rig.retries[0]?.imgSrc).toBe(original);
+    expect(rig.retryOptions[0]).toMatchObject({ priority: priorityOf("prefetch") });
     expect(rig.images.preloaded.map((image) => image.src)).toContain(fixed);
   });
 

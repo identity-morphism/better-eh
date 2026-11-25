@@ -14,7 +14,7 @@ import type { PageData } from "../../src/types";
 import type { ViewContext } from "../../src/views/context";
 import { flushMicrotasks } from "../ui/async";
 import { installDom, mountHost, requireNode, viewContext } from "../ui/dom";
-import { installTestObservers } from "../ui/observers";
+import { installTestObservers, TestResizeObserver } from "../ui/observers";
 
 const GALLERY = "https://e-hentai.org/g/123456/abcdef1234/";
 const VIEWER = "https://e-hentai.org/s/hash/123456-2";
@@ -70,12 +70,6 @@ void mock.module("../../src/ui/toast", () => ({
 // The loader, prefetcher and toast mocks must be registered before viewer.ts is evaluated, so this
 // import cannot be static.
 const { mountViewer } = await import("../../src/views/viewer");
-
-class TestResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 /** Stand-in for the detached `new Image()` probe the original upgrade loads. */
 class TestProbeImage {
@@ -506,6 +500,75 @@ describe("mountViewer", () => {
     press("r");
     expect(images[1]?.getAttribute("src")).toContain("nl=888");
     expect(images[0]?.getAttribute("src")).not.toContain("nl=");
+  });
+
+  test("continuous HUD writes only the fields that changed", async () => {
+    updateSettings({ ...DEFAULT_SETTINGS, readerMode: "continuous" });
+    const next = page({
+      viewerUrl: NEXT,
+      pageNum: 3,
+      counterText: "3 / 5",
+      imgSrc: "https://img.example/pages/3.jpg",
+      prevHref: VIEWER,
+      nextHref: NEXT_NEXT,
+    });
+    state.pages.set(NEXT, next);
+
+    active = harness();
+    mountViewer(host, page(), active.ctx);
+
+    const counter = requireNode<HTMLElement>(host, "#hud-counter");
+    const fileInfo = requireNode<HTMLElement>(host, "#file-info");
+    let counterWrites = 0;
+    let fileInfoWrites = 0;
+    let counterValue = counter.textContent;
+    let fileInfoValue = fileInfo.textContent;
+    Object.defineProperty(counter, "textContent", {
+      configurable: true,
+      get: () => counterValue,
+      set: (value: string) => {
+        counterWrites += 1;
+        counterValue = value;
+        counter.replaceChildren(value);
+      },
+    });
+    Object.defineProperty(fileInfo, "textContent", {
+      configurable: true,
+      get: () => fileInfoValue,
+      set: (value: string) => {
+        fileInfoWrites += 1;
+        fileInfoValue = value;
+        fileInfo.replaceChildren(value);
+      },
+    });
+
+    const disabledWrites = new Map<string, number>();
+    for (const id of ["#hud-first", "#hud-prev", "#hud-next", "#hud-last"]) {
+      const button = requireNode<HTMLButtonElement>(host, id);
+      let disabled = button.disabled;
+      disabledWrites.set(id, 0);
+      Object.defineProperty(button, "disabled", {
+        configurable: true,
+        get: () => disabled,
+        set: (value: boolean) => {
+          disabledWrites.set(id, (disabledWrites.get(id) ?? 0) + 1);
+          disabled = value;
+        },
+      });
+    }
+
+    click(requireNode(host, "#hud-next"));
+    await flushMicrotasks(16);
+
+    // The append's onChange reports the same page and flags as the mounted frame, so only the
+    // step to the new page writes: its counter/file info and the now-enabled Previous.
+    expect(counterWrites).toBe(1);
+    expect(fileInfoWrites).toBe(1);
+    expect(disabledWrites.get("#hud-prev")).toBe(1);
+    expect(disabledWrites.get("#hud-first")).toBe(0);
+    expect(disabledWrites.get("#hud-next")).toBe(0);
+    expect(disabledWrites.get("#hud-last")).toBe(0);
+    expect(counter.textContent).toBe("3 / 5");
   });
 
   test("an image failure shows the error panel and retries through the loader", async () => {

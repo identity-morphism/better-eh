@@ -3,7 +3,8 @@ import { anchorHref, categoryFromNode, cleanText } from "./helpers";
 import { parseTitle } from "./title";
 import { galleryIdentity } from "./url";
 
-const PAGES_TEXT = /^([\d,]+)\s+pages?$/i;
+/** `N pages` as an element's whole text, tolerating the whitespace around it without collapsing it. */
+const PAGES_TEXT = /^\s*([\d,]+)\s+pages?\s*$/i;
 
 /**
  * The ten favorite folders' native mark colours, in slot order. The site paints a favorited row's
@@ -41,10 +42,15 @@ function favoriteSlot(style: string | null): number | null {
  * Favorite mark on a row's posted date.
  *
  * Unfavorited rows carry a `posted_<gid>` node too, but the site only gives it a folder `title` and
- * the inline folder colour when the gallery sits in a favorite folder.
+ * the inline folder colour when the gallery sits in a favorite folder. `nodes` are the row's
+ * posted-date nodes, already queried by the caller.
  */
-function parseFavorite(root: Element): FavoriteMark | null {
-  for (const node of root.querySelectorAll<HTMLElement>('div[id^="posted_"]')) {
+function parseFavorite(nodes: Iterable<HTMLElement>): FavoriteMark | null {
+  for (const node of nodes) {
+    // `postedpop_` is the hover popup; it never carries the folder treatment.
+    if (!node.id.startsWith("posted_")) {
+      continue;
+    }
     const folder = node.getAttribute("title");
     const slot = favoriteSlot(node.getAttribute("style"));
     if (folder === null && slot === null) {
@@ -63,13 +69,39 @@ function parseFavorite(root: Element): FavoriteMark | null {
  * `alice7410 pages`). Reading one element at a time rejects those merges.
  */
 function parsePages(root: Element): number | null {
-  for (const node of root.querySelectorAll("*")) {
-    const match = PAGES_TEXT.exec(cleanText(node.textContent));
-    if (match?.[1]) {
-      return Number.parseInt(match[1].replace(/,/g, ""), 10);
+  // The count is normally a leaf's whole text (`<div>10 pages</div>`, `<span>3 pages</span>`).
+  // Reading only leaves skips the glued ancestor text and touches every text node once.
+  const nodes = root.querySelectorAll("*");
+  for (const node of nodes) {
+    if (node.childElementCount !== 0) {
+      continue;
+    }
+    const pages = wholePages(node.textContent);
+    if (pages !== null) {
+      return pages;
+    }
+  }
+  // Slow path: the number and the noun can sit in different nodes (`<div>3<span> pages</span></div>`),
+  // which only the ancestor's whole text reads as `3 pages`.
+  for (const node of nodes) {
+    if (node.childElementCount === 0) {
+      continue;
+    }
+    const pages = wholePages(node.textContent);
+    if (pages !== null) {
+      return pages;
     }
   }
   return null;
+}
+
+/** Parse an element's whole text as `N pages`; null unless the entire text is the count. */
+function wholePages(text: string | null): number | null {
+  const digits = PAGES_TEXT.exec(text ?? "")?.[1];
+  if (digits === undefined) {
+    return null;
+  }
+  return Number.parseInt(digits.replace(/,/g, ""), 10);
 }
 
 function coverSrc(image: HTMLImageElement | null): string | null {
@@ -90,6 +122,9 @@ function coverSize(image: HTMLImageElement | null): { width: number; height: num
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
+/** The `x y` offset pair the site pins on the rating sprite. */
+const RATING_POSITION = /(-?[\d.]+)px\s+(-?[\d.]+)px/;
+
 /**
  * Average rating from the `.ir` star sprite offset.
  *
@@ -101,7 +136,7 @@ function parseRating(root: Element): number | null {
   if (!position) {
     return null;
   }
-  const match = /(-?[\d.]+)px\s+(-?[\d.]+)px/.exec(position);
+  const match = RATING_POSITION.exec(position);
   if (!match?.[1] || !match[2]) {
     return null;
   }
@@ -169,6 +204,8 @@ function parseItem(root: Element, base: string, selectors: ItemSelectors): ListI
   }
 
   const image = root.querySelector<HTMLImageElement>(selectors.image);
+  const uploader = root.querySelector<HTMLAnchorElement>("a[href*='/uploader/']");
+  const postedNodes = root.querySelectorAll<HTMLElement>(POSTED_SELECTOR);
   const titleText =
     cleanText(root.querySelector(selectors.title)?.textContent) ||
     cleanText(link?.textContent) ||
@@ -183,12 +220,12 @@ function parseItem(root: Element, base: string, selectors: ItemSelectors): ListI
     coverSize: coverSize(image),
     rating: parseRating(root),
     category: categoryFromNode(root.querySelector<HTMLElement>(selectors.category)),
-    uploader: cleanText(root.querySelector("a[href*='/uploader/']")?.textContent) || null,
-    uploaderHref: anchorHref(root.querySelector("a[href*='/uploader/']"), base),
-    posted: cleanText(root.querySelector(POSTED_SELECTOR)?.textContent),
+    uploader: cleanText(uploader?.textContent) || null,
+    uploaderHref: anchorHref(uploader, base),
+    posted: cleanText(postedNodes[0]?.textContent),
     pages: parsePages(root),
     torrentsHref: parseTorrents(root, base),
-    favorite: parseFavorite(root),
+    favorite: parseFavorite(postedNodes),
   };
 }
 

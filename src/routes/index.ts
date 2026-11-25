@@ -12,7 +12,7 @@ import type { Priority } from "../net/priority";
 import { priorityOf } from "../net/priority";
 import { parseArchivePage } from "../parse/archive";
 import { parseFavorites } from "../parse/favorites";
-import { parseGalleryPage } from "../parse/gallery";
+import { parseGalleryPage, parseGalleryThumbPage } from "../parse/gallery";
 import { parseGalleryTorrents } from "../parse/gallery-torrents";
 import { parseHome } from "../parse/home";
 import { parseListPage } from "../parse/list";
@@ -84,6 +84,9 @@ export interface RouteViews {
   match(url: URL): OwnedRoute | null;
 }
 
+/** How many recently parsed document routes keep their data for a history move back. */
+const ROUTE_DATA_CACHE_LIMIT = 8;
+
 /** The per-route data of a document route: how to parse it, draw it, name it, and how to fetch it. */
 interface DocumentSpec<K extends OwnedKind, I = unknown> {
   /** Queue tag the document load carries. */
@@ -123,6 +126,26 @@ function documentView<K extends OwnedKind, I = unknown>(
   deps: RouteViewDeps,
   spec: DocumentSpec<K, I>,
 ): RouteViewFor<K> {
+  // History moves back to a page the app just rendered should not refetch it. The cap keeps a long
+  // session's visits from retaining every parsed document; `fresh` (and an always-fresh spec, such
+  // as settings or the archive chooser) still goes to the network.
+  const cached = new Map<string, RouteDataByKind[K]>();
+  const cacheable = spec.fresh !== true;
+  const remember = (route: RouteOf<K>, data: RouteDataByKind[K]): void => {
+    if (!cacheable) {
+      return;
+    }
+    // Refresh the insertion order so the cap evicts the least recently used page.
+    cached.delete(route.url);
+    cached.set(route.url, data);
+    if (cached.size > ROUTE_DATA_CACHE_LIMIT) {
+      const oldest = cached.keys().next().value;
+      if (oldest !== undefined) {
+        cached.delete(oldest);
+      }
+    }
+  };
+
   const fetchDocument = (
     url: string,
     signal: AbortSignal,
@@ -155,6 +178,12 @@ function documentView<K extends OwnedKind, I = unknown>(
   return {
     prepare: (route) => ({ route, bootUrl: null, state: {} }),
     load: async (route, signal, options) => {
+      if (options?.fresh !== true) {
+        const hit = cached.get(route.url);
+        if (hit !== undefined) {
+          return hit;
+        }
+      }
       const { doc, url } = await fetchDocument(
         spec.request?.(route) ?? route.url,
         signal,
@@ -163,7 +192,11 @@ function documentView<K extends OwnedKind, I = unknown>(
       );
       const data = spec.parse(doc, url, route);
       spec.sanity?.(data, doc);
+      remember(route, data);
       return data;
+    },
+    seed: (route, data) => {
+      remember(route, data);
     },
     parse: (doc, route) => {
       const data = spec.parse(doc, route.url, route);
@@ -287,10 +320,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
         tag: "gallery",
         parse: parseGalleryPage,
         sanity: assertGalleryPage,
-        page: (doc, url) => {
-          const page = parseGalleryPage(doc, url);
-          return { items: page.thumbs, next: page.nextHref };
-        },
+        page: parseGalleryThumbPage,
         render: (host, data, ctx, pageSource) => renderGallery(host, data, ctx, { pageSource }),
         title: (data) => documentTitle(data.title.primary),
       }),

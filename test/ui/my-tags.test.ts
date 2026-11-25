@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
+import { resetUserTagCache } from "../../src/data/my-tags";
 import type { MyTagsPage, TagsetState } from "../../src/parse/my-tags";
 import type { MyTagsViewDeps, SaveTagset } from "../../src/views/my-tags";
 import { renderMyTags } from "../../src/views/my-tags";
@@ -60,6 +61,7 @@ function render(deps: MyTagsViewDeps = {}): void {
 }
 
 beforeEach(() => {
+  resetUserTagCache();
   document = installDom(PAGE_URL);
   host = mountHost(document);
 });
@@ -131,9 +133,71 @@ describe("renderMyTags", () => {
     expect(document.getElementById("eh-toast")?.textContent).toBe("My Tags updated");
   });
 
+  test("adds an existing tag through the cached id without fetching My Tags", async () => {
+    let fetched = 0;
+    let reloads = 0;
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const ctx = viewContext({
+      reload: () => {
+        reloads += 1;
+      },
+    });
+    renderMyTags(host, data, ctx, {
+      loadDocument: () => {
+        fetched += 1;
+        return Promise.reject(new Error("the cached id must skip the page"));
+      },
+      post: (url, body) => {
+        calls.push({ url, body });
+        return Promise.resolve({});
+      },
+    });
+
+    const form = requireNode<HTMLFormElement>(host, "#my-tags-add");
+    // Linkedom has no HTMLFormElement.reset; the add flow clears the form after a save.
+    form.reset = () => undefined;
+    requireNode<HTMLInputElement>(form, ".my-tags-add-name").value = "female:entry";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await until(() => reloads === 1);
+
+    expect(fetched).toBe(0);
+    expect(calls.map((call) => call.url)).toEqual(["https://api.e-hentai.org/api.php"]);
+    expect(calls[0]?.body).toMatchObject({
+      method: "setusertag",
+      tagid: 4242,
+      // The add form starts blank, so its default flags are the edit's intent.
+      tagwatch: 0,
+      taghide: 0,
+      tagweight: 10,
+    });
+    expect(document.getElementById("eh-toast")?.textContent).toBe("My Tags updated");
+  });
+
+  test("delegates row changes: watch clears hide and the colour follows its toggle", () => {
+    render();
+
+    const row = requireNode<HTMLElement>(host, '[data-tag-id="4243"]');
+    const watch = requireNode<HTMLInputElement>(row, ".my-tags-watch");
+    const hide = requireNode<HTMLInputElement>(row, ".my-tags-hide");
+    const colorEnabled = requireNode<HTMLInputElement>(row, ".my-tags-color-enable");
+    const color = requireNode<HTMLInputElement>(row, ".my-tags-color");
+    expect(hide.hasAttribute("checked")).toBe(true);
+    expect(color.disabled).toBe(true);
+
+    watch.checked = true;
+    watch.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(hide.checked).toBe(false);
+
+    colorEnabled.checked = true;
+    colorEnabled.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(color.disabled).toBe(false);
+  });
+
   test("shows a save failure inline", async () => {
     render({
       post: () => Promise.reject(new Error("API is down")),
+      // The stale-id retry re-reads the list first; keep it off the network and let it fail.
+      loadDocument: () => Promise.reject(new Error("offline")),
     });
 
     const row = requireNode<HTMLElement>(host, '[data-tag-id="4243"]');

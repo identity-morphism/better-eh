@@ -72,6 +72,17 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
+/** Write only a property whose value actually moved, so a reposition costs no needless layout. */
+function setStyle(
+  panel: HTMLElement,
+  property: "left" | "right" | "top" | "bottom" | "width" | "maxHeight",
+  value: string,
+): void {
+  if (panel.style[property] !== value) {
+    panel.style[property] = value;
+  }
+}
+
 /**
  * Place `panel` against its anchor and cap its height to the room beside it.
  *
@@ -83,15 +94,15 @@ export function placePanel(panel: HTMLElement, placement: Placement): void {
   const { anchor } = placement;
   const gap = placement.gap ?? ANCHOR_GAP;
   // The top layer's own `inset: 0` would pin the panel to both edges; `left` alone drives the pair.
-  panel.style.right = "auto";
+  setStyle(panel, "right", "auto");
 
   if (anchor === null) {
     const size = boxSize(panel);
     const left = view.width > 0 ? (view.width - size.width) / 2 + view.left : 0;
     const top = view.height > 0 ? (view.height - size.height) / 2 + view.top : 0;
-    panel.style.left = `${Math.round(Math.max(view.left + PANEL_MARGIN, left))}px`;
-    panel.style.top = `${Math.round(Math.max(view.top + PANEL_MARGIN, top))}px`;
-    panel.style.maxHeight = view.height > 0 ? `${view.height - PANEL_MARGIN * 2}px` : "";
+    setStyle(panel, "left", `${Math.round(Math.max(view.left + PANEL_MARGIN, left))}px`);
+    setStyle(panel, "top", `${Math.round(Math.max(view.top + PANEL_MARGIN, top))}px`);
+    setStyle(panel, "maxHeight", view.height > 0 ? `${view.height - PANEL_MARGIN * 2}px` : "");
     return;
   }
 
@@ -105,7 +116,7 @@ export function placePanel(panel: HTMLElement, placement: Placement): void {
           Math.max(240, view.width - PANEL_MARGIN * 2),
         );
   if (placement.minWidth !== undefined) {
-    panel.style.width = `${Math.round(width)}px`;
+    setStyle(panel, "width", `${Math.round(width)}px`);
   }
 
   const rawLeft = placement.align === "end" ? rect.right - width : rect.left;
@@ -113,7 +124,7 @@ export function placePanel(panel: HTMLElement, placement: Placement): void {
     view.width > 0
       ? clamp(rawLeft, view.left + PANEL_MARGIN, view.left + view.width - width - PANEL_MARGIN)
       : rawLeft;
-  panel.style.left = `${Math.round(left)}px`;
+  setStyle(panel, "left", `${Math.round(left)}px`);
 
   const below = view.height > 0 ? view.top + view.height - rect.bottom - PANEL_MARGIN : 0;
   const above = view.height > 0 ? rect.top - view.top - PANEL_MARGIN : 0;
@@ -122,13 +133,13 @@ export function placePanel(panel: HTMLElement, placement: Placement): void {
   const room = openBelow ? below : above;
   const maxHeight = room > 0 ? Math.max(placement.fit?.floor ?? 0, room - gap) : 0;
 
-  panel.style.maxHeight = maxHeight > 0 ? `${Math.round(maxHeight)}px` : "";
+  setStyle(panel, "maxHeight", maxHeight > 0 ? `${Math.round(maxHeight)}px` : "");
   if (openBelow) {
-    panel.style.top = `${Math.round(rect.bottom + gap)}px`;
-    panel.style.bottom = "auto";
+    setStyle(panel, "top", `${Math.round(rect.bottom + gap)}px`);
+    setStyle(panel, "bottom", "auto");
   } else {
     // Pin the bottom edge rather than deriving a top: the panel's height is content-sized.
-    panel.style.top = "auto";
-    panel.style.bottom = `${Math.round(view.top + view.height - rect.top + gap)}px`;
+    setStyle(panel, "top", "auto");
+    setStyle(panel, "bottom", `${Math.round(view.top + view.height - rect.top + gap)}px`);
   }
 }

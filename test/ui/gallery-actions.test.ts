@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
+import { cacheUserTags, resetUserTagCache } from "../../src/data/my-tags";
 import type { GalleryData } from "../../src/types";
 import type { GalleryViewDeps } from "../../src/views/gallery";
 import { loadFixture } from "../dom";
-import { until } from "./async";
+import { deferred, until } from "./async";
 import { GALLERY_URL, mountGallery, renderGalleryAt } from "./gallery-harness";
 
 interface ApiCall {
@@ -30,6 +31,7 @@ describe("gallery parity actions", () => {
   let data: GalleryData;
 
   beforeEach(async () => {
+    resetUserTagCache();
     ({ host, data } = await mountGallery({ fixture: "gallery-comments.html" }));
   });
 
@@ -141,7 +143,7 @@ describe("gallery parity actions", () => {
     expect(card?.querySelector(".comment-vote-up")?.getAttribute("aria-pressed")).toBe("true");
   });
 
-  test("posting a comment submits the form and renders the refetched comment", async () => {
+  test("posting a comment renders the page the POST answered with", async () => {
     const updated = await loadFixture("gallery-comments.html");
     const template = updated.querySelectorAll("#cdiv .c1")[1];
     if (!template) {
@@ -162,7 +164,7 @@ describe("gallery parity actions", () => {
     render({
       postComment: (url, text) => {
         submitted.push({ url, text });
-        return Promise.resolve();
+        return Promise.resolve({ doc: updated, url });
       },
       loadDocument: (url) => {
         loads.push(url);
@@ -181,14 +183,79 @@ describe("gallery parity actions", () => {
     await until(() => host.querySelector(".comments-title")?.textContent === "Comments (3)", 50);
 
     expect(submitted).toEqual([{ url: GALLERY_URL, text: "Nice pacing" }]);
-    expect(loads).toEqual([GALLERY_URL]);
+    expect(loads).toEqual([]);
     expect(host.querySelector(".comments-title")?.textContent).toBe("Comments (3)");
     expect([...host.querySelectorAll(".comment-body")].map((node) => node.textContent)).toContain(
       "Fresh from the server",
     );
   });
 
-  test("the tag menu votes, closes, and refreshes the tag list", async () => {
+  test("a comment POST without a usable page falls back to one gallery reload", async () => {
+    const updated = await loadFixture("gallery-comments.html");
+    const loads: string[] = [];
+    render({
+      postComment: () => Promise.resolve(undefined),
+      loadDocument: (url) => {
+        loads.push(url);
+        return Promise.resolve({ doc: updated, url });
+      },
+    });
+
+    const textarea = host.querySelector<HTMLTextAreaElement>("textarea[name='commenttext_new']");
+    if (textarea) {
+      textarea.value = "Fallback path";
+    }
+    host
+      .querySelector("form.comment-composer")
+      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await until(() => host.querySelector(".comment-status")?.textContent === "", 50);
+
+    expect(loads).toEqual([GALLERY_URL]);
+  });
+
+  test("concurrent comment refreshes share one gallery fetch", async () => {
+    const updated = await loadFixture("gallery-comments.html");
+    const gate = deferred<{ doc: Document; url: string }>();
+    let loads = 0;
+    render({
+      postComment: () => Promise.resolve(undefined),
+      editComment: () => Promise.resolve(undefined),
+      loadDocument: () => {
+        loads += 1;
+        return gate.promise;
+      },
+    });
+
+    host
+      .querySelector<HTMLButtonElement>('.comment[data-comment-id="9001"] .comment-edit')
+      ?.click();
+    const editArea = host.querySelector<HTMLTextAreaElement>(".comment-edit-form textarea");
+    if (editArea) {
+      editArea.value = "Edited";
+    }
+    host
+      .querySelector<HTMLFormElement>(".comment-edit-form")
+      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    const composer = host.querySelector<HTMLTextAreaElement>("textarea[name='commenttext_new']");
+    if (composer) {
+      composer.value = "New comment";
+    }
+    host
+      .querySelector("form.comment-composer")
+      ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await until(() => loads === 1, 100);
+    // Let both mutations reach their refresh before releasing the shared fetch.
+    for (let turn = 0; turn < 10; turn++) {
+      await Promise.resolve();
+    }
+    gate.resolve({ doc: updated, url: GALLERY_URL });
+    await until(() => host.querySelector(".comment-status")?.textContent === "", 100);
+
+    expect(loads).toBe(1);
+  });
+
+  test("the tag menu votes, closes, and does not reload the gallery", async () => {
     const api = recorder();
     const loads: string[] = [];
     const doc = await loadFixture("gallery-comments.html");
@@ -212,7 +279,7 @@ describe("gallery parity actions", () => {
       (node) => node.textContent === "Vote up",
     );
     voteUp?.click();
-    await until(() => document.querySelector(".tag-menu-panel") === null && loads.length === 1, 50);
+    await until(() => document.querySelector(".tag-menu-panel") === null, 50);
 
     expect(api.calls[0]?.body).toEqual({
       method: "taggallery",
@@ -224,10 +291,11 @@ describe("gallery parity actions", () => {
       vote: 1,
     });
     expect(document.querySelector(".tag-menu-panel")).toBeNull();
-    expect(loads).toEqual([GALLERY_URL]);
+    // The tag row renders no vote state, so the vote is the whole mutation.
+    expect(loads).toEqual([]);
   });
 
-  test("the tag box adds tags and refreshes the tag list", async () => {
+  test("the tag box adds tags without reloading the gallery", async () => {
     const api = recorder();
     const loads: string[] = [];
     const doc = await loadFixture("gallery-comments.html");
@@ -247,7 +315,7 @@ describe("gallery parity actions", () => {
     }
     input.value = "female:glasses, sole female";
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    await until(() => loads.length === 1 && input.value === "", 50);
+    await until(() => input.value === "", 50);
 
     expect(api.calls[0]?.body).toEqual({
       method: "taggallery",
@@ -258,7 +326,39 @@ describe("gallery parity actions", () => {
       tags: "female:glasses, sole female",
       vote: 1,
     });
-    expect(loads).toEqual([GALLERY_URL]);
+    expect(loads).toEqual([]);
+  });
+
+  test("a tag action uses the cached user-tag id without fetching My Tags", async () => {
+    cacheUserTags([
+      { id: 99, name: "artist:alice", watched: false, hidden: false, color: "", weight: 10 },
+    ]);
+    const api = recorder({});
+    let loads = 0;
+    render({
+      post: api.post,
+      loadDocument: () => {
+        loads += 1;
+        return Promise.reject(new Error("the cached id should skip My Tags"));
+      },
+    });
+
+    host
+      .querySelector(".tag-chip")
+      ?.dispatchEvent(new Event("contextmenu", { bubbles: true, cancelable: true }));
+    [...document.querySelectorAll<HTMLButtonElement>(".tag-menu-item")]
+      .find((node) => node.textContent === "Watch tag")
+      ?.click();
+
+    await until(() => document.getElementById("eh-toast")?.textContent === "My Tags updated", 50);
+    expect(loads).toBe(0);
+    expect(api.calls).toHaveLength(1);
+    expect(api.calls[0]?.body).toMatchObject({
+      method: "setusertag",
+      tagid: 99,
+      tagwatch: 1,
+      taghide: 0,
+    });
   });
 
   test("renders the site actions as a rail instead of a hidden menu", () => {

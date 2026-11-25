@@ -20,6 +20,8 @@ interface ContinuousStackOptions<T, View> {
   render: (item: T) => { node: HTMLElement; view: View };
   /** Called after an append, a failure, or the end so the view can re-sync its own chrome. */
   onChange?: () => void;
+  /** A page node joined the stack, so document-space page positions may have moved. */
+  onAppend?: () => void;
   /** View lifetime; aborts observation and in-flight loads. */
   signal: AbortSignal;
 }
@@ -51,6 +53,7 @@ export function createContinuousStack<T, View>({
   load,
   render,
   onChange,
+  onAppend,
   signal,
 }: ContinuousStackOptions<T, View>): ContinuousStack<View> {
   const pages: ContinuousStackPage<View>[] = [];
@@ -58,6 +61,7 @@ export function createContinuousStack<T, View>({
     const rendered = render(item);
     pages.push({ node: rendered.node, view: rendered.view });
     container.insertBefore(rendered.node, scroll.element);
+    onAppend?.();
   };
 
   const scroll = infiniteScroll<T>({

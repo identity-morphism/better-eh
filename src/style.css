@@ -1,5 +1,6 @@
 body.no-cursor,
-body.no-cursor * {
+body.no-cursor #reader,
+body.no-cursor #reader * {
   cursor: none !important;
 }
 
@@ -502,6 +503,12 @@ body.fit-w.reader-spread #spread-img {
   display: flex;
   justify-content: center;
   width: 100%;
+  /*
+   * Isolate each page's layout from the ones around it. Paint containment is deliberately absent:
+   * the zoom controller scales `.reader-page-img`, which has to paint outside this box, and
+   * `contain: paint` would clip the zoomed artwork.
+   */
+  contain: layout;
 }
 
 .reader-page.is-failed .reader-page-img {
@@ -563,7 +570,8 @@ body.fit-h.reader-continuous #reader {
 
   /* Windows High Contrast users still need a pointer; an invisible cursor is an accessibility bug. */
   body.no-cursor,
-  body.no-cursor * {
+  body.no-cursor #reader,
+  body.no-cursor #reader * {
     cursor: auto !important;
   }
 

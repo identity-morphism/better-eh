@@ -104,8 +104,17 @@ export function tagNamespace(name: string): TagNamespace | null {
   return NAMESPACE_BY_NAME.get(name.trim().toLowerCase()) ?? null;
 }
 
+/** Anything outside printable ASCII needs NFKD plus mark stripping; ASCII folds by lowercasing. */
+const NON_ASCII = /[^\x20-\x7E]/u;
+
+/** A key that is already lower-case ASCII with single spaces needs no cleaning. */
+const CLEAN_KEY = /[^\x20-\x7E]|[_A-Z]|^\s|\s$|\s{2}/u;
+
 /** Case- and accent-insensitive form used for all matching. */
 export function fold(text: string): string {
+  if (!NON_ASCII.test(text)) {
+    return text.toLowerCase();
+  }
   return text
     .normalize("NFKD")
     .replace(/\p{M}+/gu, "")
@@ -114,6 +123,10 @@ export function fold(text: string): string {
 
 /** Normalize a raw tag key the same way for downloads, caches, and the compact asset. */
 export function cleanTagKey(key: string): string {
+  // The index read re-cleans every stored key; most are already in canonical form.
+  if (!CLEAN_KEY.test(key)) {
+    return key;
+  }
   return collapseWhitespace(key.replace(/_/gu, " ")).toLowerCase();
 }
 

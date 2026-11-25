@@ -4,6 +4,7 @@ import {
   postComment as postCommentRequest,
   voteComment,
 } from "../data/gallery-actions";
+import type { HtmlResponse } from "../fetch/loader";
 import type { GalleryApiConfig, GalleryComment, GalleryData } from "../types";
 import { appendChildren, buttonEl, el } from "./dom";
 import { errorText } from "./error-text";
@@ -17,8 +18,11 @@ function isAborted(signal: AbortSignal): boolean {
 
 /** Transports and defaults for one comment section render. */
 export interface CommentSectionDeps extends CommentTransports {
-  /** Re-read the gallery after a mutation and re-render the comments from the fresh page. */
-  refresh: () => Promise<void>;
+  /**
+   * Re-render the comments from the page the mutation answered with, or refetch when the transport
+   * returned no usable document.
+   */
+  refresh: (page?: HtmlResponse) => Promise<void>;
 }
 
 /** Inputs for {@link commentsSection}. */
@@ -42,7 +46,7 @@ function commentCard(
   config: GalleryApiConfig | null,
   deps: CommentSectionDeps,
   signal: AbortSignal,
-  edit: (commentId: number, text: string) => Promise<void>,
+  edit: (commentId: number, text: string) => Promise<HtmlResponse | undefined>,
 ): HTMLElement {
   const card = el("article", {
     class: comment.uploader ? "comment is-uploader" : "comment",
@@ -185,7 +189,7 @@ function commentCard(
 
             void editingAction.run({
               run: async () => {
-                await edit(comment.id, text);
+                const page = await edit(comment.id, text);
                 if (signal.aborted) {
                   return;
                 }
@@ -196,7 +200,7 @@ function commentCard(
                 bodyHost.replaceChildren(body);
                 showToast("Comment updated");
                 try {
-                  await deps.refresh();
+                  await deps.refresh(page);
                 } catch (error) {
                   if (!isAborted(signal)) {
                     showToast(errorText(error));
@@ -274,10 +278,10 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
   const posting = createPendingAction();
 
   /** Re-render the comments after a post; failure here must not claim the post failed. */
-  const refresh = async (): Promise<void> => {
+  const refresh = async (page?: HtmlResponse): Promise<void> => {
     status.replaceChildren("Posted. Refreshing…");
     try {
-      await deps.refresh();
+      await deps.refresh(page);
       if (signal.aborted) {
         return;
       }
@@ -314,12 +318,12 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
 
       void posting.run({
         run: async () => {
-          await postComment(data.url, text, signal);
+          const page = await postComment(data.url, text, signal);
           if (signal.aborted) {
             return;
           }
           textarea.value = "";
-          await refresh();
+          await refresh(page);
         },
         signal,
         setBusy: (busy) => {

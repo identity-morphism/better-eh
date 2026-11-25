@@ -472,12 +472,12 @@ export function renderList(
   grid.append(shownItems.map((item) => resultCard(item, ctx.signal)));
 
   const syncCount = (): void => {
-    const cards = grid.element.querySelectorAll(".card").length;
-    if (rangeActive) {
-      countNode.textContent = `${cards} shown`;
-    } else if (data.resultText === null) {
-      countNode.textContent = countText(cards, "item");
+    // A site-provided result line is a total, not the cards on screen, so appends never change it.
+    if (!rangeActive && data.resultText !== null) {
+      return;
     }
+    const cards = grid.size();
+    countNode.textContent = rangeActive ? `${cards} shown` : countText(cards, "item");
   };
 
   const footer = el("div");

@@ -20,6 +20,12 @@ const QUERY_VERSION = 1;
 const DRAFT_KEY = "eh:search-draft:v1";
 const DRAFT_VERSION = 1;
 
+/**
+ * A keystroke should update the field instantly, not wait on storage. Writes coalesce, and a page
+ * hiding or losing focus flushes the last text so a reload or a reopened tab sees it.
+ */
+const DRAFT_WRITE_DELAY_MS = 150;
+
 const adapter = sessionStorageAdapter();
 
 const queryStore = createStore<string>(
@@ -42,6 +48,71 @@ const draftStore = createStore<string | null>(
   },
   adapter,
 );
+
+let draftTimer: number | null = null;
+let pendingDraft: string | null = null;
+let boundWindow: Window | null = null;
+let boundDocument: Document | null = null;
+
+/** Persist the newest draft now and cancel the timer that would have done it. */
+function flushDraftWrite(): void {
+  if (draftTimer !== null) {
+    window.clearTimeout(draftTimer);
+    draftTimer = null;
+  }
+  if (pendingDraft === null) {
+    return;
+  }
+  const text = pendingDraft;
+  pendingDraft = null;
+  draftStore.write(text);
+}
+
+function flushWhenHidden(): void {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    flushDraftWrite();
+  }
+}
+
+/**
+ * Bind the flush points to the current document.
+ *
+ * Tests replace the global window between cases; following the live object keeps the listener on
+ * the page that is actually open and removes the one on the discarded document.
+ */
+function bindDraftLifecycle(): void {
+  const view = typeof window === "undefined" ? null : window;
+  if (view !== null && view !== boundWindow) {
+    boundWindow?.removeEventListener("pagehide", flushDraftWrite);
+    boundWindow?.removeEventListener("blur", flushDraftWrite);
+    view.addEventListener("pagehide", flushDraftWrite);
+    view.addEventListener("blur", flushDraftWrite);
+    boundWindow = view;
+  }
+  const doc = typeof document === "undefined" ? null : document;
+  if (doc !== null && doc !== boundDocument) {
+    boundDocument?.removeEventListener("visibilitychange", flushWhenHidden);
+    doc.addEventListener("visibilitychange", flushWhenHidden);
+    boundDocument = doc;
+  }
+}
+
+function scheduleDraftWrite(text: string): void {
+  bindDraftLifecycle();
+  pendingDraft = text;
+  if (draftTimer !== null) {
+    window.clearTimeout(draftTimer);
+  }
+  draftTimer = window.setTimeout(flushDraftWrite, DRAFT_WRITE_DELAY_MS);
+}
+
+function discardDraftWrite(): void {
+  if (draftTimer !== null) {
+    window.clearTimeout(draftTimer);
+    draftTimer = null;
+  }
+  pendingDraft = null;
+}
 
 /** What the tab is searching for: the committed query and the text being edited. */
 export interface SearchDraft {
@@ -91,6 +162,7 @@ export function setSearchQuery(query: SearchQuery): void {
   const next: SearchDraft = { query: { ...query }, text: query.text };
   const url = buildSearchUrl(next.query);
 
+  discardDraftWrite();
   cached = next;
   queryStore.write(url);
   draftStore.write(next.text);
@@ -108,7 +180,7 @@ export function setSearchDraftText(text: string): void {
   }
 
   cached = { query: previous.query, text };
-  draftStore.write(text);
+  scheduleDraftWrite(text);
   notify();
 }
 
@@ -122,3 +194,5 @@ export function subscribeSearchDraft(
 function notify(): void {
   draftChanged.emit(getSearchDraft());
 }
+
+bindDraftLifecycle();

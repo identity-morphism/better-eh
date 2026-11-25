@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { formatPageRange, parseGalleryPage } from "../../src/parse/gallery";
+import {
+  formatPageRange,
+  parseGalleryApiConfig,
+  parseGalleryPage,
+  parseGalleryThumbPage,
+} from "../../src/parse/gallery";
 import { loadFixture, parseDocument } from "../dom";
 
 const GALLERY_URL = "https://e-hentai.org/g/123456/abcdef1234/";
@@ -111,5 +116,119 @@ describe("parseGalleryPage", () => {
     expect(() =>
       parseGalleryPage(parseDocument(""), "https://e-hentai.org/g/not-a-gallery/"),
     ).toThrow(Error);
+  });
+});
+
+describe("parseGalleryThumbPage", () => {
+  test("returns the same thumbs and next link as the full parser on each gallery fixture", async () => {
+    for (const name of ["gallery.html", "gallery-comments.html"]) {
+      const fixture = await loadFixture(name);
+      const full = parseGalleryPage(fixture, GALLERY_URL);
+
+      expect(parseGalleryThumbPage(fixture, GALLERY_URL)).toEqual({
+        items: full.thumbs,
+        next: full.nextHref,
+      });
+    }
+  });
+
+  test("parses a thumbnail page without tags, comments, actions or credentials", () => {
+    const fragment = parseDocument(`
+      <div id="gdt">
+        <a href="/s/aaa/123456-1"
+          ><div
+            style="background-image:url(/sprites/a.jpg);width:200px;height:150px;background-position:0px 0px"
+          ></div
+        ></a>
+        <a href="/s/aaa/123456-2"
+          ><div
+            style="background-image:url(/sprites/a.jpg);width:200px;height:150px;background-position:150px 0px"
+            title="Page 2"
+          ></div
+        ></a>
+      </div>
+      <div class="gpc">Showing 26 - 50 of 60</div>
+    `);
+
+    const page = parseGalleryThumbPage(fragment, "https://e-hentai.org/g/123456/abcdef1234/?p=1");
+
+    expect(page.items).toEqual([
+      {
+        href: "https://e-hentai.org/s/aaa/123456-1",
+        label: 1,
+        sprite: "/sprites/a.jpg",
+        x: 0,
+        width: 200,
+        height: 150,
+        spriteCount: 2,
+      },
+      {
+        href: "https://e-hentai.org/s/aaa/123456-2",
+        label: 2,
+        sprite: "/sprites/a.jpg",
+        x: 150,
+        width: 200,
+        height: 150,
+        spriteCount: 2,
+      },
+    ]);
+    expect(page.next).toBe("https://e-hentai.org/g/123456/abcdef1234/?p=2");
+  });
+});
+
+describe("inline script values", () => {
+  test("reads assignments split across scripts, skipping external scripts", () => {
+    const parsed = parseDocument(`
+      <script>var api_url = "https://api.example/api.php";</script>
+      <script src="/static.js">var apiuid = 999;</script>
+      <script>var apiuid = 42; var apikey = 'key';</script>
+      <script>
+        var gid = 123456;
+        var token = "tok";
+      </script>
+    `);
+
+    expect(parseGalleryApiConfig(parsed)).toEqual({
+      apiUrl: "https://api.example/api.php",
+      apiUid: "42",
+      apiKey: "key",
+      gid: "123456",
+      token: "tok",
+    });
+  });
+
+  test("keeps the first occurrence of each value", () => {
+    const parsed = parseDocument(`
+      <script>
+        var api_url = "https://api.example/api.php";
+        var apiuid = 1;
+        var apikey = "first";
+        var gid = 111;
+        var token = "first-token";
+        var display_rating = 2.5;
+      </script>
+      <script>
+        var api_url = "https://evil.example/api.php";
+        var apiuid = 2;
+        var apikey = "second";
+        var gid = 222;
+        var token = "second-token";
+        var display_rating = 4.5;
+      </script>
+      <h1 id="gn">A Gallery</h1>
+      <div id="rating_image" class="ir irr"></div>
+      <div id="rating_label">Average: 4.00</div>
+    `);
+
+    const page = parseGalleryPage(parsed, GALLERY_URL);
+
+    expect(page.apiConfig).toEqual({
+      apiUrl: "https://api.example/api.php",
+      apiUid: "1",
+      apiKey: "first",
+      gid: "111",
+      token: "first-token",
+    });
+    expect(page.ratingInfo.user).toBe(2.5);
   });
 });

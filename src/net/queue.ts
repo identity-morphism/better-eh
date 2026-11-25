@@ -84,7 +84,13 @@ export class RequestQueue {
     return promise;
   }
 
-  purge(predicate: (task: { url: string; tag: string }) => boolean): void {
+  /**
+   * Drop queued work the predicate selects; a purged request rejects with `RequestPurgedError`.
+   *
+   * The payload includes `priority`, so a caller can spare work the reader is waiting on without
+   * relying on every producer to agree on a tag.
+   */
+  purge(predicate: (task: { url: string; tag: string; priority: Priority }) => boolean): void {
     for (let index = this.pending.length - 1; index >= 0; index--) {
       const task = this.pending[index];
       if (!task || !predicate(task)) {

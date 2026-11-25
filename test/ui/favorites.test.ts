@@ -129,6 +129,37 @@ describe("renderFavorites", () => {
     expect(bar?.hidden).toBe(true);
   });
 
+  test("measures the bulk spacer only when the bar appears or disappears", () => {
+    // linkedom has no viewport, so give syncBulkSpace one that measures.
+    window.innerHeight = 800;
+    const bar = host.querySelector<HTMLElement>(".favorites-bulk");
+    const spacer = host.querySelector<HTMLElement>(".favorites-bulk-spacer");
+    if (!bar || !spacer) {
+      throw new Error("missing bulk bar");
+    }
+    const real = bar.getBoundingClientRect.bind(bar);
+    let measured = 0;
+    bar.getBoundingClientRect = () => {
+      measured += 1;
+      return real();
+    };
+
+    select("101");
+    expect(measured).toBe(1);
+    expect(spacer.hidden).toBe(false);
+
+    // A second card only changes the count, not the bar's footprint.
+    select("102");
+    select("101");
+    expect(measured).toBe(1);
+
+    // Hiding the bar needs no measurement: the spacer simply collapses.
+    select("102");
+    expect(measured).toBe(1);
+    expect(spacer.hidden).toBe(true);
+    expect(bar.hidden).toBe(true);
+  });
+
   test("deletes the selected galleries and clears the selection", async () => {
     select("101");
     select("102");

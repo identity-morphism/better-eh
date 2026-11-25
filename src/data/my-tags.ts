@@ -2,9 +2,10 @@
  * My Tags mutations: watch, hide, colour and weight a tag.
  *
  * The site stores user tags server-side. Editing an existing tag goes through the `setusertag` JSON
- * API, which needs the numeric user-tag id (only present on `/mytags`), so the current list is
- * fetched first unless the caller already has the row's state. A tag that is not on that list is
- * added through the native `/mytags` form instead.
+ * API, which needs the numeric user-tag id (only present on `/mytags`). Every `/mytags` load fills
+ * a session cache keyed by tag name, so callers can skip that fetch; a cached id that the API
+ * rejects is re-read once and retried, and a tag that is not on the list is added through the
+ * native `/mytags` form instead.
  */
 
 import type { DocumentOptions, HtmlResponse } from "../fetch/loader";
@@ -99,6 +100,36 @@ function normalizeName(name: string): string {
   return collapseWhitespace(name).toLowerCase();
 }
 
+/**
+ * Saved tags this session has seen, keyed by normalized `namespace:tag`.
+ *
+ * `/mytags` is the only page that exposes the numeric ids `setusertag` needs, so every page load
+ * feeds this cache and the gallery's tag menu can resolve a tag without a fresh fetch.
+ */
+const userTagCache = new Map<string, UserTagState>();
+
+/**
+ * Remember the tags a `/mytags` page listed.
+ *
+ * Entries merge instead of replacing the map: a `?tagset=` view can list only one set's tags, and
+ * the other sets' ids stay valid.
+ */
+export function cacheUserTags(tags: readonly UserTagState[]): void {
+  for (const tag of tags) {
+    userTagCache.set(normalizeName(tag.name), tag);
+  }
+}
+
+/** One saved tag's current state, or `undefined` when this session has not loaded `/mytags`. */
+export function lookupUserTag(name: string): UserTagState | undefined {
+  return userTagCache.get(normalizeName(name));
+}
+
+/** Forget every cached id; tests share the module, and a new page load repopulates the cache. */
+export function resetUserTagCache(): void {
+  userTagCache.clear();
+}
+
 /** Round a weight and keep it inside the site's -99..99 range; missing input means 10. */
 export function normalizeWeight(weight: number | null | undefined): number {
   if (weight === null || weight === undefined || !Number.isFinite(weight)) {
@@ -128,6 +159,40 @@ async function postTagJson(url: string, body: unknown, signal?: AbortSignal): Pr
 
 async function addTagForm(url: string, body: URLSearchParams, signal?: AbortSignal): Promise<void> {
   await postForm(url, body, { tag: "my-tags", failure: "Could not save tag", signal });
+}
+
+interface SavedTagNext {
+  watched: boolean;
+  hidden: boolean;
+  color: string;
+  weight: number;
+}
+
+/** POST one `setusertag` update for an id the page exposed. */
+async function saveUserTag(deps: MyTagDeps, id: number, next: SavedTagNext): Promise<void> {
+  const post = deps.post ?? ((url: string, body: unknown) => postTagJson(url, body, deps.signal));
+  const data = await post(deps.config.apiUrl, {
+    method: "setusertag",
+    apiuid: deps.config.apiUid,
+    apikey: deps.config.apiKey,
+    tagid: id,
+    tagwatch: next.watched ? 1 : 0,
+    taghide: next.hidden ? 1 : 0,
+    tagcolor: next.color,
+    tagweight: next.weight,
+  });
+  throwIfFailed(data);
+}
+
+/** Read `/mytags` once, refresh the cache, and return the requested tag's row. */
+async function loadUserTag(name: string, deps: MyTagDeps): Promise<UserTagState | undefined> {
+  const response = await deps.loadDocument(deps.myTagsUrl, { fresh: true, signal: deps.signal });
+  if (deps.signal?.aborted) {
+    return undefined;
+  }
+  const tags = parseUserTags(response.doc);
+  cacheUserTags(tags);
+  return tags.find((entry) => normalizeName(entry.name) === name);
 }
 
 /**
@@ -197,14 +262,11 @@ export async function applyMyTag(
     throw new Error("Missing tag name.");
   }
 
-  let existing = deps.existing;
-  if (existing === undefined) {
-    const response = await deps.loadDocument(deps.myTagsUrl, { fresh: true, signal: deps.signal });
-    if (deps.signal?.aborted) {
-      return "updated";
-    }
-    existing = parseUserTags(response.doc).find((entry) => normalizeName(entry.name) === name);
-  }
+  // The caller's row state and the session cache both skip the `/mytags` fetch. Only a cache miss
+  // reads the page; that read also refreshes every cached id.
+  let existing = deps.existing ?? lookupUserTag(name);
+  const known = existing;
+  existing ??= await loadUserTag(name, deps);
   if (deps.signal?.aborted) {
     return "updated";
   }
@@ -218,25 +280,40 @@ export async function applyMyTag(
     } else if (change.hidden === true) {
       watched = false;
     }
-    const next = {
+    const next: SavedTagNext = {
       watched,
       hidden,
       color: change.color === undefined ? existing.color : normalizeColor(change.color),
       weight: change.weight === undefined ? existing.weight : normalizeWeight(change.weight),
     };
-    const post = deps.post ?? ((url, body) => postTagJson(url, body, deps.signal));
-    const data = await post(deps.config.apiUrl, {
-      method: "setusertag",
-      apiuid: deps.config.apiUid,
-      apikey: deps.config.apiKey,
-      tagid: existing.id,
-      tagwatch: next.watched ? 1 : 0,
-      taghide: next.hidden ? 1 : 0,
-      tagcolor: next.color,
-      tagweight: next.weight,
-    });
-    throwIfFailed(data);
-    return "updated";
+
+    try {
+      await saveUserTag(deps, existing.id, next);
+      userTagCache.set(name, { id: existing.id, name: existing.name, ...next });
+      return "updated";
+    } catch (failure) {
+      // A cached id goes stale when the tag is deleted and re-added elsewhere. Re-read once; a
+      // vanished tag falls through to the add form, a changed id gets the same edit retried.
+      if (known === undefined) {
+        throw failure;
+      }
+      let fresh: UserTagState | undefined;
+      try {
+        fresh = await loadUserTag(name, deps);
+      } catch {
+        throw failure;
+      }
+      if (deps.signal?.aborted) {
+        throw failure;
+      }
+      if (fresh === undefined) {
+        userTagCache.delete(name);
+      } else {
+        await saveUserTag(deps, fresh.id, next);
+        userTagCache.set(name, { id: fresh.id, name: fresh.name, ...next });
+        return "updated";
+      }
+    }
   }
 
   const weight = change.weight === undefined ? DEFAULT_WEIGHT : normalizeWeight(change.weight);

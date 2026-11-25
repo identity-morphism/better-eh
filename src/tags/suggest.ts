@@ -234,6 +234,42 @@ function appliedTerms(terms: readonly SearchTerm[], phrase: SearchTerm): Map<str
   return applied;
 }
 
+/**
+ * Resolve a saved usage id (`namespace\0rawKey`) without materialising the index's 45k-entry lookup
+ * map. Namespace arrays are key-sorted, so a binary search finds a recent tag directly and an empty
+ * query stays cheap when the user has a handful of recents. The lookup map remains a fallback for
+ * an id the sorted arrays cannot resolve.
+ */
+function usageEntry(index: TagIndex, id: string): TagEntry | null {
+  const separator = id.indexOf("\u0000");
+  if (separator < 0) {
+    return null;
+  }
+  const entries = index.byNamespace.get(id.slice(0, separator));
+  if (entries === undefined) {
+    return null;
+  }
+  const key = id.slice(separator + 1);
+  let low = 0;
+  let high = entries.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const entry = entries[middle];
+    if (entry === undefined) {
+      break;
+    }
+    if (entry.key === key) {
+      return entry;
+    }
+    if (entry.key < key) {
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return index.lookup.get(id) ?? null;
+}
+
 function recentEntries(
   index: TagIndex,
   usage: ReadonlyMap<string, TagUsage>,
@@ -242,7 +278,7 @@ function recentEntries(
 ): TagEntry[] {
   return [...usage.entries()]
     .map(([id]) => {
-      const entry = index.lookup.get(id);
+      const entry = usageEntry(index, id);
       if (!entry) {
         return null;
       }
@@ -254,6 +290,38 @@ function recentEntries(
     .map((item) => item.entry);
 }
 
+/** The ranking order shared by the full sort and the bounded shortlist. */
+function compareRank(score: number, entry: TagEntry, otherScore: number, other: TagEntry): number {
+  return (
+    otherScore - score ||
+    entry.key.length - other.key.length ||
+    (entry.key < other.key ? -1 : entry.key > other.key ? 1 : 0) ||
+    (entry.ns.id < other.ns.id ? -1 : 1)
+  );
+}
+
+/** Insert into the score-ordered shortlist, dropping the worst entry past `limit`. */
+function keepBestTag(items: TagSuggestion[], candidate: TagSuggestion, limit: number): void {
+  let low = 0;
+  let high = items.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    const current = items[middle];
+    if (
+      current !== undefined &&
+      compareRank(candidate.score, candidate.entry, current.score, current.entry) < 0
+    ) {
+      high = middle;
+    } else {
+      low = middle + 1;
+    }
+  }
+  items.splice(low, 0, candidate);
+  if (items.length > limit) {
+    items.pop();
+  }
+}
+
 function tagSuggestions(
   entries: readonly TagEntry[],
   query: string,
@@ -263,9 +331,14 @@ function tagSuggestions(
   maxCount: number,
   prefixNs: string,
   completions: ReadonlyMap<string, TagCompletion>,
+  limit: number,
 ): { items: TagSuggestion[]; total: number } {
   const items: TagSuggestion[] = [];
   let total = 0;
+  // Empty maps are the common case (no picks yet); skip two id constructions per match then.
+  const hasUsage = usage.size > 0;
+  const hasCompletions = completions.size > 0;
+  const hasApplied = applied.size > 0;
 
   for (const entry of entries) {
     const match = scoreTag(entry, query, maxCount);
@@ -273,27 +346,36 @@ function tagSuggestions(
       continue;
     }
     total++;
-    items.push({
-      kind: "tag",
-      entry,
-      score:
-        match.score +
-        usageBoost(usage, entry, now) +
-        completionBoost(completions, entry, prefixNs, query, now),
-      matchStart: match.at,
-      matchLength: query.length,
-      applied: applied.get(tagIdentity(entry.ns, entry.key)) ?? null,
-      recent: usage.has(tagId(entry.ns.id, entry.key)),
-    });
+    if (limit <= 0) {
+      continue;
+    }
+    const score =
+      match.score +
+      (hasUsage ? usageBoost(usage, entry, now) : 0) +
+      (hasCompletions ? completionBoost(completions, entry, prefixNs, query, now) : 0);
+    // Reject before building the suggestion: a match that cannot enter the shortlist must not
+    // allocate its identity string or result object. Only the best `limit` can ever be displayed.
+    const worst = items.length >= limit ? items[items.length - 1] : undefined;
+    if (worst !== undefined && compareRank(score, entry, worst.score, worst.entry) >= 0) {
+      continue;
+    }
+    keepBestTag(
+      items,
+      {
+        kind: "tag",
+        entry,
+        score,
+        matchStart: match.at,
+        matchLength: query.length,
+        // `entry.folded` is already `normaliseTagKey(entry.key)`, so the identity is a plain join;
+        // rebuilding it through `tagIdentity` re-normalises every matching key on every keystroke.
+        applied: hasApplied ? (applied.get(`${entry.ns.id}\u0000${entry.folded}`) ?? null) : null,
+        recent: hasUsage && usage.has(tagId(entry.ns.id, entry.key)),
+      },
+      limit,
+    );
   }
 
-  items.sort(
-    (a, b) =>
-      b.score - a.score ||
-      a.entry.key.length - b.entry.key.length ||
-      (a.entry.key < b.entry.key ? -1 : a.entry.key > b.entry.key ? 1 : 0) ||
-      (a.entry.ns.id < b.entry.ns.id ? -1 : 1),
-  );
   return { items, total };
 }
 
@@ -361,8 +443,9 @@ function searchPhrase(
       index.maxCount,
       namespace.id,
       completions,
+      limit,
     );
-    return { term: phrase, items: items.slice(0, limit), total, empty: false };
+    return { term: phrase, items, total, empty: false };
   }
 
   const query = fold(phrase.value);
@@ -388,6 +471,7 @@ function searchPhrase(
     index.maxCount,
     "",
     completions,
+    limit,
   );
   return {
     term: phrase,

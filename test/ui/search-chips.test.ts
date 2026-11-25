@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import { renderSearchChips } from "../../src/ui/search-chips";
+import { closePopovers } from "../../src/ui/popover";
+import { createSearchChips, renderSearchChips } from "../../src/ui/search-chips";
 import { installDom } from "./dom";
 
 beforeEach(() => {
@@ -75,5 +76,65 @@ describe("search filter chips", () => {
     row?.querySelector<HTMLButtonElement>(".search-filters-clear")?.click();
     expect(sends).toEqual([""]);
     expect(renderSearchChips("   ", () => undefined)).toBeNull();
+  });
+});
+
+describe("search filter reconciliation", () => {
+  test("reuses unchanged chips and keeps their edits on the live text", () => {
+    const edits: Array<{ text: string; index: number }> = [];
+    const chips = createSearchChips((text, action) => {
+      if (action.type !== "clear") {
+        edits.push({ text, index: action.index });
+      }
+    });
+    expect(chips.update("one two three")).toBe(true);
+
+    const row = chips.element;
+    const [first, second] = toggles(row);
+    if (!first || !second) {
+      throw new Error("expected chips");
+    }
+
+    chips.update("one two three ");
+    expect(toggles(row)[0]).toBe(first);
+    expect(toggles(row)[1]).toBe(second);
+
+    chips.update("one two three four");
+    expect(toggles(row)[0]).toBe(first);
+    expect(toggles(row)[1]).toBe(second);
+    expect(toggles(row)).toHaveLength(4);
+
+    // Dropping the first chip reuses the suffix; a reorder reuses the same nodes.
+    const four = toggles(row)[3];
+    chips.update("two three four");
+    expect(toggles(row)[0]).toBe(second);
+    chips.update("four two");
+    expect(toggles(row)[0]).toBe(four);
+    expect(toggles(row).map((node) => node.querySelector(".term-value")?.textContent)).toEqual([
+      "four",
+      "two",
+    ]);
+    expect(toggles(row)[1]).toBe(second);
+
+    // Reused chips still open their context menu after the rebuild.
+    const opened = toggles(row)[1]?.dispatchEvent(
+      new Event("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    expect(opened).toBe(false);
+    expect(
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(
+        (node) => node.textContent,
+      ),
+    ).toContain("Remove");
+    closePopovers();
+
+    // Same rendered chips, new source offsets: the click must remove the live term.
+    chips.update("one  two three four");
+    toggles(row)[1]?.click();
+    expect(edits.at(-1)).toEqual({ text: "one three four", index: 1 });
+
+    expect(chips.update("")).toBe(false);
+    expect(toggles(row)).toHaveLength(0);
+    chips.destroy();
   });
 });

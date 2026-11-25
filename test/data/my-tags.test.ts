@@ -1,7 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
 import type { GalleryPost } from "../../src/data/gallery-actions";
-import { applyMyTag, normalizeWeight, saveTagset } from "../../src/data/my-tags";
+import {
+  applyMyTag,
+  cacheUserTags,
+  lookupUserTag,
+  normalizeWeight,
+  resetUserTagCache,
+  saveTagset,
+} from "../../src/data/my-tags";
 import type { DocumentOptions, HtmlResponse } from "../../src/fetch/loader";
 import type { TagsetState, UserTagState } from "../../src/parse/my-tags";
 import { normalizeColor, parseUserTags } from "../../src/parse/my-tags";
@@ -42,6 +49,26 @@ function doc(): Document {
   `);
 }
 
+/** One saved-tag block per entry, as `/mytags` renders them. */
+function tagList(entries: ReadonlyArray<{ id: number; name: string }>): Document {
+  return parseDocument(`
+    <div id="usertags_outer">
+      ${entries
+        .map(
+          ({ id, name }) => `
+        <div id="usertag_${id}">
+          <div id="tagpreview_${id}" title="${name}"></div>
+          <input id="tagwatch_${id}" type="checkbox">
+          <input id="taghide_${id}" type="checkbox">
+          <input id="tagcolor_${id}" value="">
+          <input id="tagweight_${id}" value="10">
+        </div>`,
+        )
+        .join("")}
+    </div>
+  `);
+}
+
 interface DepsOverrides {
   loadDocument?: (url: string, options: DocumentOptions) => Promise<HtmlResponse>;
   post?: GalleryPost;
@@ -58,6 +85,8 @@ function deps(overrides: DepsOverrides = {}) {
     ...overrides,
   };
 }
+
+beforeEach(resetUserTagCache);
 
 describe("My Tags parsing", () => {
   test("reads the saved tags and their current flags", () => {
@@ -154,7 +183,8 @@ describe("My Tags mutations", () => {
           tagwatch: 0,
           taghide: 1,
           tagcolor: "#00ff00",
-          tagweight: 10,
+          // The previous edit patched the cache, so the weight carries forward like the page would.
+          tagweight: 30,
         },
       },
       {
@@ -207,6 +237,134 @@ describe("My Tags mutations", () => {
     expect(body.taghide).toBe(0);
     expect(body.tagcolor).toBe("#ff8800");
     expect(body.tagweight).toBe(25);
+  });
+
+  test("resolves a cached id without fetching My Tags", async () => {
+    cacheUserTags([
+      { id: 77, name: "female:entry", watched: false, hidden: false, color: "", weight: 10 },
+    ]);
+    let fetched = 0;
+    const bodies: Array<Record<string, unknown>> = [];
+
+    const result = await applyMyTag(
+      "Female:entry",
+      { color: "#00ff00" },
+      deps({
+        loadDocument: () => {
+          fetched += 1;
+          throw new Error("the cached id should skip the page");
+        },
+        post: (_url, body) => {
+          bodies.push(body as Record<string, unknown>);
+          return Promise.resolve({});
+        },
+      }),
+    );
+
+    expect(result).toBe("updated");
+    expect(fetched).toBe(0);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ method: "setusertag", tagid: 77, tagcolor: "#00ff00" });
+    expect(lookupUserTag("female:entry")?.color).toBe("#00ff00");
+  });
+
+  test("refreshes a stale cached id and retries the edit once", async () => {
+    cacheUserTags([
+      { id: 42, name: "female:entry", watched: true, hidden: false, color: "", weight: 10 },
+    ]);
+    const fresh = tagList([{ id: 55, name: "female:entry" }]);
+    const ids: number[] = [];
+    let fetches = 0;
+
+    const result = await applyMyTag(
+      "female:entry",
+      { watched: true },
+      deps({
+        loadDocument: () => {
+          fetches += 1;
+          return Promise.resolve({ doc: fresh, url: MYTAGS_URL });
+        },
+        post: (_url, body) => {
+          // applyMyTag builds this body, so the recorder mirrors its one field under test.
+          const posted = body as { tagid: number };
+          ids.push(posted.tagid);
+          return ids.length === 1
+            ? Promise.resolve({ error: "Invalid tag id" })
+            : Promise.resolve({});
+        },
+      }),
+    );
+
+    expect(result).toBe("updated");
+    expect(fetches).toBe(1);
+    expect(ids).toEqual([42, 55]);
+    expect(lookupUserTag("female:entry")?.id).toBe(55);
+  });
+
+  test("re-adds a cached tag the refreshed list no longer has", async () => {
+    cacheUserTags([
+      { id: 42, name: "female:entry", watched: true, hidden: false, color: "", weight: 10 },
+    ]);
+    const empty = tagList([]);
+    const added: URLSearchParams[] = [];
+    let posts = 0;
+
+    const result = await applyMyTag(
+      "female:entry",
+      { hidden: true },
+      deps({
+        loadDocument: () => Promise.resolve({ doc: empty, url: MYTAGS_URL }),
+        post: () => {
+          posts += 1;
+          return Promise.resolve({ error: "Invalid tag id" });
+        },
+        addTag: (_url, body) => {
+          added.push(body);
+          return Promise.resolve();
+        },
+      }),
+    );
+
+    expect(result).toBe("added");
+    expect(posts).toBe(1);
+    const addedBody = added[0];
+    if (addedBody === undefined) {
+      throw new Error("the tag was not added");
+    }
+    expect(Object.fromEntries(addedBody)).toMatchObject({
+      usertag_action: "add",
+      tagname_new: "female:entry",
+      taghide_new: "on",
+    });
+    expect(lookupUserTag("female:entry")).toBeUndefined();
+  });
+
+  test("does not retry when the id came from the page just fetched", async () => {
+    let fetches = 0;
+    let posts = 0;
+
+    await expect(
+      applyMyTag(
+        "female:entry",
+        { watched: true },
+        deps({
+          loadDocument: () => {
+            fetches += 1;
+            return Promise.resolve({
+              doc: tagList([{ id: 42, name: "female:entry" }]),
+              url: MYTAGS_URL,
+            });
+          },
+          post: () => {
+            posts += 1;
+            return Promise.resolve({ error: "Not gold star" });
+          },
+        }),
+      ),
+    ).rejects.toThrow("Could not save tag: Not gold star");
+
+    expect(fetches).toBe(1);
+    expect(posts).toBe(1);
   });
 
   test("adds a tag missing from My Tags through the native form", async () => {

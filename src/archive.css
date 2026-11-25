@@ -1,7 +1,8 @@
 /* archive chooser styles. Compiled through Tailwind (see src/tailwind.css). */
 
 .archive-funds {
-  @apply mt-3 mb-0 rounded-row border border-line bg-surface px-3 py-2 text-control text-muted;
+  @apply mt-3 mb-0 rounded-row bg-surface px-3 py-2 text-control text-muted;
+  border: 1px solid var(--color-line);
 }
 
 .archive-options {
@@ -10,11 +11,13 @@
 }
 
 .archive-option {
-  @apply flex flex-col gap-3 rounded-card border border-line-strong bg-panel p-4;
+  @apply flex flex-col gap-3 rounded-card bg-panel p-4;
+  border: 1px solid var(--color-line-strong);
 }
 
 .archive-option-title {
-  @apply m-0 text-title-2 font-semibold;
+  @apply m-0 text-title-2;
+  font-weight: 600;
 }
 
 .archive-option-meta {
@@ -42,7 +45,8 @@
 }
 
 .archive-footer {
-  @apply mt-8 border-t border-line pt-4;
+  @apply mt-8 pt-4;
+  border-top: 1px solid var(--color-line);
 }
 
 @media (max-width: 720px) {

@@ -1,6 +1,6 @@
 import type { QuickTag } from "../data/quick-tags";
 import { quickTags, subscribeQuickTags } from "../data/quick-tags";
-import { containsExpression, toggleExpressionInSearch } from "../tags/model";
+import { parseSearchTerms, termIdentity, toggleExpressionInSearch } from "../tags/model";
 import { buttonEl, el } from "./dom";
 import { openQuickTagEditor } from "./quick-tags-editor";
 
@@ -28,14 +28,27 @@ export interface QuickTagsHandle {
 export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
   const { signal } = options;
   let tags = quickTags();
-  let text = options.getText();
-  const entries: { tag: QuickTag; node: HTMLButtonElement }[] = [];
+  const entries: {
+    tag: QuickTag;
+    node: HTMLButtonElement;
+    /** The tag's expression terms, parsed once; every one must be present to press it. */
+    keys: string[];
+    on?: boolean;
+  }[] = [];
   const row = el("div", { class: "quick-tags", role: "group", "aria-label": "Quick tags" });
 
   const refresh = (next?: string): void => {
-    text = next ?? options.getText();
+    const text = next ?? options.getText();
+    if (entries.length === 0) {
+      return;
+    }
+    const present = new Set(parseSearchTerms(text).map(termIdentity));
     for (const entry of entries) {
-      const on = containsExpression(text, entry.tag.query);
+      const on = entry.keys.length > 0 && entry.keys.every((key) => present.has(key));
+      if (entry.on === on) {
+        continue;
+      }
+      entry.on = on;
       entry.node.setAttribute("aria-pressed", String(on));
       entry.node.title = on ? `Remove ${entry.tag.query}` : `Add ${entry.tag.query}`;
     }
@@ -57,7 +70,13 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
         { signal },
       );
       row.append(node);
-      entries.push({ tag, node });
+      entries.push({
+        tag,
+        node,
+        keys: parseSearchTerms(tag.query)
+          .filter((term) => term.value !== "")
+          .map(termIdentity),
+      });
     }
 
     const edit = buttonEl({

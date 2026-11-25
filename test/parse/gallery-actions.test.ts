@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { parseGalleryPage } from "../../src/parse/gallery";
-import { loadFixture } from "../dom";
+import { loadFixture, parseDocument } from "../dom";
 
 const GALLERY_URL = "https://e-hentai.org/g/123456/abcdef1234/";
 
@@ -60,5 +60,45 @@ describe("parseGalleryPage without site extras", () => {
 
     expect(plain.comments).toEqual([]);
     expect(plain.apiConfig).toBeNull();
+  });
+});
+
+describe("parseGalleryPage comment bodies and edit flags", () => {
+  test("keeps br newlines through nested markup and collapses blank runs", () => {
+    const parsed = parseDocument(`
+      <h1 id="gn">A Gallery</h1>
+      <div id="cdiv">
+        <div class="c1">
+          <div class="c3">Posted on 02 January 2024, 03:04 by: <a href="/uploader/alice">alice</a></div>
+          <div class="c6" id="comment_5"><span>Great</span> work<br /><br /><br />part two</div>
+        </div>
+      </div>
+    `);
+
+    const [comment] = parseGalleryPage(parsed, GALLERY_URL).comments;
+
+    expect(comment?.body).toBe("Great work\n\npart two");
+  });
+
+  test("marks only the comment its edit marker belongs to", () => {
+    const parsed = parseDocument(`
+      <h1 id="gn">A Gallery</h1>
+      <div id="cdiv">
+        <div class="c1">
+          <div class="c3">Posted on 02 January 2024, 03:04 by: <a href="/uploader/alice">alice</a></div>
+          <div class="c6" id="comment_7">First</div>
+          <button data-comment-edit="7">Change</button>
+        </div>
+        <div class="c1">
+          <div class="c3">Posted on 03 January 2024, 03:04 by: <a href="/uploader/bob">bob</a></div>
+          <div class="c6" id="comment_8">Second</div>
+        </div>
+        <div id="formdiv"><button type="submit">Post Comment</button></div>
+      </div>
+    `);
+
+    const comments = parseGalleryPage(parsed, GALLERY_URL).comments;
+
+    expect(comments.map((comment) => comment.editable)).toEqual([true, false]);
   });
 });

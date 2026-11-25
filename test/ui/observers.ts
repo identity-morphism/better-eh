@@ -48,6 +48,39 @@ export function lastObserver(): TestObserver {
   return observer;
 }
 
+/** Minimal ResizeObserver: tests fire changes by hand. */
+export class TestResizeObserver {
+  static last: TestResizeObserver | null = null;
+
+  disconnected = false;
+
+  readonly callback: ResizeObserverCallback;
+
+  readonly observed = new Set<Element>();
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    TestResizeObserver.last = this;
+  }
+
+  observe(node: Element): void {
+    this.observed.add(node);
+  }
+
+  unobserve(node: Element): void {
+    this.observed.delete(node);
+  }
+
+  disconnect(): void {
+    this.disconnected = true;
+    this.observed.clear();
+  }
+
+  fire(): void {
+    this.callback([], this);
+  }
+}
+
 /** Drain the promise chain behind a fetch without involving the clock. */
 export function settle(): Promise<void> {
   return flushMicrotasks(10);

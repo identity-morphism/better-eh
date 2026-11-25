@@ -1,8 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
-import { rateGallery } from "../../src/data/gallery-actions";
+import { postComment, rateGallery } from "../../src/data/gallery-actions";
 import { getSettings, updateSettings } from "../../src/settings";
 import type { GalleryApiConfig } from "../../src/types";
+import { parseDocument } from "../dom";
 
 Object.assign(globalThis, { location: new URL("https://e-hentai.org/g/123456/abcdef1234/") });
 
@@ -75,5 +76,40 @@ describe("gallery action endpoints", () => {
     );
 
     expect(calls).toHaveLength(0);
+  });
+
+  test("a comment POST returns the gallery page it answered with", async () => {
+    const globals = globalThis as unknown as Record<string, unknown>;
+    const parser = globals.DOMParser;
+    globals.DOMParser = class {
+      parseFromString(text: string): Document {
+        return parseDocument(text);
+      }
+    };
+    const url = "https://e-hentai.org/g/123456/abcdef1234/";
+    try {
+      const page = "<!doctype html><html><body><div id='cdiv'></div></body></html>";
+      globalThis.fetch = (() =>
+        Promise.resolve(
+          new Response(page, { headers: { "content-type": "text/html" } }),
+        )) as unknown as typeof fetch;
+
+      const result = await postComment(url, "hello");
+      expect(result?.doc.querySelector("#cdiv")).not.toBeNull();
+      // A fabricated Response has no final URL, so the request URL becomes the base.
+      expect(result?.url).toBe(url);
+
+      globalThis.fetch = (() =>
+        Promise.resolve(
+          new Response('{"error":"busy"}', { headers: { "content-type": "application/json" } }),
+        )) as unknown as typeof fetch;
+      expect(await postComment(url, "hello")).toBeUndefined();
+    } finally {
+      if (parser === undefined) {
+        delete globals.DOMParser;
+      } else {
+        globals.DOMParser = parser;
+      }
+    }
   });
 });

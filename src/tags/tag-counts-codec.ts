@@ -36,27 +36,33 @@ export interface TagCounts {
   readonly max: number;
 }
 
-function hash32(key: string, seed: number): number {
-  let hash = seed >>> 0;
-  for (let index = 0; index < key.length; index++) {
-    hash ^= key.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
+/**
+ * Stable 40-bit identity for an already-normalised tag key: the output of `normaliseTagKey` (the
+ * `folded` field every index entry keeps).
+ *
+ * Two FNV-1a passes with different seeds make a collision between the ~2–3k vendored tags
+ * negligible while keeping the id inside the exact-integer range. Both passes share one scan, so
+ * hashing a key costs the same as a single pass.
+ */
+export function tagKeyIdFromFolded(folded: string): number {
+  let high = 0x811c9dc5;
+  let low = 0x9e3779b9;
+  for (let index = 0; index < folded.length; index++) {
+    const code = folded.charCodeAt(index);
+    high = Math.imul(high ^ code, 0x01000193);
+    low = Math.imul(low ^ code, 0x01000193);
   }
-  return hash >>> 0;
+  return (high >>> 0) * 0x100 + ((low >>> 0) & 0xff);
 }
 
 /**
  * Stable 40-bit identity for a tag key.
  *
- * The key is cleaned and folded here, so raw and already-normalized spellings hash alike. Two
- * FNV-1a passes with different seeds make a collision between the ~2–3k vendored tags negligible
- * while keeping the id inside the exact-integer range.
+ * The key is cleaned and folded here, so raw and already-normalized spellings hash alike. Callers
+ * that already hold a folded key can use {@link tagKeyIdFromFolded} to skip that work.
  */
 export function tagKeyId(key: string): number {
-  const normalized = normaliseTagKey(key);
-  const high = hash32(normalized, 0x811c9dc5);
-  const low = hash32(normalized, 0x9e3779b9) & 0xff;
-  return high * 0x100 + low;
+  return tagKeyIdFromFolded(normaliseTagKey(key));
 }
 
 /** Quantize a gallery count to one byte on the `log1p` scale. */

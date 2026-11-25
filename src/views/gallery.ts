@@ -1,7 +1,7 @@
 import type { CommentTransports, GalleryActionDeps } from "../data/gallery-actions";
 import { voteTag } from "../data/gallery-actions";
 import type { MyTagChange } from "../data/my-tags";
-import { applyMyTag } from "../data/my-tags";
+import { applyMyTag, lookupUserTag } from "../data/my-tags";
 import { clearResume, getResume } from "../data/resume";
 import type { DocumentOptions, HtmlResponse } from "../fetch/loader";
 import { loader } from "../fetch/loader";
@@ -72,6 +72,7 @@ function cover(data: GalleryData): HTMLElement {
     src: data.coverSrc,
     alt: "",
     decoding: "async",
+    fetchpriority: "high",
     width: data.coverSize?.width ?? null,
     height: data.coverSize?.height ?? null,
   });
@@ -380,8 +381,7 @@ export function renderGallery(
     ((url, documentOptions) =>
       loader.document(url, { priority: priorityOf("navigation"), ...documentOptions }));
 
-  /** The one fresh fetch+parse of the gallery page used by post-mutation refreshes. */
-  const reload = async (): Promise<GalleryData | null> => {
+  const fetchGallery = async (): Promise<GalleryData | null> => {
     const response = await load(data.url, { fresh: true, signal: ctx.signal });
     if (ctx.signal.aborted) {
       return null;
@@ -389,11 +389,32 @@ export function renderGallery(
     return parseGalleryPage(response.doc, response.url);
   };
 
+  /** The one fresh fetch+parse of the gallery page used by post-mutation refreshes. */
+  let pendingReload: Promise<GalleryData | null> | null = null;
+  const reload = (): Promise<GalleryData | null> => {
+    if (pendingReload !== null) {
+      return pendingReload;
+    }
+    const run = fetchGallery();
+    pendingReload = run;
+    const settle = (): void => {
+      if (pendingReload === run) {
+        pendingReload = null;
+      }
+    };
+    run.then(settle, settle);
+    return run;
+  };
+
   const commentDeps: CommentSectionDeps = {
     post: deps.post,
     postComment: deps.postComment,
     editComment: deps.editComment,
-    refresh: async () => {
+    refresh: async (page) => {
+      if (page !== undefined) {
+        replaceComments(parseGalleryPage(page.doc, page.url));
+        return;
+      }
       const next = await reload();
       if (next !== null) {
         replaceComments(next);
@@ -433,8 +454,8 @@ export function renderGallery(
     if (config === null) {
       return;
     }
+    // The tag row renders no vote state, so the vote is the only network work.
     await voteTag(config, tag, vote, { post: deps.post });
-    await refreshTags();
   };
 
   const runTagVoteBatch = async (tags: string): Promise<void> => {
@@ -442,7 +463,6 @@ export function renderGallery(
       return;
     }
     await voteTag(config, tags, 1, { post: deps.post });
-    await refreshTags();
   };
 
   const runMyTag = async (tag: string, change: MyTagChange): Promise<void> => {
@@ -452,6 +472,7 @@ export function renderGallery(
     const result = await applyMyTag(tag, change, {
       config,
       myTagsUrl: new URL(SITE_PATHS.myTags, data.url).href,
+      existing: lookupUserTag(tag),
       loadDocument: load,
       post: deps.post,
       signal: ctx.signal,
@@ -478,26 +499,6 @@ export function renderGallery(
     colorTag: (tag, color) => runMyTag(tag, { color }),
     config,
     text: () => getSearchDraft().text,
-  };
-
-  /** The tag row replaces itself from the refreshed page; it also owns focus return. */
-  const refreshTags = async (): Promise<void> => {
-    const next = await reload();
-    if (next === null) {
-      return;
-    }
-    if (next.tags.length === 0) {
-      return;
-    }
-    if (tagRow === null) {
-      const created = createTagRow(next, tagActions, ctx.signal);
-      if (created !== null) {
-        tagRow = created;
-        host.insertBefore(created.element, grid);
-      }
-      return;
-    }
-    tagRow.update(next);
   };
 
   tagRow = createTagRow(data, tagActions, ctx.signal);

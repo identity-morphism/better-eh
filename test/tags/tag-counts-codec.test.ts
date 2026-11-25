@@ -9,6 +9,7 @@ import {
   HEADER_BYTES,
   quantiseCount,
   tagKeyId,
+  tagKeyIdFromFolded,
 } from "../../src/tags/tag-counts-codec";
 
 function toBase64(bytes: Uint8Array): string {
@@ -26,6 +27,11 @@ describe("tag counts codec", () => {
     expect(tagKeyId("Big_brevity")).toBe(tagKeyId("big brevity"));
     expect(tagKeyId("  big   brevity ")).toBe(tagKeyId("big brevity"));
     expect(tagKeyId("Pokémon")).toBe(tagKeyId("pokemon"));
+
+    // The index keeps folded keys; hashing them directly must agree with the public entry point.
+    expect(tagKeyIdFromFolded("big brevity")).toBe(tagKeyId("Big_brevity"));
+    expect(tagKeyIdFromFolded("pokemon")).toBe(tagKeyId("Pokémon"));
+    expect(tagKeyIdFromFolded("")).toBe(tagKeyId(""));
   });
 
   test("quantizes on a log scale with bounded error", () => {

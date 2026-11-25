@@ -2,6 +2,10 @@ import type { ParsedTitle, TitleMetadata } from "../types";
 
 const LANGUAGE =
   /\[(English|Japanese|Chinese|Korean|Thai|Vietnamese|French|German|Italian|Portuguese|Russian|Spanish)/i;
+/** A bracketed leading or trailing metadata block, with the padding that surrounds it. */
+const LEADING_METADATA = /^(\([^)]+\)|\[[^\]]+\])\s*/;
+const TRAILING_METADATA = /\s*(\([^)]+\)|\[[^\]]+\])$/;
+const TITLE_SEPARATOR = /\s*\|\s*/;
 const NON_ARTIST_TAGS: Record<string, true> = {
   digital: true,
   colorized: true,
@@ -21,7 +25,7 @@ export function parseTitle(raw: string): ParsedTitle {
   const trailing: TitleMetadata[] = [];
 
   for (;;) {
-    const match = text.match(/^(\([^)]+\)|\[[^\]]+\])\s*/);
+    const match = LEADING_METADATA.exec(text);
     const m = match?.[1];
     if (!m) {
       break;
@@ -44,7 +48,7 @@ export function parseTitle(raw: string): ParsedTitle {
   }
 
   for (;;) {
-    const match = text.match(/\s*(\([^)]+\)|\[[^\]]+\])$/);
+    const match = TRAILING_METADATA.exec(text);
     const m = match?.[1];
     if (!m) {
       break;
@@ -61,7 +65,7 @@ export function parseTitle(raw: string): ParsedTitle {
     text = text.slice(0, -match[0].length).trim();
   }
 
-  const parts = text.split(/\s*\|\s*/);
+  const parts = text.split(TITLE_SEPARATOR);
 
   return {
     leading,

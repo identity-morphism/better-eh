@@ -71,8 +71,24 @@ export function createSettingsDraft({ bindings, onChange }: SettingsDraftOptions
     }
   };
 
+  /** Same answer as `changed().size > 0`, without building the map. */
+  const isDirty = (): boolean => {
+    for (const binding of bindings) {
+      if (!baseline.has(binding.key)) {
+        return true;
+      }
+      const previous = baseline.get(binding.key);
+      const value = binding.read();
+      const same = binding.equals ? binding.equals(value, previous) : Object.is(value, previous);
+      if (!same) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const draft: SettingsDraft = {
-    isDirty: () => changed().size > 0,
+    isDirty,
     changed,
     reset: () => {
       for (const binding of bindings) {

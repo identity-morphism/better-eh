@@ -17,11 +17,11 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { decodeTagVocabulary, encodeTagVocabulary } from "../src/tags/index-codec";
-import { TAG_NAMESPACES } from "../src/tags/model";
+import { fold, TAG_NAMESPACES } from "../src/tags/model";
 import {
   decodeTagCountsFromBytes,
   encodeTagCountsBytes,
-  tagKeyId,
+  tagKeyIdFromFolded,
 } from "../src/tags/tag-counts-codec";
 import { readExistingAsset } from "./asset-file";
 
@@ -52,13 +52,20 @@ function selectCoreGroups(
   const groups = new Map<string, readonly string[]>();
   for (const namespace of TAG_NAMESPACES) {
     const keys = vocabulary.get(namespace.id) ?? [];
-    const kept = [...keys]
-      .sort((left, right) => {
-        const leftCount = counts.get(tagKeyId(left)) ?? 0;
-        const rightCount = counts.get(tagKeyId(right)) ?? 0;
-        return rightCount - leftCount || (left < right ? -1 : left > right ? 1 : 0);
-      })
+    // The asset keys are already cleaned, so folding gives the identity the counts are keyed by.
+    // Hash each key once up front; doing it inside the comparator meant two full normalise-plus-
+    // hash passes per comparison over the whole 45k-key vocabulary.
+    const ranked = keys.map((key) => ({
+      key,
+      count: counts.get(tagKeyIdFromFolded(fold(key))) ?? 0,
+    }));
+    ranked.sort(
+      (left, right) =>
+        right.count - left.count || (left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
+    );
+    const kept = ranked
       .slice(0, TAGS_PER_NAMESPACE)
+      .map((item) => item.key)
       .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
     groups.set(namespace.id, kept);
   }
@@ -82,7 +89,7 @@ function selectCoreCounts(
   const selected = new Map<string, number>();
   for (const keys of groups.values()) {
     for (const key of keys) {
-      const count = counts.get(tagKeyId(key)) ?? 0;
+      const count = counts.get(tagKeyIdFromFolded(fold(key))) ?? 0;
       if (count > 0) {
         selected.set(key, count);
       }

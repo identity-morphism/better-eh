@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { TagCompletion, TagIndex, TagUsage } from "../../src/tags/db";
+import type { TagCompletion, TagEntry, TagIndex, TagUsage } from "../../src/tags/db";
 import { buildTagIndex, COMPLETION_TTL_MS, completionId, tagId } from "../../src/tags/db";
 import { parseSearchTerms } from "../../src/tags/model";
 import type { SuggestResult } from "../../src/tags/suggest";
@@ -165,6 +165,104 @@ describe("suggestions", () => {
     expect(result.items.every((item) => item.kind === "tag" && item.entry.ns.id === "female")).toBe(
       true,
     );
+  });
+
+  test("keeps only the best matches for the display limit without changing rank or total", () => {
+    const full = buildSuggestions(INDEX, "b", 1, new Map(), 50);
+    const bounded = buildSuggestions(INDEX, "b", 1, new Map(), 2);
+    const none = buildSuggestions(INDEX, "b", 1, new Map(), 0);
+
+    expect(full.total).toBeGreaterThan(2);
+    expect(bounded.total).toBe(full.total);
+    expect(bounded.items).toHaveLength(2);
+    expect(tagKeys(bounded)).toEqual(tagKeys(full).slice(0, 2));
+
+    // Even when nothing is displayed the match count stays accurate.
+    expect(none.total).toBe(full.total);
+    expect(none.items).toHaveLength(0);
+  });
+
+  test("resolves empty-query recents without materialising the lookup map", () => {
+    const base = buildTagIndex(
+      {
+        data: [
+          { namespace: "female", data: { "big brevity": {}, "sole female": {} } },
+          { namespace: "male", data: { "sole male": {} } },
+        ],
+      },
+      1,
+    );
+
+    let reads = 0;
+    const index: TagIndex = {
+      entries: base.entries,
+      updated: base.updated,
+      byNamespace: base.byNamespace,
+      maxCount: base.maxCount,
+      get lookup(): ReadonlyMap<string, TagEntry> {
+        reads += 1;
+        return base.lookup;
+      },
+    };
+
+    const usage = usageOf([
+      ["female", "sole female", 3],
+      ["male", "sole male", 1],
+    ]);
+    const result = buildSuggestions(index, "", 0, usage, 50);
+
+    expect(reads).toBe(0);
+    expect(tagKeys(result).slice(0, 2)).toEqual(["sole female", "sole male"]);
+    expect(result.items[0]?.kind).toBe("tag");
+    if (result.items[0]?.kind === "tag") {
+      expect(result.items[0].recent).toBe(true);
+    }
+  });
+
+  test("falls back to lookup for an index whose namespace arrays are unsorted", () => {
+    const base = buildTagIndex(
+      {
+        data: [
+          {
+            namespace: "female",
+            data: {
+              "big brevity": {},
+              "big brother": {},
+              "sole female": {},
+              "small brevity": {},
+            },
+          },
+        ],
+      },
+      1,
+    );
+    const female = base.byNamespace.get("female") ?? [];
+    const byKey = new Map(female.map((entry) => [entry.key, entry] as const));
+    const reordered = ["sole female", "big brevity", "small brevity"].flatMap((key) => {
+      const entry = byKey.get(key);
+      return entry === undefined ? [] : [entry];
+    });
+
+    let reads = 0;
+    const index: TagIndex = {
+      entries: base.entries,
+      updated: base.updated,
+      byNamespace: new Map([...base.byNamespace, ["female", reordered]]),
+      maxCount: base.maxCount,
+      get lookup(): ReadonlyMap<string, TagEntry> {
+        reads += 1;
+        return base.lookup;
+      },
+    };
+
+    const usage = usageOf([
+      ["female", "sole female", 1],
+      ["unknown", "missing", 1],
+    ]);
+    const result = buildSuggestions(index, "", 0, usage, 50);
+
+    expect(tagKeys(result)).toEqual(["sole female"]);
+    expect(reads).toBe(1);
   });
 
   test("completes namespaces, keeping any typed value", () => {

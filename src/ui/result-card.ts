@@ -110,14 +110,17 @@ function cardTitle(item: ListItem): HTMLElement {
 /**
  * Category, rating, posted time, page count and the torrent link, in the order the site's own cards
  * use.
+ *
+ * The posted-date node comes back unmarked: the card's favorite state paints it, so the initial
+ * paint and every later repaint write the same node exactly once.
  */
-function cardMeta(item: ListItem): HTMLElement {
+function cardMeta(item: ListItem): { element: HTMLElement; posted: HTMLElement | null } {
+  let posted: HTMLElement | null = null;
   const meta = el(
     "div",
     { class: "card-meta" },
     ...cardFactRows(item, (text) => {
-      const posted = el("span", { class: "card-posted", text });
-      setFavoriteMark(posted, item.favorite);
+      posted = el("span", { class: "card-posted", text });
       return posted;
     }),
   );
@@ -136,7 +139,7 @@ function cardMeta(item: ListItem): HTMLElement {
       ),
     );
   }
-  return meta;
+  return { element: meta, posted };
 }
 
 interface ResultCardOptions {
@@ -162,8 +165,7 @@ export function resultCard(
   options: ResultCardOptions = {},
 ): HTMLElement {
   const favorite = createFavoriteState(item, item.favorite);
-  const meta = cardMeta(item);
-  const posted = meta.querySelector<HTMLElement>(".card-posted");
+  const { element: meta, posted } = cardMeta(item);
   const repaint = (snapshot: FavoriteSnapshot): void => {
     if (posted === null) {
       return;

@@ -1,13 +1,20 @@
 /**
  * `/mytags`: the saved user tags with inline editing, plus the form that adds a new one.
  *
- * Writes go through {@link applyMyTag}; rows pass their parsed state so saving does not re-fetch the
- * page just to learn the tag id. Anonymous pages (`apiUid = -1`) and pages without credentials
- * render read-only with an escape hatch to the native page.
+ * Writes go through {@link applyMyTag}. Rendering the page also fills the session tag cache, so rows
+ * and the add form already know the saved ids and never re-fetch the page to look one up. Anonymous
+ * pages (`apiUid = -1`) and pages without credentials render read-only with an escape hatch to the
+ * native page.
  */
 
 import type { MyTagChange, MyTagTransports, TagsetChange } from "../data/my-tags";
-import { applyMyTag, normalizeWeight, saveTagset as saveTagsetRequest } from "../data/my-tags";
+import {
+  applyMyTag,
+  cacheUserTags,
+  lookupUserTag,
+  normalizeWeight,
+  saveTagset as saveTagsetRequest,
+} from "../data/my-tags";
 import type { DocumentOptions } from "../fetch/loader";
 import { loader } from "../fetch/loader";
 import type { ApiCredentials } from "../parse/gallery";
@@ -214,6 +221,16 @@ interface TagInputs {
   color: HTMLInputElement;
 }
 
+/** Keep watch/hide exclusive and the colour control editable only while its toggle is on. */
+function syncTagInputs(inputs: TagInputs, readOnly: boolean): void {
+  if (isChecked(inputs.watched)) {
+    inputs.hidden.checked = false;
+  } else if (isChecked(inputs.hidden)) {
+    inputs.watched.checked = false;
+  }
+  inputs.color.disabled = readOnly || !isChecked(inputs.colorEnabled);
+}
+
 /** Anonymous pages carry `apiuid = -1`; both cases leave no usable write credentials. */
 function writableApi(data: MyTagsPage): ApiCredentials | null {
   const api = data.api;
@@ -236,7 +253,12 @@ function describeTag(tag: UserTagState): string {
 }
 
 /** The shared control block: watch/hide stay exclusive, colour only applies while enabled. */
-function tagInputs(tag: UserTagState | null, readOnly: boolean, signal: AbortSignal): TagInputs {
+function tagInputs(
+  tag: UserTagState | null,
+  readOnly: boolean,
+  signal: AbortSignal,
+  bind = true,
+): TagInputs {
   const watched = el("input", {
     type: "checkbox",
     class: "my-tags-watch",
@@ -273,32 +295,6 @@ function tagInputs(tag: UserTagState | null, readOnly: boolean, signal: AbortSig
     control.disabled = readOnly;
   }
 
-  watched.addEventListener(
-    "change",
-    () => {
-      if (isChecked(watched)) {
-        hidden.checked = false;
-      }
-    },
-    { signal },
-  );
-  hidden.addEventListener(
-    "change",
-    () => {
-      if (isChecked(hidden)) {
-        watched.checked = false;
-      }
-    },
-    { signal },
-  );
-  colorEnabled.addEventListener(
-    "change",
-    () => {
-      color.disabled = readOnly || !isChecked(colorEnabled);
-    },
-    { signal },
-  );
-
   const node = el(
     "div",
     { class: "my-tags-fields" },
@@ -309,7 +305,21 @@ function tagInputs(tag: UserTagState | null, readOnly: boolean, signal: AbortSig
     color,
   );
 
-  return { node, watched, hidden, weight, colorEnabled, color };
+  const inputs = { node, watched, hidden, weight, colorEnabled, color };
+  // Rows delegate these three changes to the list so a page of saved tags adds two listeners, not
+  // three per row; the add form has no list to delegate to.
+  if (bind) {
+    for (const control of [watched, hidden, colorEnabled]) {
+      control.addEventListener(
+        "change",
+        () => {
+          syncTagInputs(inputs, readOnly);
+        },
+        { signal },
+      );
+    }
+  }
+  return inputs;
 }
 
 /** Read the controls into the change the mutation layer expects. */
@@ -382,6 +392,8 @@ export function renderMyTags(
   deps?: MyTagsViewDeps,
 ): void {
   const api = writableApi(data);
+  // The page just told us every saved tag's id; the add form and the gallery's tag menu reuse it.
+  cacheUserTags(data.tags);
   const load =
     deps?.loadDocument ??
     ((url: string, options: DocumentOptions) => loader.document(url, options));
@@ -404,11 +416,14 @@ export function renderMyTags(
   });
   noMatch.hidden = true;
 
+  // The rows never change after render, so the filter walks this snapshot instead of querying the
+  // DOM for every keystroke.
+  const filterable: Array<{ row: HTMLElement; nameLower: string }> = [];
   const filterRows = (): void => {
     const needle = filter.value.trim().toLowerCase();
     let shown = 0;
-    for (const row of list.querySelectorAll<HTMLElement>(".my-tags-row")) {
-      const match = needle === "" || (row.dataset.tagName ?? "").includes(needle);
+    for (const { row, nameLower } of filterable) {
+      const match = needle === "" || nameLower.includes(needle);
       row.hidden = !match;
       if (match) {
         shown += 1;
@@ -417,6 +432,40 @@ export function renderMyTags(
     noMatch.hidden = needle === "" || shown > 0 || data.tags.length === 0;
   };
   filter.addEventListener("input", filterRows, { signal: ctx.signal });
+
+  // Row state is rebuilt on every render, but the controls and save handlers are looked up through
+  // the list, so a page of saved tags costs two listeners instead of three or four per row.
+  const rowInputs = new WeakMap<HTMLElement, TagInputs>();
+  const rowSaves = new WeakMap<HTMLElement, () => Promise<void>>();
+  list.addEventListener(
+    "change",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const row = target.closest<HTMLElement>(".my-tags-row");
+      const inputs = row === null ? undefined : rowInputs.get(row);
+      if (inputs !== undefined) {
+        syncTagInputs(inputs, api === null);
+      }
+    },
+    { signal: ctx.signal },
+  );
+  list.addEventListener(
+    "click",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const row = target.closest<HTMLElement>(".my-tags-row");
+      if (row !== null) {
+        void rowSaves.get(row)?.();
+      }
+    },
+    { signal: ctx.signal },
+  );
 
   const buildAddForm = (credentials: ApiCredentials): HTMLElement => {
     const name = textInput({
@@ -475,6 +524,8 @@ export function renderMyTags(
           const result = await applyMyTag(tag, readChange(inputs), {
             config: credentials,
             myTagsUrl: data.url,
+            // The page's own list already carries this tag's id when it is a saved tag.
+            existing: lookupUserTag(tag),
             loadDocument: load,
             post: deps?.post,
             addTag: deps?.addTag,
@@ -506,7 +557,7 @@ export function renderMyTags(
   };
 
   const buildRow = (tag: UserTagState, credentials: ApiCredentials | null): HTMLElement => {
-    const inputs = tagInputs(tag, credentials === null, ctx.signal);
+    const inputs = tagInputs(tag, credentials === null, ctx.signal, false);
     const state: UserTagState = { ...tag };
     const summary = el("span", { class: "my-tags-row-state", text: describeTag(state) });
     const error = el("p", { class: "my-tags-error", role: "alert" });
@@ -527,6 +578,7 @@ export function renderMyTags(
       inputs.node,
       error,
     );
+    rowInputs.set(row, inputs);
 
     if (credentials !== null) {
       const save = buttonEl({ class: "btn btn-small my-tags-save", text: "Save" });
@@ -569,21 +621,16 @@ export function renderMyTags(
         });
         busy = false;
       };
-
-      save.addEventListener(
-        "click",
-        () => {
-          void saveRow();
-        },
-        { signal: ctx.signal },
-      );
+      rowSaves.set(row, saveRow);
     }
 
     return row;
   };
 
   for (const tag of data.tags) {
-    list.append(buildRow(tag, api));
+    const row = buildRow(tag, api);
+    filterable.push({ row, nameLower: tag.name.toLowerCase() });
+    list.append(row);
   }
 
   const tagsetSection =

@@ -105,7 +105,8 @@
 }
 
 .tag-menu-title {
-  @apply text-control font-semibold text-fg;
+  @apply text-control text-fg;
+  font-weight: 600;
 }
 
 .tag-menu-ns {
@@ -113,7 +114,9 @@
 }
 
 .tag-menu-divider {
-  @apply m-0 border-0 border-t border-line;
+  @apply m-0;
+  border: 0;
+  border-top: 1px solid var(--color-line);
 }
 
 .tag-menu-actions {
@@ -141,7 +144,8 @@
 
 .tag-title,
 .comments-title {
-  @apply text-section font-semibold text-fg;
+  @apply text-section text-fg;
+  font-weight: 600;
 }
 
 /* Namespace labels and the tag chips share one two-column row, and the composer starts in the
@@ -167,11 +171,13 @@
 /* --------------------------------------------------------- comments */
 
 .gallery-comments {
-  @apply mt-2 grid gap-3 border-t border-line pt-5 pb-10;
+  @apply mt-2 grid gap-3 pt-5 pb-10;
+  border-top: 1px solid var(--color-line);
 }
 
 .comment {
-  @apply rounded-control border border-line bg-surface p-3;
+  @apply rounded-control bg-surface p-3;
+  border: 1px solid var(--color-line);
 }
 
 .comment.is-uploader {
@@ -183,11 +189,13 @@
 }
 
 .comment-author {
-  @apply font-semibold;
+  font-weight: 600;
 }
 
 .comment-badge {
-  @apply rounded-none border border-accent px-1.5 py-px text-micro text-star;
+  @apply rounded-none text-micro text-star;
+  padding: 1px 6px;
+  border: 1px solid var(--color-accent);
 }
 
 .comment-score-wrap {
@@ -195,7 +203,8 @@
 }
 
 .comment-score {
-  @apply min-w-6 text-right text-control font-semibold text-muted;
+  @apply min-w-6 text-right text-control text-muted;
+  font-weight: 600;
 }
 
 .comment-vote {
@@ -207,7 +216,8 @@
 }
 
 .comment-retry {
-  @apply cursor-pointer border-0 bg-transparent p-0 text-meta font-semibold text-link underline;
+  @apply cursor-pointer border-0 bg-transparent p-0 text-meta text-link underline;
+  font-weight: 600;
 }
 
 .comment-vote:hover,
@@ -264,6 +274,7 @@
 
 /* My Tags watch/hide/colour controls in the tag menu. */
 .tag-menu-color {
-  @apply h-7 w-10 cursor-pointer border border-line bg-canvas p-0.5;
+  @apply h-7 w-10 cursor-pointer bg-canvas p-0.5;
+  border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
 }

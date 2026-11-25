@@ -17,7 +17,8 @@
 }
 
 .gallery-torrent-card {
-  @apply rounded-card border border-line bg-panel p-3.5;
+  @apply rounded-card bg-panel p-3.5;
+  border: 1px solid var(--color-line);
 }
 
 .gallery-torrent-head {
@@ -25,7 +26,8 @@
 }
 
 .gallery-torrent-name {
-  @apply min-w-0 text-control font-semibold break-words text-fg no-underline;
+  @apply min-w-0 text-control break-words text-fg no-underline;
+  font-weight: 600;
 }
 
 a.gallery-torrent-name:hover {
@@ -53,7 +55,8 @@ a.gallery-torrent-name:hover {
 }
 
 .gallery-torrent-details {
-  @apply mt-3 border-t border-line pt-3;
+  @apply mt-3 pt-3;
+  border-top: 1px solid var(--color-line);
 }
 
 .gallery-torrent-info {

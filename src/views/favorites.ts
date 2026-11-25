@@ -232,6 +232,8 @@ export function renderFavorites(
 
   const selectAll = el("input", { class: "favorites-check-all", type: "checkbox" });
   const grid = createCardGrid(ctx.signal);
+  /** Each rendered card's checkbox, so a selection change writes only the boxes it changed. */
+  const boxes = new Map<string, HTMLInputElement>();
 
   const disarmDelete = (): void => {
     armedDelete = false;
@@ -243,8 +245,17 @@ export function renderFavorites(
 
   const syncBar = (): void => {
     const total = selection.size;
-    bar.hidden = total === 0;
-    countLabel.textContent = `${total} selected`;
+    const hidden = total === 0;
+    if (bar.hidden !== hidden) {
+      bar.hidden = hidden;
+      // Only the bar appearing changes the scrollable room the pager needs; measuring on every
+      // selection change would force a layout for nothing.
+      syncBulkSpace();
+    }
+    const label = `${total} selected`;
+    if (countLabel.textContent !== label) {
+      countLabel.textContent = label;
+    }
     statusText.hidden = retryAction === null;
     retryButton.hidden = retryAction === null;
     removeButton.disabled = total === 0 || pending.busy;
@@ -256,10 +267,12 @@ export function renderFavorites(
     }
     selectAll.checked = selection.all;
     selectAll.indeterminate = selection.some && !selection.all;
-    for (const box of grid.element.querySelectorAll<HTMLInputElement>(".favorites-checkbox")) {
-      box.checked = selection.has(box.value);
+    for (const [gid, box] of boxes) {
+      const checked = selection.has(gid);
+      if (box.checked !== checked) {
+        box.checked = checked;
+      }
     }
-    syncBulkSpace();
   };
 
   const perform = (action: BulkAction): void => {
@@ -365,6 +378,7 @@ export function renderFavorites(
     );
 
     const select = el("label", { class: "favorites-select", title: "Select favorite" }, checkbox);
+    boxes.set(item.gid, checkbox);
 
     return resultCard(item, ctx.signal, {
       className: "favorites-card",

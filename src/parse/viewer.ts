@@ -8,6 +8,17 @@ import { parseTitle } from "./title";
  */
 const NL_TOKEN = /\bnl\(\s*(?:'([^']*)'|"([^"]*)"|([^'")\s]+))\s*\)/u;
 
+/** The `N / M` counter text inside one scope, or null when the scope does not hold it. */
+function findCounter(root: ParentNode | null): string | null {
+  if (root === null) {
+    return null;
+  }
+  const match = [...root.querySelectorAll("div, span, td")].find((node) =>
+    /^\d+ \/ \d+$/.test(node.textContent.trim()),
+  );
+  return match?.textContent.trim() ?? null;
+}
+
 function parseNlToken(doc: Document | HTMLElement): string | null {
   const anchor = doc.querySelector("#loadfail, a[onclick*='nl(']");
   const match = NL_TOKEN.exec(anchor?.getAttribute("onclick") ?? "");
@@ -50,10 +61,9 @@ export function parseViewer(doc: Document | HTMLElement, viewerUrl: string): Pag
           ? `${new URL(viewerUrl).origin}/s/${pageHash}/${galleryId}-${pageNum - 1}`
           : null));
 
-  const counterText =
-    [...doc.querySelectorAll("div, span, td")]
-      .find((el) => /^\d+ \/ \d+$/.test(el.textContent.trim()))
-      ?.textContent.trim() ?? `${pageNum} / ?`;
+  // The native counter lives in the info bar; scan that first, then the whole document for the
+  // layouts that move it. On a real viewer page the first scope is a few nodes, not the sidebar.
+  const counterText = findCounter(doc.querySelector("#i2")) ?? findCounter(doc) ?? `${pageNum} / ?`;
 
   const fileInfo = (() => {
     for (const el of doc.querySelector("#i2")?.querySelectorAll("div, span") ?? []) {

@@ -1,8 +1,6 @@
 @layer theme, base, components, utilities;
 
-@import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/preflight.css" layer(base);
-@import "tailwindcss/utilities.css" layer(utilities);
+@import "tailwindcss" source(none);
 @import "./app.css" layer(components);
 @import "./nav.css" layer(components);
 @import "./settings.css" layer(components);
@@ -15,10 +13,11 @@
 @import "./home.css" layer(components);
 @import "./my-tags.css" layer(components);
 
-@source "./**/*.{ts,html}";
-/* The build writes utilities-shaped strings into dist; scanning it makes each build depend on the
-   previous one. Only the sources above may contribute classes. */
-@source not "../dist";
+/* Scanning TS for utility-shaped words emitted 31 utilities of which three are real: the extractor
+   matches identifiers, class fragments and CSS property names (`table`, `container`, `blur`, `!table`).
+   Components get their utilities from `@apply`, which resolves without a candidate scan, so detection
+   is off and the only utilities the bundle ships are the three used as literal class names. */
+@source inline("sr-only justify-between text-control");
 
 @theme {
   /* Behind artwork the reader wants no tint at all. */

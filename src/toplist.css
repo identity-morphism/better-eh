@@ -1,7 +1,8 @@
 /* toplist feature styles. Compiled through Tailwind (see src/tailwind.css). */
 
 .toplist-tabs {
-  @apply sticky z-30 mb-5 grid grid-cols-2 gap-x-4 gap-y-3 rounded-card border border-line bg-surface p-4;
+  @apply sticky z-30 mb-5 grid grid-cols-2 gap-x-4 gap-y-3 rounded-card bg-surface p-4;
+  border: 1px solid var(--color-line);
   top: var(--topbar-h, 0px);
 }
 
@@ -24,12 +25,15 @@
 }
 
 .toplist-section {
-  @apply min-w-0 rounded-card border border-line bg-panel p-3;
+  @apply min-w-0 rounded-card bg-panel p-3;
+  border: 1px solid var(--color-line);
   scroll-margin-top: var(--sticky-reading-line, 96px);
 }
 
 .toplist-section-title {
-  @apply mb-2 border-b border-line pb-2 text-body font-semibold text-fg;
+  @apply mb-2 pb-2 text-body text-fg;
+  border-bottom: 1px solid var(--color-line);
+  font-weight: 600;
 }
 
 .toplist-rows {
@@ -37,7 +41,13 @@
 }
 
 .toplist-row {
-  @apply flex items-baseline gap-2 rounded-row px-1.5 py-0.5 text-control transition-colors;
+  @apply flex items-baseline rounded-row text-control;
+  gap: 8px;
+  padding: 2px 6px;
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .toplist-row:hover {
@@ -45,7 +55,8 @@
 }
 
 .toplist-rank {
-  @apply w-7 shrink-0 text-right text-meta font-semibold text-muted tabular-nums;
+  @apply w-7 shrink-0 text-right text-meta text-muted tabular-nums;
+  font-weight: 600;
 }
 
 .toplist-rank.is-top {

@@ -21,6 +21,12 @@ export interface DocumentOptions {
   priority?: Priority;
   signal?: AbortSignal;
   tag?: string;
+  /**
+   * Cache the parsed document for later `document()` calls; defaults to true. Viewer and no-limit
+   * loads pass false: only their parsed `PageData` is reused, so they cannot evict route
+   * documents.
+   */
+  cache?: boolean;
 }
 
 export interface ViewerPageOptions {
@@ -39,6 +45,8 @@ export interface ViewerPageOptions {
 export interface RetryWithNlOptions {
   /** View or prefetch-window lifetime; an aborted retry makes no request and returns null. */
   signal?: AbortSignal;
+  /** Request class for the retry; defaults to critical, the reader's own repair. */
+  priority?: Priority;
 }
 
 interface TransportOptions {
@@ -170,9 +178,11 @@ export function createPageLoader(deps: PageLoaderDeps): PageLoader {
     }
 
     const result: HtmlResponse = { doc, url: finalUrl };
-    documents.set(url, result);
-    if (finalUrl !== url) {
-      documents.set(finalUrl, result);
+    if (options.cache !== false) {
+      documents.set(url, result);
+      if (finalUrl !== url) {
+        documents.set(finalUrl, result);
+      }
     }
     return result;
   }
@@ -187,6 +197,7 @@ export function createPageLoader(deps: PageLoaderDeps): PageLoader {
     const controller = new AbortController();
     const shared = (async () => {
       const { doc, url: finalUrl } = await loadDocument(url, {
+        cache: false,
         priority,
         tag,
         signal: controller.signal,
@@ -262,19 +273,31 @@ export function createPageLoader(deps: PageLoaderDeps): PageLoader {
       cachePage(data, url);
     },
 
-    async retryWithNl(page, { signal } = {}) {
+    async retryWithNl(page, { signal, priority } = {}) {
       if (page.nlToken === null || page.nlToken === "") {
         return null;
       }
       if (signal?.aborted) {
         return null;
       }
-      const retryUrl = `${page.viewerUrl.split("?")[0]}?nl=${encodeURIComponent(page.nlToken)}`;
-      log("nl retry →", retryUrl);
+      // A navigation may have loaded this page while the speculative copy's image failed; the
+      // newer parse is at least as good as anything this retry would fetch.
+      const newer = pages.get(page.viewerUrl);
+      if (newer !== undefined && newer !== page) {
+        log("nl retry skipped, newer page cached", page.viewerUrl);
+        return newer;
+      }
+      // Build through URL: string concatenation put `?nl=` inside a `#fragment`, where the site
+      // never saw it, so the retry silently fetched the limited page again.
+      const retryUrl = new URL(page.viewerUrl);
+      retryUrl.hash = "";
+      retryUrl.search = `?nl=${encodeURIComponent(page.nlToken)}`;
+      log("nl retry →", retryUrl.href);
       try {
-        const { doc } = await loadDocument(retryUrl, {
+        const { doc } = await loadDocument(retryUrl.href, {
           fresh: true,
-          priority: priorityOf("critical"),
+          cache: false,
+          priority: priority ?? priorityOf("critical"),
           tag: "viewer",
           signal,
         });
@@ -296,6 +319,9 @@ export const loader: PageLoader = createPageLoader({
   request: (url, options) => net.fetch(url, options),
   parseHtml: (text) => new DOMParser().parseFromString(text, "text/html"),
   purgeQueue: () => {
-    net.purge((task) => task.tag !== "critical");
+    // Keep critical work (every POST and a reader-initiated no-limit retry) and drop everything
+    // below it: speculation, appends and background chrome. A producer can forget a tag; its
+    // priority cannot lie.
+    net.purge((task) => task.priority < priorityOf("critical"));
   },
 });

@@ -1,7 +1,8 @@
 /* torrents feature styles. Compiled through Tailwind (see src/tailwind.css). */
 
 .torrent-filters {
-  @apply flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line pt-2.5 pb-4;
+  @apply flex flex-wrap items-center gap-x-5 gap-y-2 pt-2.5 pb-4;
+  border-bottom: 1px solid var(--color-line);
 }
 
 .torrent-filter {
@@ -33,7 +34,8 @@
 }
 
 .torrent-table-wrap {
-  @apply mt-3 overflow-x-auto rounded-control border border-line bg-surface;
+  @apply mt-3 overflow-x-auto rounded-control bg-surface;
+  border: 1px solid var(--color-line);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -43,7 +45,9 @@
 }
 
 .torrent-table thead th {
-  @apply border-b border-line-strong bg-panel px-3 py-2 text-meta font-semibold tracking-wide text-muted uppercase;
+  @apply bg-panel px-3 py-2 text-meta tracking-wide text-muted uppercase;
+  border-bottom: 1px solid var(--color-line-strong);
+  font-weight: 600;
 }
 
 .torrent-sort {
@@ -77,7 +81,8 @@
 }
 
 .torrent-cell {
-  @apply border-b border-line px-3 py-2 text-left align-middle;
+  @apply px-3 py-2 text-left align-middle;
+  border-bottom: 1px solid var(--color-line);
 }
 
 .torrent-table tbody tr:last-child .torrent-cell {

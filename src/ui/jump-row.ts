@@ -6,6 +6,9 @@
  * anchors.
  */
 
+import type { FrameHandle } from "./frame";
+import { cancelFrame, requestFrame } from "./frame";
+
 /** A jump row and the sections it targets, index-aligned. */
 interface JumpRow {
   row: HTMLElement;
@@ -46,11 +49,7 @@ export function trackScrollEdges(row: HTMLElement, signal?: AbortSignal): void {
   if (signal) {
     window.addEventListener("resize", () => syncScrollEdges(row), { passive: true, signal });
   }
-  if (typeof requestAnimationFrame === "function") {
-    requestAnimationFrame(() => syncScrollEdges(row));
-  } else {
-    syncScrollEdges(row);
-  }
+  requestFrame(() => syncScrollEdges(row));
 }
 
 /** Centre a link in its scrolling row without touching the page scroll. */
@@ -76,6 +75,10 @@ function revealLink(row: HTMLElement, link: HTMLElement): void {
  * reading line, so it stays put until the next heading actually reaches the line instead of
  * flickering between two sections that both intersect. The returned `activate` lets a click mark
  * its target at once, before the scroll has settled.
+ *
+ * Resize and scroll events are coalesced into one animation frame. A resize only rebuilds the
+ * observer when the band (viewport minus reading line) changed, and `activate` writes
+ * `aria-current` on at most the previous and the new link.
  */
 export function trackJumpRow(
   { row, links, sections }: JumpRow,
@@ -83,28 +86,27 @@ export function trackJumpRow(
 ): (index: number) => void {
   let current = -1;
   let observer: IntersectionObserver | null = null;
-  let frame = 0;
-
-  const syncEdges = (): void => {
-    syncScrollEdges(row);
-  };
+  let observerMargin = "";
+  let edgesFrame: FrameHandle = null;
+  let resizeFrame: FrameHandle = null;
+  let bootOuter: FrameHandle = null;
+  let bootInner: FrameHandle = null;
 
   const activate = (index: number): void => {
     if (index === current) {
       return;
     }
+    const previous = current;
     current = index;
-    links.forEach((link, linkIndex) => {
-      if (linkIndex === index) {
-        link.setAttribute("aria-current", "true");
-      } else {
-        link.removeAttribute("aria-current");
-      }
-    });
+    // Only the two links whose state actually changed are touched; the rest of the row stays.
+    if (previous >= 0) {
+      links[previous]?.removeAttribute("aria-current");
+    }
     const link = links[index];
     if (link) {
+      link.setAttribute("aria-current", "true");
       revealLink(row, link);
-      syncEdges();
+      syncScrollEdges(row);
     }
   };
 
@@ -129,59 +131,90 @@ export function trackJumpRow(
     return active;
   };
 
-  const observe = (): void => {
-    observer?.disconnect();
-    observer = null;
-    if (typeof IntersectionObserver === "undefined") {
-      return;
-    }
+  const observerOptions = (): IntersectionObserverInit => {
     const height = Number.isFinite(window.innerHeight) ? window.innerHeight : 0;
     // A band from the top of the viewport down to the reading line: a section enters exactly when
     // its heading reaches the line and leaves once its last row has passed it.
-    observer = new IntersectionObserver(() => activate(pick()), {
+    return {
       rootMargin: `0px 0px -${Math.max(0, height - readingLine())}px 0px`,
-    });
+    };
+  };
+
+  const observe = (): void => {
+    if (typeof IntersectionObserver === "undefined") {
+      return;
+    }
+    const options = observerOptions();
+    const margin = options.rootMargin ?? "";
+    if (observer !== null && margin === observerMargin) {
+      // Same band: the existing observer already watches every section, so keep it.
+      return;
+    }
+    observer?.disconnect();
+    observerMargin = margin;
+    observer = new IntersectionObserver(() => activate(pick()), options);
     for (const section of sections) {
       observer.observe(section);
     }
   };
 
-  const release = (): void => {
-    if (frame !== 0) {
-      cancelAnimationFrame(frame);
-      frame = 0;
+  const syncEdges = (): void => {
+    syncScrollEdges(row);
+  };
+
+  const scheduleEdges = (): void => {
+    if (edgesFrame !== null) {
+      return;
     }
+    edgesFrame = requestFrame(() => {
+      edgesFrame = null;
+      syncEdges();
+    });
+  };
+
+  const applyResize = (): void => {
+    observe();
+    activate(pick());
+    syncEdges();
+  };
+
+  const scheduleResize = (): void => {
+    if (resizeFrame !== null) {
+      return;
+    }
+    resizeFrame = requestFrame(() => {
+      resizeFrame = null;
+      applyResize();
+    });
+  };
+
+  const release = (): void => {
+    for (const frame of [edgesFrame, resizeFrame, bootOuter, bootInner]) {
+      cancelFrame(frame);
+    }
+    edgesFrame = null;
+    resizeFrame = null;
+    bootOuter = null;
+    bootInner = null;
     observer?.disconnect();
     observer = null;
   };
 
   activate(pick());
-  row.addEventListener("scroll", syncEdges, { passive: true, signal });
+  row.addEventListener("scroll", scheduleEdges, { passive: true, signal });
 
   // The sticky chrome publishes its height in an animation frame after the render; observing a
   // frame later keeps the reading line on the same line as `scroll-margin-top`.
-  if (typeof requestAnimationFrame === "function") {
-    frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        syncEdges();
-        observe();
-      });
-    });
-  } else {
-    syncEdges();
-    observe();
-  }
-
-  window.addEventListener(
-    "resize",
-    () => {
-      observe();
-      activate(pick());
+  bootOuter = requestFrame(() => {
+    bootOuter = null;
+    bootInner = requestFrame(() => {
+      bootInner = null;
       syncEdges();
-    },
-    { passive: true, signal },
-  );
+      observe();
+    });
+  });
+
+  window.addEventListener("resize", scheduleResize, { passive: true, signal });
   signal.addEventListener("abort", release, { once: true });
 
   return activate;

@@ -88,6 +88,28 @@ describe("resultCard", () => {
     expect(cover?.getAttribute("height")).toBe("353");
   });
 
+  test("clones one cached star glyph pair into every half target", () => {
+    const first = resultCard(ITEM, new AbortController().signal);
+    const second = resultCard(ITEM, new AbortController().signal);
+    const glyphs = (card: HTMLElement): SVGSVGElement[] => [
+      ...card.querySelectorAll<SVGSVGElement>(".rating-half svg"),
+    ];
+
+    const a = glyphs(first);
+    const b = glyphs(second);
+    expect(a).toHaveLength(20);
+    expect(b).toHaveLength(20);
+    // Every cell owns its nodes: the prototype is cloned, never shared or moved.
+    expect(new Set([...a, ...b]).size).toBe(40);
+
+    expect(a[0]?.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(a[0]?.getAttribute("aria-hidden")).toBe("true");
+    expect(a[0]?.classList.contains("rating-half-off")).toBe(true);
+    expect(a[1]?.classList.contains("rating-half-on")).toBe(true);
+    expect(a[1]?.querySelector("path")?.getAttribute("fill")).toBe("currentColor");
+    expect(a[0]?.querySelector("path")?.getAttribute("fill")).toBe("none");
+  });
+
   test("renders unknown favorite state as today's neutral button", () => {
     const article = resultCard({ ...ITEM, favorite: null }, new AbortController().signal);
 

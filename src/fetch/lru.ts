@@ -4,6 +4,8 @@ interface Lru<K, V> {
   get(key: K): V | undefined;
   /** Store a value as the most recently used, evicting the oldest entry when full. */
   set(key: K, value: V): void;
+  /** Forget an entry without reporting it as an eviction; returns whether it was present. */
+  delete(key: K): boolean;
   /** Change the capacity, dropping the oldest entries until the new limit is met. */
   setLimit(limit: number): void;
 }
@@ -55,6 +57,10 @@ export function createLru<K, V>(limit: number, onEvict?: (value: V, key: K) => v
         }
       }
       entries.set(key, value);
+    },
+    delete(key) {
+      // Deliberately not `drop`: the caller is removing a bad entry, not the cache evicting one.
+      return entries.delete(key);
     },
     setLimit(next) {
       capacity = Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0;
