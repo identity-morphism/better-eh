@@ -1,5 +1,5 @@
 import { anchorHref, cleanText, parseNumber } from "./helpers";
-import { safeUrl } from "./url";
+import { galleryHref, queryGalleryIdentity } from "./url";
 
 /** One torrent form from `/gallerytorrents.php`. */
 export interface GalleryTorrent {
@@ -28,21 +28,13 @@ export interface GalleryTorrentsPage {
   torrents: readonly GalleryTorrent[];
 }
 
-const GID = /^\d+$/;
-const GALLERY_TOKEN = /^[0-9a-f]+$/i;
-
 /** The tracker link each form carries; its text is the torrent's file name. */
 const DOWNLOAD_LINK = "a[href*='ehtracker.org/get/']";
 
 /** The gallery address the page's `gid`/`t` query names, if both values are safe. */
 function galleryHrefFrom(url: string): string | null {
-  const parsed = safeUrl(url);
-  const gid = parsed?.searchParams.get("gid") ?? "";
-  const token = parsed?.searchParams.get("t") ?? "";
-  if (!GID.test(gid) || !GALLERY_TOKEN.test(token)) {
-    return null;
-  }
-  return `/g/${gid}/${token}/`;
+  const identity = queryGalleryIdentity(url, "gid", "t");
+  return identity === null ? null : galleryHref(identity);
 }
 
 /**

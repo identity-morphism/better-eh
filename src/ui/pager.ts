@@ -40,7 +40,7 @@ interface PagerOptions {
  * parameter, and every later page stores its zero-based index. `param` is the site's spelling, `p`
  * or `page`.
  */
-export function pageHref(baseUrl: string, page: number, param: string): string {
+function pageHref(baseUrl: string, page: number, param: string): string {
   const url = new URL(baseUrl);
   if (page <= 1) {
     url.searchParams.delete(param);
@@ -183,4 +183,41 @@ export function pager({
 
   wrap.hidden = prev === null && next === null && !numbered && info === "";
   return wrap;
+}
+
+interface NumberedPagerOptions {
+  baseUrl: string;
+  /** One-based page the site is showing. */
+  page: number;
+  total: number;
+  /** Site query parameter for the zero-based cursor (`p`, `page`). */
+  param: string;
+  label: string;
+  navigate: (href: string) => void;
+  prev?: string | null;
+  next?: string | null;
+  info?: string;
+}
+
+/** The numbered strip plus its jump control, shared by the site's numbered listings. */
+export function numberedPager({
+  baseUrl,
+  page,
+  total,
+  param,
+  label,
+  navigate,
+  prev = null,
+  next = null,
+  info = "",
+}: NumberedPagerOptions): HTMLElement {
+  const href = (target: number): string => pageHref(baseUrl, target, param);
+  return pager({
+    prev,
+    next,
+    info,
+    label,
+    pages: { current: page, total, href },
+    jump: { current: page, go: (target) => navigate(href(target)) },
+  });
 }

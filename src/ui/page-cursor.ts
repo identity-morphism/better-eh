@@ -13,19 +13,22 @@ export interface CursorPage<T> {
  */
 export type PageSource<T> = (url: string, signal: AbortSignal) => Promise<CursorPage<T>>;
 
-/** Inputs for one cursor: the first page URL, item identity, and the view's abort signal. */
-interface PageCursorOptions<T> {
-  /** URL of the first page to fetch, or null when there is nothing to load. */
+/** Inputs shared by the sequential cursor and every sentinel that drives it. */
+export interface PageFeedOptions<T> {
+  /** URL of the page after the rendered one, or null when there is nothing more. */
   next: string | null;
-  /** Stable identity of an item, so overlapping pages cannot report one twice. */
+  /** Stable identity of an item, so overlapping pages cannot render one twice. */
   key: (item: T) => string;
-  /** Keys already rendered before the cursor was created. */
+  /** Keys already rendered before the feed started. */
   initialKeys?: readonly string[];
   /** Fetch one page; the signal aborts with the view. */
   load: (url: string, signal: AbortSignal) => Promise<CursorPage<T>>;
   /** View lifetime; aborting stops the in-flight request and every later load. */
   signal: AbortSignal;
 }
+
+/** Inputs for one cursor: the feed contract only. */
+type PageCursorOptions<T> = PageFeedOptions<T>;
 
 /**
  * Sequential next-page loader shared by the listing sentinel and the viewer's continuous mode.

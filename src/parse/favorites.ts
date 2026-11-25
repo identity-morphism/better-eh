@@ -13,6 +13,11 @@ interface FavoriteFolderTab {
 /** Sort orders offered by the favorites page. */
 export type FavoriteOrder = "published" | "favorited";
 
+/** Site query value that selects one favorite order. */
+export function orderParam(order: FavoriteOrder): string {
+  return order === "published" ? "fs_p" : "fs_f";
+}
+
 /** Everything the favorites view renders for one page load. */
 export interface FavoritesPage {
   /** Address this page was loaded from; the view builds folder and order links from it. */

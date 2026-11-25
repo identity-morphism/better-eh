@@ -6,10 +6,9 @@
  * render read-only with an escape hatch to the native page.
  */
 
-import type { GalleryPost } from "../data/gallery-actions";
-import type { MyTagChange, TagsetChange } from "../data/my-tags";
+import type { MyTagChange, MyTagTransports, TagsetChange } from "../data/my-tags";
 import { applyMyTag, normalizeWeight, saveTagset as saveTagsetRequest } from "../data/my-tags";
-import type { DocumentOptions, HtmlResponse } from "../fetch/loader";
+import type { DocumentOptions } from "../fetch/loader";
 import { loader } from "../fetch/loader";
 import type { ApiCredentials } from "../parse/gallery";
 import { isChecked } from "../parse/helpers";
@@ -32,13 +31,7 @@ export type SaveTagset = (
 ) => Promise<void>;
 
 /** Optional transports so tests can drive saves without the network. */
-export interface MyTagsViewDeps {
-  /** Fetch the page that holds the saved tag ids; defaults to the shared loader. */
-  loadDocument?: (url: string, options: DocumentOptions) => Promise<HtmlResponse>;
-  /** Transport for the `setusertag` JSON API. */
-  post?: GalleryPost;
-  /** Transport for the native add-form POST. */
-  addTag?: (url: string, body: URLSearchParams, signal?: AbortSignal) => Promise<void>;
+export interface MyTagsViewDeps extends MyTagTransports {
   /** Transport for the tagset form; defaults to the native form POST. */
   saveTagset?: SaveTagset;
 }
@@ -336,6 +329,42 @@ function readChange(inputs: TagInputs): MyTagChange {
   };
 }
 
+interface SaveAction {
+  button: HTMLButtonElement;
+  /** Label the button returns to after the request. */
+  idle: string;
+  busy: string;
+  error: HTMLElement;
+  failure: string;
+  /** Run the mutation and return the toast text for success. */
+  save: () => Promise<string>;
+  onSaved: (message: string) => void;
+}
+
+/** Run one POST-backed save: lock the button, surface failures inline, toast the result. */
+async function runSaveAction({
+  button,
+  idle,
+  busy,
+  error,
+  failure,
+  save,
+  onSaved,
+}: SaveAction): Promise<void> {
+  error.hidden = true;
+  button.disabled = true;
+  button.textContent = busy;
+  try {
+    onSaved(await save());
+  } catch (cause) {
+    error.textContent = errorText(cause, failure);
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = idle;
+  }
+}
+
 function readOnlyNote(data: MyTagsPage): HTMLElement {
   return el(
     "p",
@@ -444,31 +473,33 @@ export function renderMyTags(
       }
 
       adding = true;
-      submit.disabled = true;
-      submit.textContent = "Adding…";
-      try {
-        const result = await applyMyTag(tag, readChange(inputs), {
-          config: credentials,
-          myTagsUrl: data.url,
-          loadDocument: load,
-          post: deps?.post,
-          addTag: deps?.addTag,
-          signal: ctx.signal,
-        });
-        showToast(result === "added" ? "Tag added to My Tags" : "My Tags updated");
-        form.reset();
-        inputs.weight.value = "10";
-        inputs.color.disabled = true;
-        // The site assigns the new tag's id; only a fresh page exposes the editable row.
-        ctx.reload();
-      } catch (failure) {
-        error.textContent = errorText(failure, "Could not save tag.");
-        error.hidden = false;
-      } finally {
-        adding = false;
-        submit.disabled = false;
-        submit.textContent = "Add tag";
-      }
+      await runSaveAction({
+        button: submit,
+        idle: "Add tag",
+        busy: "Adding…",
+        error,
+        failure: "Could not save tag.",
+        save: async () => {
+          const result = await applyMyTag(tag, readChange(inputs), {
+            config: credentials,
+            myTagsUrl: data.url,
+            loadDocument: load,
+            post: deps?.post,
+            addTag: deps?.addTag,
+            signal: ctx.signal,
+          });
+          return result === "added" ? "Tag added to My Tags" : "My Tags updated";
+        },
+        onSaved: (message) => {
+          showToast(message);
+          form.reset();
+          inputs.weight.value = "10";
+          inputs.color.disabled = true;
+          // The site assigns the new tag's id; only a fresh page exposes the editable row.
+          ctx.reload();
+        },
+      });
+      adding = false;
     };
 
     form.addEventListener(
@@ -520,37 +551,35 @@ export function renderMyTags(
           return;
         }
         busy = true;
-        save.disabled = true;
-        save.textContent = "Saving…";
-        error.hidden = true;
-        try {
-          const change = readChange(inputs);
-          await applyMyTag(tag.name, change, {
-            config: credentials,
-            myTagsUrl: data.url,
-            existing: state,
-            loadDocument: load,
-            post: deps?.post,
-            addTag: deps?.addTag,
-            signal: ctx.signal,
-          });
-          const rawWeight = inputs.weight.value.trim();
-          Object.assign(state, {
-            watched: isChecked(inputs.watched),
-            hidden: isChecked(inputs.hidden),
-            color: isChecked(inputs.colorEnabled) ? normalizeColor(inputs.color.value) : "",
-            weight: rawWeight === "" ? state.weight : normalizeWeight(Number(rawWeight)),
-          });
-          summary.textContent = describeTag(state);
-          showToast("My Tags updated");
-        } catch (failure) {
-          error.textContent = errorText(failure, "Could not save tag.");
-          error.hidden = false;
-        } finally {
-          busy = false;
-          save.disabled = false;
-          save.textContent = "Save";
-        }
+        await runSaveAction({
+          button: save,
+          idle: "Save",
+          busy: "Saving…",
+          error,
+          failure: "Could not save tag.",
+          save: async () => {
+            await applyMyTag(tag.name, readChange(inputs), {
+              config: credentials,
+              myTagsUrl: data.url,
+              existing: state,
+              loadDocument: load,
+              post: deps?.post,
+              addTag: deps?.addTag,
+              signal: ctx.signal,
+            });
+            const rawWeight = inputs.weight.value.trim();
+            Object.assign(state, {
+              watched: isChecked(inputs.watched),
+              hidden: isChecked(inputs.hidden),
+              color: isChecked(inputs.colorEnabled) ? normalizeColor(inputs.color.value) : "",
+              weight: rawWeight === "" ? state.weight : normalizeWeight(Number(rawWeight)),
+            });
+            summary.textContent = describeTag(state);
+            return "My Tags updated";
+          },
+          onSaved: showToast,
+        });
+        busy = false;
       };
 
       save.addEventListener(

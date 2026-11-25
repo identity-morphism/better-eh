@@ -1,6 +1,8 @@
 import { postForm } from "../net/http";
 import type { UconfigField, UconfigSection } from "../parse/uconfig";
 import { categorySwitchShown, categorySwitchValue, uconfigBody } from "../parse/uconfig";
+import { nativePath } from "../routes/identity";
+import { SITE_PATHS, siteUrl } from "../site";
 import type { Child } from "../ui/dom";
 import { el } from "../ui/dom";
 import { errorText } from "../ui/error-text";
@@ -19,7 +21,7 @@ type Save = (body: URLSearchParams, signal?: AbortSignal) => Promise<void>;
 
 /** The site's settings form: a form POST to `/uconfig.php` with the current session's cookie. */
 const saveSiteSettings: Save = async (body, signal) => {
-  await postForm(`${location.origin}/uconfig.php`, body, {
+  await postForm(siteUrl(SITE_PATHS.uconfig), body, {
     tag: "uconfig-save",
     failure: "Saving settings failed",
     signal,
@@ -74,6 +76,16 @@ function labeledField(
   );
 }
 
+/** Register one form control's read/write pair with the draft. */
+function bindValue(
+  bindings: DraftBinding<string>[],
+  key: string,
+  read: () => string,
+  write: (value: string) => void,
+): void {
+  bindings.push({ key, read, write });
+}
+
 function radioGroup(
   field: UconfigField,
   id: string,
@@ -99,15 +111,16 @@ function radioGroup(
     );
   });
 
-  bindings.push({
-    key: field.name,
-    read: () => choices.find((choice) => choice.readChecked())?.element.value ?? "",
-    write: (value) => {
+  bindValue(
+    bindings,
+    field.name,
+    () => choices.find((choice) => choice.readChecked())?.element.value ?? "",
+    (value) => {
       for (const choice of choices) {
         choice.writeChecked(choice.element.value === value);
       }
     },
-  });
+  );
 
   return el(
     "fieldset",
@@ -129,11 +142,7 @@ function checkboxItem(
     checked: field.value !== "",
     disabled: field.disabled,
   });
-  bindings.push({
-    key: field.name,
-    read: control.readValue,
-    write: control.writeValue,
-  });
+  bindValue(bindings, field.name, control.readValue, control.writeValue);
   return el(
     "div",
     { class: "settings-row" },
@@ -180,11 +189,7 @@ function selectField(
       disabled: option.disabled,
     })),
   });
-  bindings.push({
-    key: field.name,
-    read: control.read,
-    write: control.write,
-  });
+  bindValue(bindings, field.name, control.read, control.write);
   return labeledField(field, id, control.element, sectionTitle);
 }
 
@@ -205,13 +210,14 @@ function textField(
     autocomplete: "off",
     disabled: field.disabled ? "" : null,
   });
-  bindings.push({
-    key: field.name,
-    read: () => input.value,
-    write: (value) => {
+  bindValue(
+    bindings,
+    field.name,
+    () => input.value,
+    (value) => {
       input.value = value;
     },
-  });
+  );
   return labeledField(field, id, input, sectionTitle);
 }
 
@@ -229,25 +235,27 @@ function textareaField(
     disabled: field.disabled ? "" : null,
   });
   textarea.value = field.value;
-  bindings.push({
-    key: field.name,
-    read: () => textarea.value,
-    write: (value) => {
+  bindValue(
+    bindings,
+    field.name,
+    () => textarea.value,
+    (value) => {
       textarea.value = value;
     },
-  });
+  );
   return labeledField(field, id, textarea, sectionTitle);
 }
 
 function hiddenField(field: UconfigField, bindings: DraftBinding<string>[]): HTMLInputElement {
   const input = el("input", { type: "hidden", name: field.name, value: field.value });
-  bindings.push({
-    key: field.name,
-    read: () => input.value,
-    write: (value) => {
+  bindValue(
+    bindings,
+    field.name,
+    () => input.value,
+    (value) => {
       input.value = value;
     },
-  });
+  );
   return input;
 }
 
@@ -477,7 +485,7 @@ export function renderSettings(
       summary: [
         el("a", {
           class: "settings-native",
-          href: "/uconfig.php?eh_native=1",
+          href: nativePath(SITE_PATHS.uconfig),
           "data-native": "",
           text: "Native settings",
           title: "Open the site's own settings page (display-name profiles, category switches)",

@@ -1,3 +1,4 @@
+import { collapseWhitespace } from "../strings";
 import { categoryFromClass } from "./query";
 import { safeUrl } from "./url";
 
@@ -18,16 +19,27 @@ export function isChecked(input: HTMLInputElement | null): boolean {
 }
 
 export function cleanText(value: string | null | undefined): string {
-  return (value ?? "").replace(/\s+/g, " ").trim();
+  return collapseWhitespace(value ?? "");
 }
 
-export function parseNumber(value: string | null | undefined): number | null {
-  const match = /([\d,]+)/.exec(value ?? "");
-  if (!match?.[1]) {
+/** The first integer-like run matched by `pattern`, with thousands separators removed. */
+function parseIntMatch(value: string | null | undefined, pattern: RegExp): number | null {
+  const digits = pattern.exec(value ?? "")?.[1];
+  if (digits === undefined) {
     return null;
   }
-  const parsed = Number.parseInt(match[1].replace(/,/g, ""), 10);
+  const parsed = Number.parseInt(digits.replace(/,/g, ""), 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** First unsigned number in the text, e.g. `1,234 images` → 1234. */
+export function parseNumber(value: string | null | undefined): number | null {
+  return parseIntMatch(value, /([\d,]+)/);
+}
+
+/** First signed number in the text, e.g. a comment score of `+78` or `-4`. */
+export function parseSignedNumber(value: string | null | undefined): number | null {
+  return parseIntMatch(value, /^\s*([+-]?\d[\d,]*)/);
 }
 
 /** Absolute URL for an anchor's `href`, resolved against the page URL. */

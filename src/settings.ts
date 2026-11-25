@@ -28,29 +28,12 @@ function isStoredValues(value: unknown): value is Partial<UserSettings> {
   return isRecord(value);
 }
 
-/** Values from the pre-v2 keys, used when no v2 record exists. */
-function legacyValues(read: SettingsReader): Partial<UserSettings> {
-  const legacyFit = read("defaultFitHeight");
-  const legacyDebug = read("debug");
-  const legacyKeymap = read("keymap");
-  return {
-    fitHeight: typeof legacyFit === "boolean" ? legacyFit : DEFAULT_SETTINGS.fitHeight,
-    debug: typeof legacyDebug === "boolean" ? legacyDebug : DEFAULT_SETTINGS.debug,
-    keymap: isKeyMapPatch(legacyKeymap)
-      ? { ...DEFAULT_SETTINGS.keymap, ...legacyKeymap }
-      : DEFAULT_SETTINGS.keymap,
-  };
-}
-
-/**
- * Store options for one reader: a missing or outdated record falls back to the pre-v2 keys, which
- * the first write then migrates into the shared envelope.
- */
-function settingsOptions(read: SettingsReader): StoreOptions<Partial<UserSettings>> {
+/** Store options: a missing or outdated record starts from the schema defaults. */
+function settingsOptions(): StoreOptions<Partial<UserSettings>> {
   return {
     key: STORAGE_KEY,
     version: VERSION,
-    empty: () => legacyValues(read),
+    empty: () => ({}),
     guard: isStoredValues,
   };
 }
@@ -63,7 +46,7 @@ function applyStoredScalars(target: UserSettings, values: Partial<UserSettings>)
 
 export function loadSettings(read: SettingsReader = readStoredSetting): Readonly<UserSettings> {
   // A read-only view of the caller's reader: nothing here writes.
-  const values = createStore(settingsOptions(read), {
+  const values = createStore(settingsOptions(), {
     read,
     write: () => undefined,
     remove: () => undefined,
@@ -78,7 +61,7 @@ export function loadSettings(read: SettingsReader = readStoredSetting): Readonly
   });
 }
 
-const store = createStore(settingsOptions(readStoredSetting), gm);
+const store = createStore(settingsOptions(), gm);
 
 let current: Readonly<UserSettings> = loadSettings();
 

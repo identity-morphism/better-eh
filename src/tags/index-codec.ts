@@ -1,3 +1,5 @@
+import { hasCodecHeader } from "./codec-header";
+
 /**
  * Compact vocabulary payload for the tag index.
  *
@@ -117,15 +119,7 @@ export function encodeTagVocabulary(groups: ReadonlyMap<string, readonly string[
 
 /** Decode the asset; returns `null` for any corrupt or unsupported payload. */
 export function decodeTagVocabulary(bytes: Uint8Array): Map<string, readonly string[]> | null {
-  if (bytes.length < HEADER_BYTES) {
-    return null;
-  }
-  for (let index = 0; index < MAGIC.length; index++) {
-    if (bytes[index] !== MAGIC[index]) {
-      return null;
-    }
-  }
-  if (bytes[4] !== FORMAT_VERSION) {
+  if (!hasCodecHeader(bytes, MAGIC, FORMAT_VERSION, HEADER_BYTES)) {
     return null;
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

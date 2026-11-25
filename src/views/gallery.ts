@@ -1,7 +1,10 @@
-import { isLoggedIn } from "../data/favorites";
-import type { GalleryActionDeps } from "../data/gallery-actions";
-import { postComment, voteTag } from "../data/gallery-actions";
-import type { MyTagChange } from "../data/my-tags";
+import type {
+  CommentTransports,
+  GalleryActionDeps,
+  TagVoteTransports,
+} from "../data/gallery-actions";
+import { voteTag } from "../data/gallery-actions";
+import type { MyTagChange, MyTagTransports } from "../data/my-tags";
 import { applyMyTag } from "../data/my-tags";
 import { clearResume, getResume } from "../data/resume";
 import type { DocumentOptions, HtmlResponse } from "../fetch/loader";
@@ -16,6 +19,8 @@ import {
   setSearchQuery,
   subscribeSearchDraft,
 } from "../search-draft";
+import { isLoggedIn } from "../session";
+import { SITE_PATHS } from "../site";
 import type { SearchTerm, TagSign } from "../tags/model";
 import { fold, parseSearchTerms, tagIdentity, toggleTagInSearch } from "../tags/model";
 import type { GalleryApiConfig, GalleryData, GalleryThumb, TagRef } from "../types";
@@ -29,6 +34,7 @@ import { commentsSection } from "../ui/gallery-comments";
 import type { CommentSectionDeps } from "../ui/gallery-comments";
 import { ratingControl } from "../ui/gallery-rating";
 import { openTagMenu } from "../ui/gallery-tag-menu";
+import type { PageSource } from "../ui/page-cursor";
 import { createPagedRegion } from "../ui/paged-region";
 import { pager } from "../ui/pager";
 import { openPopup } from "../ui/popup-window";
@@ -39,23 +45,14 @@ import { titleNodes } from "../ui/title";
 import { showToast } from "../ui/toast";
 import { renderTopbar } from "../ui/topbar";
 import { bindViewScale } from "../ui/view-scale";
-import type { PageSource, ViewContext } from "./context";
+import type { ViewContext } from "./context";
 
 /** Optional transports so tests can drive mutations and refreshes without the network. */
-export interface GalleryViewDeps extends GalleryActionDeps {
+export interface GalleryViewDeps extends GalleryActionDeps, CommentTransports {
   /** Re-fetch the gallery document after a mutation; defaults to the shared loader. */
   loadDocument?: (url: string, options: DocumentOptions) => Promise<HtmlResponse>;
   /** Route-owned next-page source for appended thumbnail pages. */
   pageSource?: PageSource<GalleryThumb>;
-  /** Submit the native comment form; defaults to the real endpoint. */
-  postComment?: (url: string, text: string, signal?: AbortSignal) => Promise<void>;
-  /** Save an edited comment; defaults to the native edit endpoint. */
-  editComment?: (
-    url: string,
-    commentId: number,
-    text: string,
-    signal?: AbortSignal,
-  ) => Promise<void>;
 }
 
 /** Probe an image URL without inserting it, reporting the failure through `onError`. */
@@ -101,20 +98,13 @@ function writableConfig(data: GalleryData): GalleryApiConfig | null {
   return config !== null && config.apiUid !== "-1" ? config : null;
 }
 
-interface TagActions {
+interface TagActions extends TagVoteTransports, MyTagTransports {
   /** URL for a modified click, reflecting the live draft query. */
   href: (token: string, sign: TagSign) => string;
   /** Add, toggle or exclude the tag in the draft query. */
   add: (token: string, sign: TagSign) => void;
-  /** Vote on the raw `namespace:tag` form, or add a comma-separated batch. */
-  vote: (tag: string, vote: 1 | -1) => Promise<void>;
-  addTags: (tags: string) => Promise<void>;
   /** Undefined on anonymous pages, which hide the tag menu. */
   config: GalleryApiConfig | null;
-  /** My Tags mutations; undefined for anonymous pages. */
-  watchTag?: (tag: string) => Promise<void>;
-  hideTag?: (tag: string) => Promise<void>;
-  colorTag?: (tag: string, color: string) => Promise<void>;
 }
 
 interface TagSection {
@@ -665,7 +655,7 @@ export function renderGallery(
 
   const commentDeps: CommentSectionDeps = {
     post: deps.post,
-    postComment: deps.postComment ?? postComment,
+    postComment: deps.postComment,
     editComment: deps.editComment,
     refresh: async () => {
       const next = await reload();
@@ -777,7 +767,7 @@ export function renderGallery(
     }
     const result = await applyMyTag(tag, change, {
       config,
-      myTagsUrl: new URL("/mytags", data.url).href,
+      myTagsUrl: new URL(SITE_PATHS.myTags, data.url).href,
       loadDocument: load,
       post: deps.post,
       signal: ctx.signal,

@@ -1,8 +1,9 @@
-import { isLoggedIn } from "../data/favorites";
 import { rememberQuery } from "../data/search-history";
 import type { SearchDraft } from "../search-draft";
 import { getSearchDraft, setSearchDraftText, subscribeSearchDraft } from "../search-draft";
+import { isLoggedIn } from "../session";
 import { getSettings } from "../settings";
+import { FRONT_PATH, POPULAR_PATH, SITE_PATHS, WATCHED_PATH } from "../site";
 import { toggleExpressionInSearch } from "../tags/model";
 import { el, icon, isEditableTarget, searchInput } from "./dom";
 import { syncScrollEdges, trackScrollEdges } from "./jump-row";
@@ -77,36 +78,41 @@ function matchesPath(tabPath: string, pathname: string): boolean {
 /** Site order, as rendered in the native navbar. */
 function navSpecs(host: string): readonly NavSpec[] {
   const specs: NavSpec[] = [
-    { key: "front", label: "Front Page", target: { kind: "internal", path: "/" }, primary: true },
+    {
+      key: "front",
+      label: "Front Page",
+      target: { kind: "internal", path: FRONT_PATH },
+      primary: true,
+    },
     {
       key: "watched",
       label: "Watched",
-      target: { kind: "internal", path: "/watched" },
+      target: { kind: "internal", path: WATCHED_PATH },
       primary: true,
     },
     {
       key: "popular",
       label: "Popular",
-      target: { kind: "internal", path: "/popular" },
+      target: { kind: "internal", path: POPULAR_PATH },
       primary: true,
     },
     {
       key: "torrents",
       label: "Torrents",
-      target: { kind: "internal", path: "/torrents.php" },
+      target: { kind: "internal", path: SITE_PATHS.torrents },
       primary: true,
     },
     {
       key: "favorites",
       label: "Favorites",
-      target: { kind: "internal", path: "/favorites.php" },
+      target: { kind: "internal", path: SITE_PATHS.favorites },
       primary: true,
       accountOnly: true,
     },
     {
       key: "settings",
       label: "Settings",
-      target: { kind: "internal", path: "/uconfig.php" },
+      target: { kind: "internal", path: SITE_PATHS.uconfig },
       accountOnly: true,
     },
     {
@@ -118,11 +124,11 @@ function navSpecs(host: string): readonly NavSpec[] {
     {
       key: "mytags",
       label: "My Tags",
-      target: { kind: "internal", path: "/mytags" },
+      target: { kind: "internal", path: SITE_PATHS.myTags },
       accountOnly: true,
     },
-    { key: "home", label: "My Home", target: { kind: "internal", path: "/home.php" } },
-    { key: "toplist", label: "Toplists", target: { kind: "internal", path: "/toplist.php" } },
+    { key: "home", label: "My Home", target: { kind: "internal", path: SITE_PATHS.home } },
+    { key: "toplist", label: "Toplists", target: { kind: "internal", path: SITE_PATHS.toplist } },
     { key: "bounty", label: "Bounties", target: { kind: "internal", path: "/bounty.php" } },
     { key: "news", label: "News", target: { kind: "internal", path: "/news.php" } },
     { key: "lofi", label: "LoFi", target: { kind: "internal", path: "/lofi/" } },

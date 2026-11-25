@@ -108,6 +108,11 @@
     return Array.isArray(value);
   }
 
+  // src/strings.ts
+  function collapseWhitespace(value) {
+    return value.replace(/\s+/gu, " ").trim();
+  }
+
   // src/tags/model.ts
   var TAG_NAMESPACES = Object.freeze([
     { id: "female", label: "Female", alias: "f", weight: 9 },
@@ -135,7 +140,7 @@
     return text.normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase();
   }
   function cleanTagKey(key) {
-    return key.replace(/_/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
+    return collapseWhitespace(key.replace(/_/gu, " ")).toLowerCase();
   }
   function normaliseTagKey(key) {
     return fold(cleanTagKey(key));
@@ -302,7 +307,7 @@
     return `${text.slice(0, term.start)}${sign}${body}${text.slice(term.end)}`;
   }
   function formatTagToken(ns, key, sign = "") {
-    const value = key.trim().replace(/\s+/gu, " ");
+    const value = collapseWhitespace(key);
     const prefix = tagNamespace(ns)?.alias ?? ns;
     const body = /\s/u.test(value) ? `"${value}$"` : `${value}$`;
     return `${sign}${prefix}:${body}`;
@@ -397,6 +402,18 @@
     }
     return { gid: match[1], token: match[2] };
   }
+  function galleryHref({ gid, token }) {
+    return `/g/${gid}/${token}/`;
+  }
+  function galleryTorrentsHref({ gid, token }) {
+    return `/gallerytorrents.php?gid=${gid}&t=${token}`;
+  }
+  function queryGalleryIdentity(url, gidParam, tokenParam) {
+    const parsed = safeUrl(url);
+    const gid = parsed?.searchParams.get(gidParam) ?? "";
+    const token = parsed?.searchParams.get(tokenParam) ?? "";
+    return GALLERY_PATH.test(galleryHref({ gid, token })) ? { gid, token } : null;
+  }
   function galleryGid(value, base) {
     const url = value === null || value === undefined ? null : safeUrl(value, base);
     if (url === null) {
@@ -407,24 +424,23 @@
 
   // src/parse/query.ts
   var CATEGORIES = [
-    { bit: 2, name: "Doujinshi", cls: "ct2" },
-    { bit: 4, name: "Manga", cls: "ct3" },
-    { bit: 8, name: "Artist CG", cls: "ct4" },
-    { bit: 16, name: "Game CG", cls: "ct5" },
-    { bit: 512, name: "Western", cls: "cta" },
-    { bit: 256, name: "Non-H", cls: "ct9" },
-    { bit: 32, name: "Image Set", cls: "ct6" },
-    { bit: 64, name: "Cosplay", cls: "ct7" },
-    { bit: 128, name: "Asian Porn", cls: "ct8" },
-    { bit: 1, name: "Misc", cls: "ct1" }
+    { bit: 2, name: "Doujinshi", cls: "ct2", path: "/doujinshi" },
+    { bit: 4, name: "Manga", cls: "ct3", path: "/manga" },
+    { bit: 8, name: "Artist CG", cls: "ct4", path: "/artistcg" },
+    { bit: 16, name: "Game CG", cls: "ct5", path: "/gamecg" },
+    { bit: 512, name: "Western", cls: "cta", path: "/western" },
+    { bit: 256, name: "Non-H", cls: "ct9", path: "/non-h" },
+    { bit: 32, name: "Image Set", cls: "ct6", path: "/imageset" },
+    { bit: 64, name: "Cosplay", cls: "ct7", path: "/cosplay" },
+    { bit: 128, name: "Asian Porn", cls: "ct8", path: "/asianporn" },
+    { bit: 1, name: "Misc", cls: "ct1", path: "/misc" }
   ];
   function singleCategoryName(cats) {
     const enabled = CATEGORIES.filter((category) => (cats & category.bit) === 0);
     return enabled.length === 1 ? enabled[0]?.name ?? null : null;
   }
-  function emptySearchFilters() {
+  function emptyAdvancedFilters() {
     return {
-      cats: 0,
       rating: 0,
       expunged: false,
       torrent: false,
@@ -436,6 +452,9 @@
       disableUploader: false,
       disableTags: false
     };
+  }
+  function emptySearchFilters() {
+    return { cats: 0, ...emptyAdvancedFilters() };
   }
   function emptySearchQuery() {
     return { text: "", ...emptySearchFilters() };
@@ -560,34 +579,71 @@
     return formatTagToken("uploader", name);
   }
 
+  // src/site.ts
+  var SITE_DOMAINS = ["e-hentai.org", "exhentai.org"];
+  var SITE_PATHS = {
+    home: "/home.php",
+    favorites: "/favorites.php",
+    uconfig: "/uconfig.php",
+    myTags: "/mytags",
+    torrents: "/torrents.php",
+    galleryTorrents: "/gallerytorrents.php",
+    archive: "/archiver.php",
+    toplist: "/toplist.php"
+  };
+  var FRONT_PATH = "/";
+  var POPULAR_PATH = "/popular";
+  var WATCHED_PATH = "/watched";
+  function isSiteHost(hostname) {
+    return SITE_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+  }
+  function siteLabel() {
+    if (typeof location === "undefined") {
+      return "E-Hentai";
+    }
+    return /(^|\.)exhentai\.org$/i.test(location.hostname) ? "ExHentai" : "E-Hentai";
+  }
+  function documentTitle(...parts) {
+    return [...parts, siteLabel()].filter((part) => part !== "").join(" - ");
+  }
+  function siteUrl(path) {
+    return new URL(path, location.origin).href;
+  }
+  function galleryPopupUrl(gid, token, act, base = location.origin) {
+    const url = new URL("gallerypopups.php", base);
+    url.searchParams.set("gid", gid);
+    url.searchParams.set("t", token);
+    url.searchParams.set("act", act);
+    return url.href;
+  }
+
   // src/routes/identity.ts
   var VIEWER_PATH = /^\/s\/[^/]+\/\d+-\d+\/?$/;
   var UPLOADER_PATH = /^\/uploader\/[^/]+\/?$/;
+  function isPath(pathname, path) {
+    return pathname === path || pathname === `${path}/`;
+  }
   var LIST_PATHS = {
     "/": 0,
-    "/doujinshi": 2,
-    "/manga": 4,
-    "/artistcg": 8,
-    "/gamecg": 16,
-    "/western": 512,
-    "/non-h": 256,
-    "/imageset": 32,
-    "/cosplay": 64,
-    "/asianporn": 128,
-    "/misc": 1
+    ...Object.fromEntries(CATEGORIES.map((category) => [category.path, category.bit]))
   };
   var ALL_CATEGORY_BITS = CATEGORIES.reduce((bits, category) => bits | category.bit, 0);
   function categoryPathBit(pathname) {
     return LIST_PATHS[pathname] ?? null;
   }
   var SCOPE_PATHS = {
-    "/popular": "popular",
-    "/watched": "watched"
+    [POPULAR_PATH]: "popular",
+    [WATCHED_PATH]: "watched"
   };
   function nativeUrl(href = location.href) {
     const url = new URL(href);
     url.searchParams.set("eh_native", "1");
     return url.href;
+  }
+  function nativePath(path) {
+    const url = new URL(path, location.origin);
+    url.searchParams.set("eh_native", "1");
+    return `${url.pathname}${url.search}${url.hash}`;
   }
 
   // src/store.ts
@@ -1064,21 +1120,11 @@
   function isStoredValues(value) {
     return isRecord(value);
   }
-  function legacyValues(read) {
-    const legacyFit = read("defaultFitHeight");
-    const legacyDebug = read("debug");
-    const legacyKeymap = read("keymap");
-    return {
-      fitHeight: typeof legacyFit === "boolean" ? legacyFit : DEFAULT_SETTINGS.fitHeight,
-      debug: typeof legacyDebug === "boolean" ? legacyDebug : DEFAULT_SETTINGS.debug,
-      keymap: isKeyMapPatch(legacyKeymap) ? { ...DEFAULT_SETTINGS.keymap, ...legacyKeymap } : DEFAULT_SETTINGS.keymap
-    };
-  }
-  function settingsOptions(read) {
+  function settingsOptions() {
     return {
       key: STORAGE_KEY,
       version: VERSION2,
-      empty: () => legacyValues(read),
+      empty: () => ({}),
       guard: isStoredValues
     };
   }
@@ -1088,7 +1134,7 @@
     }
   }
   function loadSettings(read = readStoredSetting) {
-    const values = createStore(settingsOptions(read), {
+    const values = createStore(settingsOptions(), {
       read,
       write: () => {
         return;
@@ -1105,7 +1151,7 @@
       keymap: freezeKeymap({ ...DEFAULT_SETTINGS.keymap, ...storedKeymap })
     });
   }
-  var store = createStore(settingsOptions(readStoredSetting), gm);
+  var store = createStore(settingsOptions(), gm);
   var current = loadSettings();
   function getSettings() {
     return current;
@@ -1530,7 +1576,7 @@ ${defaultKeySummary()}`)) {
     "gallery not available": true
   };
   function normalizeHeading(text) {
-    return text.replace(SITE_SUFFIX, "").replace(/\s+/g, " ").trim().toLowerCase();
+    return collapseWhitespace(text.replace(SITE_SUFFIX, "")).toLowerCase();
   }
   var NOT_FOUND_TEXT = /^(?:gallery not found|gallery not available|page not found|not found)\b/i;
   function isNotFoundPage(doc) {
@@ -1554,15 +1600,21 @@ ${defaultKeySummary()}`)) {
     return typeof live === "boolean" ? live : input.hasAttribute("checked");
   }
   function cleanText(value) {
-    return (value ?? "").replace(/\s+/g, " ").trim();
+    return collapseWhitespace(value ?? "");
   }
-  function parseNumber(value) {
-    const match = /([\d,]+)/.exec(value ?? "");
-    if (!match?.[1]) {
+  function parseIntMatch(value, pattern) {
+    const digits = pattern.exec(value ?? "")?.[1];
+    if (digits === undefined) {
       return null;
     }
-    const parsed = Number.parseInt(match[1].replace(/,/g, ""), 10);
+    const parsed = Number.parseInt(digits.replace(/,/g, ""), 10);
     return Number.isFinite(parsed) ? parsed : null;
+  }
+  function parseNumber(value) {
+    return parseIntMatch(value, /([\d,]+)/);
+  }
+  function parseSignedNumber(value) {
+    return parseIntMatch(value, /^\s*([+-]?\d[\d,]*)/);
   }
   function anchorHref(anchor, base) {
     const href = anchor?.getAttribute("href");
@@ -1937,8 +1989,6 @@ ${defaultKeySummary()}`)) {
   });
 
   // src/parse/archive.ts
-  var GID = /^\d+$/;
-  var GALLERY_TOKEN = /^[0-9a-f]+$/i;
   function labelledText(container, label) {
     for (const node of container.querySelectorAll("div, p")) {
       const text = cleanText(node.textContent);
@@ -2030,16 +2080,8 @@ ${defaultKeySummary()}`)) {
     return null;
   }
   function galleryLinks(url) {
-    const parsed = safeUrl(url);
-    const gid = parsed?.searchParams.get("gid") ?? "";
-    const token = parsed?.searchParams.get("token") ?? "";
-    if (!GID.test(gid) || !GALLERY_TOKEN.test(token)) {
-      return { galleryHref: null, torrentsHref: null };
-    }
-    return {
-      galleryHref: `/g/${gid}/${token}/`,
-      torrentsHref: `/gallerytorrents.php?gid=${gid}&t=${token}`
-    };
+    const identity = queryGalleryIdentity(url, "gid", "token");
+    return identity === null ? { galleryHref: null, torrentsHref: null } : { galleryHref: galleryHref(identity), torrentsHref: galleryTorrentsHref(identity) };
   }
   function parseArchivePage(doc, url) {
     const container = doc.getElementById("db");
@@ -2246,6 +2288,9 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/parse/favorites.ts
+  function orderParam(order) {
+    return order === "published" ? "fs_p" : "fs_f";
+  }
   var FAVCAT = /favcat=(\d+)/;
   var NOTE_ID = /^favnote_(.+)$/;
   var ORDER_SELECT = 'option[value="f"]';
@@ -2346,21 +2391,6 @@ ${defaultKeySummary()}`)) {
       prevHref: list.prevHref,
       summary: list.resultText
     };
-  }
-
-  // src/site.ts
-  var SITE_DOMAINS = ["e-hentai.org", "exhentai.org"];
-  function isSiteHost(hostname) {
-    return SITE_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
-  }
-  function siteLabel() {
-    if (typeof location === "undefined") {
-      return "E-Hentai";
-    }
-    return /(^|\.)exhentai\.org$/i.test(location.hostname) ? "ExHentai" : "E-Hentai";
-  }
-  function documentTitle(...parts) {
-    return [...parts, siteLabel()].filter((part) => part !== "").join(" - ");
   }
 
   // src/parse/gallery.ts
@@ -2494,14 +2524,6 @@ ${defaultKeySummary()}`)) {
 
 `).trim();
   }
-  function signedNumber(value) {
-    const match = /^\s*([+-]?\d[\d,]*)/.exec(value ?? "");
-    if (!match?.[1]) {
-      return null;
-    }
-    const parsed = Number.parseInt(match[1].replace(/,/g, ""), 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
   function commentIsEditable(block, id) {
     if (block.querySelector(`#comment_edit_${id}, [data-comment-edit="${id}"]`)) {
       return true;
@@ -2535,7 +2557,7 @@ ${defaultKeySummary()}`)) {
         authorHref: anchorHref(authorAnchor ?? null, url),
         posted,
         body: normalizeBody(bodyText(body)),
-        score: signedNumber(scoreNode?.textContent),
+        score: parseSignedNumber(scoreNode?.textContent),
         votes: cleanText(voteNode?.textContent) || null,
         uploader: marker !== null,
         editable: commentIsEditable(block, id)
@@ -2565,14 +2587,7 @@ ${defaultKeySummary()}`)) {
     const rename = doc.getElementById("renamelink");
     const base = popupBase(scriptValue(doc, "base_url"), url);
     const identity = galleryIdentity(url);
-    const popup = rename ? safeUrl("gallerypopups.php", base) : null;
-    let renameHref = null;
-    if (identity && popup) {
-      popup.searchParams.set("gid", identity.gid);
-      popup.searchParams.set("t", identity.token);
-      popup.searchParams.set("act", "rename");
-      renameHref = popup.href;
-    }
+    const renameHref = identity === null || rename === null ? null : galleryPopupUrl(identity.gid, identity.token, "rename", base);
     return {
       archiverHref: popupTarget(doc, "archiver.php", url),
       torrentsHref: popupTarget(doc, "gallerytorrents.php", url),
@@ -2714,17 +2729,10 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/parse/gallery-torrents.ts
-  var GID2 = /^\d+$/;
-  var GALLERY_TOKEN2 = /^[0-9a-f]+$/i;
   var DOWNLOAD_LINK = "a[href*='ehtracker.org/get/']";
   function galleryHrefFrom(url) {
-    const parsed = safeUrl(url);
-    const gid = parsed?.searchParams.get("gid") ?? "";
-    const token = parsed?.searchParams.get("t") ?? "";
-    if (!GID2.test(gid) || !GALLERY_TOKEN2.test(token)) {
-      return null;
-    }
-    return `/g/${gid}/${token}/`;
+    const identity = queryGalleryIdentity(url, "gid", "t");
+    return identity === null ? null : galleryHref(identity);
   }
   function fieldText(form, label) {
     const prefix = `${label}:`;
@@ -3242,7 +3250,7 @@ ${defaultKeySummary()}`)) {
     for (const category of CATEGORIES2) {
       for (const period of PERIODS) {
         const key = String(category.base + Number.parseInt(period.digit, 10));
-        const path = `/toplist.php?tl=${key}`;
+        const path = `${SITE_PATHS.toplist}?tl=${key}`;
         sources.push({
           key,
           href: base ? new URL(path, base).href : path,
@@ -3870,126 +3878,14 @@ ${defaultKeySummary()}`)) {
     return error instanceof Error ? error.message : fallback;
   }
 
+  // src/ui/fact-row.ts
+  function factRow(label, value, className) {
+    return el("div", { class: className === undefined ? "fact-row" : `fact-row ${className}` }, el("span", { class: "fact-label", text: label }), el("span", { class: "fact-value" }, value));
+  }
+
   // src/ui/list-header.ts
   function listHeader({ title, summary }) {
     return el("div", { class: "list-header" }, el("div", { class: "list-heading" }, el("h1", { text: title })), el("div", { class: "list-summary" }, ...summary));
-  }
-
-  // src/data/favorites.ts
-  var FOLDER_COLORS = [
-    "#c8c8c8",
-    "#ff7b7b",
-    "#ffb057",
-    "#ffe066",
-    "#7ee787",
-    "#b6f36b",
-    "#63e6e2",
-    "#8fa8ff",
-    "#c792ea",
-    "#ff8fd1"
-  ];
-  function folderColor(slot) {
-    return FOLDER_COLORS[slot] ?? "#c8c8c8";
-  }
-  var CACHE_TTL = 24 * 60 * 60 * 1000;
-  var folderCache = null;
-  function memberId() {
-    return /(?:^|; )ipb_member_id=(\d+)/.exec(document.cookie)?.[1] ?? null;
-  }
-  function isLoggedIn() {
-    return memberId() !== null;
-  }
-  var LOGIN_WALL_TEXT = /sign in|log in|login/i;
-  var FAVORITES_TEXT = /favorites/i;
-  function assertSignedIn(text) {
-    if (LOGIN_WALL_TEXT.test(text) && !FAVORITES_TEXT.test(text)) {
-      throw new LoginRequiredError;
-    }
-  }
-  async function getFolders(signal) {
-    const account = memberId();
-    if (account === null) {
-      return [];
-    }
-    if (folderCache?.memberId === account && Date.now() - folderCache.at < CACHE_TTL) {
-      return folderCache.folders;
-    }
-    const { doc } = await loader.document(`${location.origin}/uconfig.php`, {
-      priority: priorityOf("background"),
-      tag: "folders",
-      signal
-    });
-    const inputs = doc.querySelectorAll('input[name^="favorite_"]');
-    if (inputs.length === 0) {
-      throw new LoginRequiredError;
-    }
-    const names = [];
-    for (let slot = 0;slot < 10; slot++) {
-      const input = doc.querySelector(`input[name="favorite_${slot}"]`);
-      names.push(input?.value.trim() ?? "");
-    }
-    const folders = names.map((name, slot) => ({
-      slot,
-      name: name || `Folder ${slot}`,
-      color: folderColor(slot)
-    }));
-    folderCache = { memberId: account, folders, at: Date.now() };
-    return folders;
-  }
-  async function setFavorite(gallery, slot, note = "") {
-    if (!isLoggedIn()) {
-      throw new LoginRequiredError;
-    }
-    const url = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(gallery.gid)}&t=${encodeURIComponent(gallery.token)}&act=addfav`;
-    const body = new URLSearchParams({
-      favcat: slot === null ? "favdel" : String(slot),
-      favnote: note,
-      ...slot === null ? {} : { apply: "Add to Favorites" },
-      update: "1"
-    });
-    const response = await postForm(url, body, {
-      tag: "favorite",
-      failure: "Favorite request failed"
-    });
-    assertSignedIn(await response.text());
-  }
-  async function getFavoriteNote(gallery, signal) {
-    if (!isLoggedIn()) {
-      return "";
-    }
-    const url = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(gallery.gid)}&t=${encodeURIComponent(gallery.token)}&act=addfav`;
-    const { doc } = await loader.document(url, {
-      priority: priorityOf("background"),
-      tag: "favnote",
-      signal,
-      fresh: true
-    });
-    return doc.querySelector('textarea[name="favnote"]')?.value ?? "";
-  }
-  var FAVORITE_SLOTS = 10;
-  async function submitBulk(action, gids, signal) {
-    if (gids.length === 0) {
-      return;
-    }
-    const body = new URLSearchParams({ ddact: action, apply: "Confirm" });
-    for (const gid of gids) {
-      body.append("modifygids[]", gid);
-    }
-    const response = await postForm(`${location.origin}/favorites.php`, body, {
-      tag: "favorite",
-      failure: "Favorite update failed",
-      signal
-    });
-    assertSignedIn(await response.text());
-  }
-  async function deleteFavorites(gids, signal) {
-    await submitBulk("delete", gids, signal);
-  }
-  async function moveFavorites(gids, slot, signal) {
-    if (!Number.isInteger(slot) || slot < 0 || slot >= FAVORITE_SLOTS) {
-      throw new RangeError(`Invalid favorite folder slot: ${slot}`);
-    }
-    await submitBulk(`fav${slot}`, gids, signal);
   }
 
   // src/data/search-history.ts
@@ -3998,9 +3894,6 @@ ${defaultKeySummary()}`)) {
   var DAY_MS = 24 * 60 * 60 * 1000;
   var RECENT_LIMIT = 20;
   var RECENT_TTL_MS = 90 * DAY_MS;
-  function normalize(text) {
-    return text.replace(/\s+/gu, " ").trim();
-  }
   function isRecent(value) {
     if (typeof value !== "object" || value === null) {
       return false;
@@ -4016,7 +3909,7 @@ ${defaultKeySummary()}`)) {
       if (!isRecent(value) || now - value.usedAt >= RECENT_TTL_MS) {
         continue;
       }
-      const text = normalize(value.text);
+      const text = collapseWhitespace(value.text);
       const key = text.toLowerCase();
       if (text === "" || seen.has(key)) {
         continue;
@@ -4027,7 +3920,7 @@ ${defaultKeySummary()}`)) {
     return recent.slice(0, RECENT_LIMIT);
   }
   function rememberQuery(text, now = Date.now()) {
-    const normalized = normalize(text);
+    const normalized = collapseWhitespace(text);
     if (normalized === "") {
       return;
     }
@@ -4113,6 +4006,14 @@ ${defaultKeySummary()}`)) {
     for (const listener of listeners2) {
       listener(state);
     }
+  }
+
+  // src/session.ts
+  function memberId() {
+    return /(?:^|; )ipb_member_id=(\d+)/.exec(document.cookie)?.[1] ?? null;
+  }
+  function isLoggedIn() {
+    return memberId() !== null;
   }
 
   // src/ui/jump-row.ts
@@ -4687,13 +4588,8 @@ ${defaultKeySummary()}`)) {
 
   // src/data/quick-tags.ts
   var KEY2 = "eh:saved-expressions:v1";
-  var LEGACY_QUICK_TAGS = "eh:quick-tags:v1";
-  var LEGACY_SAVED_SEARCHES = "eh:saved-searches:v1";
   var VERSION4 = 1;
   var QUICK_TAG_LIMIT = 30;
-  function normalize2(text) {
-    return text.replace(/\s+/gu, " ").trim();
-  }
   function isQuickTag(value) {
     if (typeof value !== "object" || value === null) {
       return false;
@@ -4702,60 +4598,6 @@ ${defaultKeySummary()}`)) {
     return typeof record.name === "string" && typeof record.query === "string" && typeof record.savedAt === "number";
   }
   var store2 = createStore({ key: KEY2, version: VERSION4, empty: () => [], guard: isUnknownArray }, gmStorage());
-  function legacyValues2(key) {
-    const raw = gmStorage().read(key);
-    if (Array.isArray(raw)) {
-      return raw;
-    }
-    if (typeof raw === "object" && raw !== null && "values" in raw) {
-      const values = raw.values;
-      return Array.isArray(values) ? values : [];
-    }
-    return [];
-  }
-  function migrateLegacy() {
-    const quick = legacyValues2(LEGACY_QUICK_TAGS).flatMap((value) => {
-      if (typeof value !== "object" || value === null) {
-        return [];
-      }
-      const record = value;
-      if (typeof record.label !== "string" || typeof record.query !== "string") {
-        return [];
-      }
-      const query = normalize2(record.query);
-      if (query === "") {
-        return [];
-      }
-      return [{ name: normalize2(record.label) || query, query, savedAt: 0 }];
-    });
-    const saved = legacyValues2(LEGACY_SAVED_SEARCHES).flatMap((value) => {
-      if (typeof value !== "object" || value === null) {
-        return [];
-      }
-      const record = value;
-      if (typeof record.name !== "string" || typeof record.text !== "string") {
-        return [];
-      }
-      const query = normalize2(record.text);
-      const name = normalize2(record.name);
-      if (query === "" || name === "") {
-        return [];
-      }
-      return [
-        {
-          name,
-          query,
-          savedAt: typeof record.savedAt === "number" ? record.savedAt : 0
-        }
-      ];
-    });
-    if (quick.length === 0 && saved.length === 0) {
-      return;
-    }
-    store2.write([...quick, ...saved].slice(0, QUICK_TAG_LIMIT));
-    gmStorage().remove(LEGACY_QUICK_TAGS);
-    gmStorage().remove(LEGACY_SAVED_SEARCHES);
-  }
   var listeners3 = new Set;
   function subscribeQuickTags(listener) {
     listeners3.add(listener);
@@ -4769,26 +4611,21 @@ ${defaultKeySummary()}`)) {
     }
   }
   function quickTags() {
-    let values = store2.read();
-    if (values.length === 0) {
-      migrateLegacy();
-      values = store2.read();
-    }
-    return values.filter(isQuickTag).map((entry) => ({
-      name: normalize2(entry.name),
-      query: normalize2(entry.query),
+    return store2.read().filter(isQuickTag).map((entry) => ({
+      name: collapseWhitespace(entry.name),
+      query: collapseWhitespace(entry.query),
       savedAt: entry.savedAt
     })).filter((entry) => entry.name !== "" && entry.query !== "").sort((a, b) => b.savedAt - a.savedAt).slice(0, QUICK_TAG_LIMIT);
   }
   function removeQuickTag(name) {
-    const key = normalize2(name).toLowerCase();
+    const key = collapseWhitespace(name).toLowerCase();
     store2.write(quickTags().filter((entry) => entry.name.toLowerCase() !== key));
     notify2();
   }
   function replaceQuickTags(tags) {
     const next = tags.map((entry) => ({
-      name: normalize2(entry.name),
-      query: normalize2(entry.query),
+      name: collapseWhitespace(entry.name),
+      query: collapseWhitespace(entry.query),
       savedAt: entry.savedAt
     })).filter((entry) => entry.name !== "" && entry.query !== "").slice(0, QUICK_TAG_LIMIT);
     store2.write(next);
@@ -4820,6 +4657,19 @@ ${defaultKeySummary()}`)) {
   // src/tags/core-vocabulary.ts
   var CORE_VOCABULARY_BASE64 = "RUhUSQEMAAZmZW1hbGXIAAAAAAZhaGVnYW8BBm1wdXRlZQEDbmFsBAwgaW50ZXJjb3Vyc2UBBHByb24ABGJhbGQBAmJ3AQNkc20B" + "CmVhdXR5IG1hcmsCCHN0aWFsaXR5AQppZyBhcmVvbGFlBQJzcwQFYmFsbHMFBnJlYXN0cwQHbmlwcGxlcwQFcGVuaXMCBGtpbmkC" + "BnNleHVhbAEIbGFja21haWwCB2luZGZvbGQCA29vZAQEbWVycwMEd2pvYgcFIGZhY2UBEG9keSBtb2RpZmljYXRpb24FB3dyaXRp" + "bmcEBHN1aXQCBW5kYWdlAQ9yZWFzdCBleHBhbnNpb24HB2ZlZWRpbmcCA2lkZQEGdWtrYWtlAghubnkgZ2lybAILc2luZXNzIHN1" + "aXQAB2NhdGdpcmwBDGhhc3RpdHkgYmVsdAIGZWF0aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0" + "aW9uAghzcGxheWluZwIFd2dpcmwBDHJvc3NkcmVzc2luZwMKdGNoIHRhdHRvbwEJdW1mbGF0aW9uAglubmlsaW5ndXMADGRhcmsg" + "bmlwcGxlcwUEc2tpbgIGdWdodGVyAQllZXB0aHJvYXQCCWZsb3JhdGlvbgIIbW9uIGdpcmwBE2lja2dpcmwgb24gZGlja2dpcmwM" + "BmZlbWFsZQECb2cDBSBnaXJsAhB1YmxlIHBlbmV0cmF0aW9uAQRydWdzAANlbGYBDHhoaWJpdGlvbmlzbQIOcG9zZWQgY2xvdGhp" + "bmcBEHllLWNvdmVyaW5nIGJhbmcDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2VtYWxlcyBvbmx5AwNkb20BBmlsbWlu" + "ZwIHbmdlcmluZwIWcnN0IHBlcnNvbiBwZXJzcGVjdGl2ZQIGc2huZXRzAwR0aW5nAQZvb3Rqb2ICBnggZ2lybAEHcmVja2xlcwEE" + "dXJyeQIGdGFuYXJpAANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQdpYW50ZXNzAQZsYXNzZXMCBG92ZXMBBW9i" + "bGluAgRra3VuAQRyb3VwAQN1cm8BBHlhcnUACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZ2ggaGVl" + "bHMBBG9ybnMDAnNlBQUgZ2lybAIGdHBhbnRzAQt1Z2UgYnJlYXN0cwUFcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGlt" + "cHJlZ25hdGlvbgEFbmNlc3QCB2ZsYXRpb24CDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxhY3Rh" + "dGlvbgIKcmdlIHRhdHRvbwIDdGV4AQRlYXNoAgVvdGFyZAEHaW5nZXJpZQEGb2xpY29uAAxtYWdpY2FsIGdpcmwCAmlkAgRrZXVw" + "Ag5sZSBvbiBkaWNrZ2lybAIJc2tlZCBmYWNlAwl0dXJiYXRpb24BA2lsZgMEa2luZwIIbmQgYnJlYWsFB2NvbnRyb2wBC29uc3Rl" + "ciBnaXJsAgR0aGVyAQV1c2NsZQAJbmFrYWRhc2hpAQdldG9yYXJlAQppcHBsZSBmdWNrBwhwaWVyY2luZwcLc3RpbXVsYXRpb24B" + "AnVuAgNyc2UACm9wcGFpIGxvbGkBAnJjAA1wYWludGVkIG5haWxzAwR6dXJpAgdudHlob3NlAgVzdGllcwEQZW5pcyBlbmxhcmdl" + "bWVudAEHaWVyY2luZwIHeGllIGN1dAEHb255dGFpbAEHcmVnbmFudAIKb3N0aXR1dGlvbgAEcmFwZQEFaW1qb2IBBG9ib3QBBHlv" + "bmEABHNjYXQCDWhvb2wgc3dpbXN1aXQGC2JveSB1bmlmb3JtBgxnaXJsIHVuaWZvcm0BB2V4IHRveXMBBmhlbWFsZQIFaWJhcmkB" + "BWlzdGVyAQRsYXZlAgZlZXBpbmcBDG1hbGwgYnJlYXN0cwYFcGVuaXMCA2VsbAEEbnVmZgEMb2xlIGRpY2tnaXJsBQZmZW1hbGUB" + "B3BhbmtpbmcBCHF1aXJ0aW5nAQh0b2NraW5ncwMQbWFjaCBkZWZvcm1hdGlvbgIGcmFwLW9uAQd3ZWF0aW5nAgZpbXN1aXQABHRh" + "aWwCB2xsIGdpcmwCBm5saW5lcwEGZWFjaGVyAgdudGFjbGVzAQ9oaWdoIGhpZ2ggYm9vdHMBBW9tYm95AgVydHVyZQENcmFuc2Zv" + "cm1hdGlvbgEId2ludGFpbHMADnVudXN1YWwgcHVwaWxzARByZXRocmEgaW5zZXJ0aW9uAgdpbmF0aW9uAA12YWdpbmFsIGJpcnRo" + "AQ1lcnkgbG9uZyBoYWlyAQNvcmUBBXR1YmVyAAV3aW5ncwIDdGNoAAV4LXJheQAEeXVyaQRtYWxlyAAAAAAGYWhlZ2FvAQZtcHV0" + "ZWUBA25hbAQMIGludGVyY291cnNlAQRwcm9uAQtzcGh5eGlhdGlvbgAEYmFsZAECYm0BA2RzbQEKZWF1dHkgbWFyawIIc3RpYWxp" + "dHkBCmlnIGFyZW9sYWUFAnNzBAViYWxscwUGcmVhc3RzBARsaXBzBAduaXBwbGVzBAVwZW5pcwIEa2luaQIGc2V4dWFsAQhsYWNr" + "bWFpbAIHaW5kZm9sZAIDb29kBARtZXJzAwR3am9iBwUgZmFjZQEQb2R5IG1vZGlmaWNhdGlvbgUHd3JpdGluZwQEc3VpdAIFbmRh" + "Z2UBD3JlYXN0IGV4cGFuc2lvbgcHZmVlZGluZwIDaWRlAQZ1a2tha2UCC3NpbmVzcyBzdWl0AAZjYXRib3kBDGhhc3RpdHkgYmVs" + "dAIGZWF0aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0aW9uAghzcGxheWluZwEMcm9zc2RyZXNz" + "aW5nAwp0Y2ggdGF0dG9vAQl1bWZsYXRpb24CCW5uaWxpbmd1cwAMZGFyayBuaXBwbGVzBQRza2luAQllZXB0aHJvYXQCA21vbgEP" + "aWNrZ2lybCBvbiBtYWxlAgJsZgECb2cDBCBib3kCEHVibGUgcGVuZXRyYXRpb24BBHJ1Z3MDAm5rAANlbGYBDHhoaWJpdGlvbmlz" + "bQIOcG9zZWQgY2xvdGhpbmcBEHllLWNvdmVyaW5nIGJhbmcDBG1hc2sDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2Vt" + "aW5pemF0aW9uAQZpbG1pbmcCFnJzdCBwZXJzb24gcGVyc3BlY3RpdmUCBnNobmV0cwMEdGluZwEJb2N1cyBhbmFsAgpvdCBsaWNr" + "aW5nBANqb2ICBXggYm95AQdyZWNrbGVzAQR1cnJ5AANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQZsYXNzZXMC" + "BG92ZXMBBW9ibGluAgRra3VuAQRyb3VwAQN1cm8ACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZGRl" + "biBzZXgCCGdoIGhlZWxzAQRvcm5zAwJzZQIGdHBhbnRzAQl1Z2UgcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGltcHJl" + "Z25hdGlvbgEFbmNlc3QCB2ZsYXRpb24CBHNla2kCDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxh" + "Y3RhdGlvbgIOcmdlIGluc2VydGlvbnMGBnRhdHRvbwIDdGV4AQRlYXNoAgZnIGxvY2sCBW90YXJkAQdpbmdlcmllAgh6YXJkIGd1" + "eQEKb25nIHRvbmd1ZQAMbWFnaWNhbCBnaXJsAgJpZAIEa2V1cAIIbGVzIG9ubHkCCXNrZWQgZmFjZQMJdHVyYmF0aW9uAQNpa28C" + "BWxraW5nAghuZCBicmVhawUHY29udHJvbAEGb25zdGVyAQV1c2NsZQAJbmFrYWRhc2hpAQdldG9yYXJlAQppcHBsZSBmdWNrBwhw" + "aWVyY2luZwcLc3RpbXVsYXRpb24BAnVuAgNyc2UAB29sZCBtYW4BAnJjAA1wYWludGVkIG5haWxzAwR6dXJpAgdudHlob3NlAgVz" + "dGllcwEQZW5pcyBlbmxhcmdlbWVudAIFdHBsYXkBB2llcmNpbmcCB3hpZSBjdXQBB29ueXRhaWwBB3JlZ25hbnQCCm9zdGl0dXRp" + "b24ABHJhcGUBBWltam9iAQRvYm90AQR5b25hAARzY2F0Ag1ob29sIHN3aW1zdWl0Bgtib3kgdW5pZm9ybQYMZ2lybCB1bmlmb3Jt" + "AQdleCB0b3lzAQZoaWJhcmkCBm90YWNvbgEEbGF2ZQIGZWVwaW5nAQptYWxsIHBlbmlzAgNlbGwBBG51ZmYBCG9sZSBtYWxlAQdw" + "YW5raW5nAQh0b2NraW5ncwMQbWFjaCBkZWZvcm1hdGlvbgIGcmFwLW9uAQd3ZWF0aW5nAgZpbXN1aXQABHRhaWwCBmxsIG1hbgIG" + "bmxpbmVzAQZlYWNoZXICB250YWNsZXMBD2hpZ2ggaGlnaCBib290cwEEaWFyYQEGb21naXJsAgVydHVyZQENcmFuc2Zvcm1hdGlv" + "bgEId2ludGFpbHMADnVudXN1YWwgcHVwaWxzARByZXRocmEgaW5zZXJ0aW9uAgdpbmF0aW9uAA12YWdpbmFsIGJpcnRoAQ1lcnkg" + "bG9uZyBoYWlyAQhpcmdpbml0eQEDb3JlAgd5ZXVyaXNtAQV0dWJlcgAFd2luZ3MCA3RjaAEHb2xmIGJveQAFeC1yYXkABHlhb2kF" + "bWl4ZWQXAAAAABBhbmltYWwgb24gYW5pbWFsAAlib2R5IHN3YXAADWZmbSB0aHJlZXNvbWUBB3JvdHRhZ2UACWdhbmcgcmFwZQEE" + "cm91cAAGaW5jZXN0AgRzZWtpAA1rb2RvbW8gZG91c2hpAApsb3cgaW5jZXN0AA1tbWYgdGhyZWVzb21lAgt0IHRocmVlc29tZQEM" + "dGYgdGhyZWVzb21lARF1bHRpbW91dGggYmxvd2pvYgUKcGxlIGFzc2pvYgkHZm9vdGpvYgkHaGFuZGpvYgkIcGFpcmluZ3MABm51" + "ZGlzbQAIb3lha29kb24ACXNoaW1haWRvbgANdHRtIHRocmVlc29tZQEEd2lucwVvdGhlcjwAAAAAAjNkAgkgaW1hZ2VzZXQADGFp" + "IGdlbmVyYXRlZAEPbHJlYWR5IHVwbG9hZGVkAQduYWdseXBoAgZpbWF0ZWQCB3Rob2xvZ3kBBnJ0Ym9vawAHY2FwdGlvbgEEb21p" + "YwMIcGlsYXRpb24ACmRha2ltYWt1cmEBBmVmYWNlZAAOZXh0cmFuZW91cyBhZHMABmZpZ3VyZQEQb3JiaWRkZW4gY29udGVudAEO" + "dWxsIGNlbnNvcnNoaXAGBG9sb3IACWdvdWRvdXNoaQAIaGFyZGNvcmUBBW93IHRvAAppbmNvbXBsZXRlAAtrb2RvbW8gb25seQAN" + "bWlzc2luZyBjb3ZlcgEQb3NhaWMgY2Vuc29yc2hpcAEQdWx0aS13b3JrIHNlcmllcwUOcGFuZWwgc2VxdWVuY2UADm5vIHBlbmV0" + "cmF0aW9uAg9uLWggZ2FtZSBtYW51YWwGCGltYWdlc2V0BARudWRlAgN2ZWwBCnVkaXR5IG9ubHkAFW9iamVjdCBpbnNlcnRpb24g" + "b25seQELdXQgb2Ygb3JkZXIACnBhcGVyY2hpbGQBCGl4ZWwgYXJ0AAhyZWFscG9ybgIEZHJhdwIGcGxhY2VkAQxvdWdoIGdyYW1t" + "YXIGC3RyYW5zbGF0aW9uAAZzYW1wbGUBB2Nhbm1hcmsCCXJlZW5zaG90cwELa2V0Y2ggbGluZXMBCW91c2h1dWhlbgELdGVyZW9z" + "Y29waWMCB29yeSBhcmMACXRhbmtvdWJvbgEIaGVtZWxlc3MBCGltZSBzdG9wAAp1bmNlbnNvcmVkAAt2YXJpYW50IHNldAALd2F0" + "ZXJtYXJrZWQBBmVidG9vbgIIc3Rlcm4gY2cICGltYWdlc2V0CAVub24taAAHeXVra3VyaQhsb2NhdGlvbggAAAAADGJhdGhpbmcg" + "cm9vbQEEZWFjaAAJY2xhc3Nyb29tAAlpbmZpcm1hcnkABW9uc2VuAAVzYXVuYQEFZW50b3UBDHdpbW1pbmcgcG9vbAZwYXJvZHnI" + "AAAAAA5hZHZlbnR1cmUgdGltZQEHbXBoaWJpYQEObmltYWwgY3Jvc3NpbmcBCHJrbmlnaHRzCQkgZW5kZmllbGQBC3RlbGllciBy" + "eXphARh2YXRhciB0aGUgbGFzdCBhaXJiZW5kZXICBmVuZ2VycwEIenVyIGxhbmUADmJha2Vtb25vZ2F0YXJpAghuZyBkcmVhbQIE" + "dG1hbgIHeW9uZXR0YQEFZW4gMTABCGxhY2sgY2F0AgRlYWNoAgp1ZSBhcmNoaXZlAQ5vY2NoaSB0aGUgcm9jawIEcnV0bwARY2Fy" + "ZGNhcHRvciBzYWt1cmEBC2hhaW5zYXcgbWFuAQlvZGUgZ2Vhc3MBCHliZXJwdW5rAAhkYW5kYWRhbgMIZ2Fucm9ucGECCnJrc3Rh" + "bGtlcnMDEmxpbmcgaW4gdGhlIGZyYW54eAIJdGUgYSBsaXZlAQxlYWQgb3IgYWxpdmUCB2x0YXJ1bmUCDXRlY3RpdmUgY29uYW4B" + "BmlnaW1vbgEKcmFnb24gYmFsbAsGIHN1cGVyDAF6BwVxdWVzdAE2dW5nZW9uIG5pIGRlYWkgbyBtb3RvbWVydSBubyB3YSBtYWNo" + "aWdhdHRlaXJ1IGRhcm91IGthAAplbGRlbiByaW5nAQ5xdWVzdHJpYSBnaXJscwAKZmFpcnkgdGFpbAIFbGxvdXQCDnRlIGdyYW5k" + "IG9yZGVyBRlrYWxlaWQgbGluZXIgcHJpc21hIGlsbHlhBQpzdGF5IG5pZ2h0AQxpbmFsIGZhbnRhc3kNBCB2aWkOA3hpdgIJcmUg" + "ZW1ibGVtCwYgZmF0ZXMMDHRocmVlIGhvdXNlcwIUdmUgbmlnaHRzIGF0IGZyZWRkeXMBBXJvemVuARJ1bGxtZXRhbCBhbGNoZW1p" + "c3QADmdlbnNoaW4gaW1wYWN0AQ5pcmxzIGZyb250bGluZQYKdW5kIHBhbnplcgEMb2JsaW4gc2xheWVyAhhjaHV1bW9uIHdhIHVz" + "YWdpIGRlc3Uga2ECFmRkZXNzIG9mIHZpY3Rvcnkgbmlra2UCEnRvdWJ1biBubyBoYW5heW9tZQEPcmFuYmx1ZSBmYW50YXN5Awp2" + "aXR5IGZhbGxzAQp1aWx0eSBnZWFyAgRuZGFtBgUgc2VlZAAEaGFsbwIKcnJ5IHBvdHRlcgIKemJpbiBob3RlbAEIZWxsdGFrZXIE" + "CHV2YSBib3NzAQ1pZ2hzY2hvb2wgZHhkCwtvZiB0aGUgZGVhZAIDbGRhAQdvbG9saXZlAgtua2FpIGdha3VlbgcJc3RhciByYWls" + "ARZ5cGVyZGltZW5zaW9uIG5lcHR1bmlhABdpamlyYW5haWRlIG5hZ2F0b3JvLXNhbgEPbmZpbml0ZSBzdHJhdG9zAgZ1eWFzaGEA" + "Dmp1anV0c3Uga2Fpc2VuAgxzdGljZSBsZWFndWUABGstb24BGWFndXlhLXNhbWEgd2Ega29rdXJhc2V0YWkCEW5vam8gb2thcmlz" + "aGltYXN1Aw50YWkgY29sbGVjdGlvbgENZW1vbm8gZnJpZW5kcwELaWxsIGxhIGtpbGwCCm0gcG9zc2libGUDDWV0c3Ugbm8geWFp" + "YmECDm5nIG9mIGZpZ2h0ZXJzAR9vYmF5YXNoaS1zYW4tY2hpIG5vIG1haWQgZHJhZ29uAgZpa2F0c3UCGW1pLXNhbiB3YSBrb215" + "dXNob3UgZGVzdS4CIm5vIHN1YmFyYXNoaWkgc2VrYWkgbmkgc3l1a3VmdWt1IG8AC2xhc3Qgb3JpZ2luARBlYWd1ZSBvZiBsZWdl" + "bmRzAQhvdmUgbGl2ZQkhIG5pamlnYXNha2kgaGlnaCBzY2hvb2wgaWRvbCBjbHViCghzdW5zaGluZQENeWNvcmlzIHJlY29pbAAb" + "bWFob3Ugc2hvdWpvIGx5cmljYWwgbmFub2hhAglzcyBlZmZlY3QBBmV0cm9pZAEGb25zdGVyBwcgaHVudGVyAQ11c2hva3UgdGVu" + "c2VpAQ95IGhlcm8gYWNhZGVtaWEDH2xpdHRsZSBwb255IGZyaWVuZHNoaXAgaXMgbWFnaWMABm5hcnV0bwEWZW9uIGdlbmVzaXMg" + "ZXZhbmdlbGlvbgEMaWVyIGF1dG9tYXRhAgdqaXNhbmppAAlvbmUgcGllY2UFCHVuY2ggbWFuAStyZSBubyBpbW91dG8gZ2Ega29u" + "bmEgbmkga2F3YWlpIHdha2UgZ2EgbmFpAgZpZ2luYWwBCXNoaSBubyBrbwEHdmVybG9yZAQFd2F0Y2gAInBhbnR5IGFuZCBzdG9j" + "a2luZyB3aXRoIGdhcnRlcmJlbHQBBmVyc29uYQcCIDMIATQIATUBBm9rZW1vbgEKcmV0dHkgY3VyZQIOaW5jZXNzIGNvbm5lY3QB" + "GHVlbGxhIG1hZ2kgbWFkb2thIG1hZ2ljYQAMcXVlZW5zIGJsYWRlAAhyYW5tYSAxMgEkZSB6ZXJvIGthcmEgaGFqaW1lcnUgaXNl" + "a2FpIHNlaWthdHN1AgtzaWRlbnQgZXZpbAIFd3JpdGUBA3dieQALc2FpbG9yIG1vb24BCWNvb2J5LWRvbwEXZW5raSB6ZXNzaG91" + "IHN5bXBob2dlYXIDCnJhbiBrYWd1cmEBBmhhbnRhZQIQaW5nZWtpIG5vIGt5b2ppbgIPb2t1Z2VraSBubyBzb21hARFvbmljIHRo" + "ZSBoZWRnZWhvZwMbbyBiaXNxdWUgZG9sbCB3YSBrb2kgbyBzdXJ1Agl1bGNhbGlidXIDDnNvdSBubyBmcmllcmVuAQlwaWRlci1t" + "YW4CBmxhdG9vbgIKeSB4IGZhbWlseQELc3NzLmdyaWRtYW4BB3RhciBmb3gFFnZzLiB0aGUgZm9yY2VzIG9mIGV2aWwFBHdhcnMC" + "DWV2ZW4gdW5pdmVyc2UCDHJlZXQgZmlnaHRlcgMLaWtlIHdpdGNoZXMBE3VwZXIgbWFyaW8gYnJvdGhlcnMFA21hbgEPd29yZCBh" + "cnQgb25saW5lAA50YWltYW5pbiBhc2FnaQkIeXVraWthemUCGXRlIG5vIHl1dXNoYSBubyBuYXJpYWdhcmkBCmVlbiB0aXRhbnME" + "GGFnZSBtdXRhbnQgbmluamEgdHVydGxlcwIEa2tlbgIYbmdlbiB0b3BwYSBndXJyZW4gbGFnYW5uAxtzZWkgc2hpdGFyYSBzbGlt" + "ZSBkYXR0YSBrZW4BEGhlIGVsZGVyIHNjcm9sbHMEEWZhaXJseSBvZGRwYXJlbnRzBAppZG9sbWFzdGVyBQpuY3JlZGlibGVzBA9s" + "ZWdlbmQgb2Yga29ycmEOBXplbGRhBQlvdWQgaG91c2UEHW1lbGFuY2hvbHkgb2YgaGFydWhpIHN1enVtaXlhBAlvd2wgaG91c2UE" + "CHNpbXBzb25zBAd3aXRjaGVyAQlvIGxvdmUtcnUCC2FydSBwcm9qZWN0AjVraWRva2kgYm9zb3R0byBydXNzaWEtZ28gZGUgZGVy" + "ZXJ1IHRvbmFyaSBubyBhbHlhLXNhbgIJbWIgcmFpZGVyAgx1aG91IHByb2plY3QBCHN1a2loaW1lAAh1bHRyYW1hbgEWbWEgbXVz" + "dW1lIHByZXR0eSBkZXJieQEIbmRlcnRhbGUBFXpha2ktY2hhbiB3YSBhc29iaXRhaQAIdm9jYWxvaWQACXdhcmhhbW1lcgELb25k" + "ZXIgd29tYW4CD3JsZCBvZiB3YXJjcmFmdAEOdXRoZXJpbmcgd2F2ZXMABXgtbWVuARVlbm9ibGFkZSBjaHJvbmljbGVzIDIAMHlh" + "aGFyaSBvcmUgbm8gc2Vpc2h1biBsb3ZlIGNvbWUgd2EgbWFjaGlnYXR0ZWlydQEub3Vrb3NvIGppdHN1cnlva3Ugc2hpam91IHNo" + "dWdpIG5vIGt5b3VzaGl0c3UgZQEHdS1naS1vaAARemVubGVzcyB6b25lIHplcm8BB29vdG9waWEJY2hhcmFjdGVyyAAAAAACMmIA" + "CGFkYSB3b25nARJlcml0aCBnYWluc2Jvcm91Z2gCBHRoZXIBA2hyaQEHa28gYW1hdQEFbGJlZG8CDmljZSBtYXJnYXRyb2lkAQdt" + "eSByb3NlAQluZHJvaWQgMTgCA2dlbAEIcHBsZWphY2sBA3F1YQEJcmxlY2NoaW5vAg90b3JpYSBwZW5kcmFnb24BBnN0b2xmbwIR" + "dWthIGxhbmdsZXkgc29yeXUDC25hIGljaGlub3NlBgV5dXVraQEEdGFnbwENeWEgc2hhbWVpbWFydQMLa2Ega2FtaXNhdG8ADGJh" + "cmJhcmEgcGVnZwIEdG1hbgIHeW9uZXR0YQEEZWxsZQEKb2EgaGFuY29jawEIcmVtZXJ0b24BC3VsbWEgYnJpZWZzAAtjYW1teSB3" + "aGl0ZQEGaGkgY2hpAw5zYXRvIG5pc2hpa2lnaQIFdW4tbGkBBHJvd24BBnludGhpYQAEZC52YQERYXJrIG1hZ2ljaWFuIGdpcmwE" + "BG5lc3MAA2VsZgIHbGVuIGpvZQEFbWlsaWEBC3J6YSBzY2FybGV0AQx1bGEgbGF3cmVuY2UABGZlcm4BBmlyZWZseQEObGFuZHJl" + "IHNjYXJsZXQCCHV0dGVyc2h5AQdvY2Fsb3JzAQZyaWVyZW4ABWdhbnl1AgdyZGV2b2lyAgd3ciBndXJhAQR1ZGFvAQl3ZW4gc3Rh" + "Y3kFCHRlbm55c29uAAxoYXJsZXkgcXVpbm4BBGlsZGECC25hIHNvcmFzYWtpBAh0YSBoeXVnYQIKdG9yaSBnb3RvdQEQb3NoaW1h" + "Y2hpIHN1aXNlaQIMdXNob3UgbWFyaW5lAQV1IHRhbwAXaWxseWFzdmllbCB2b24gZWluemJlcm4BC25vIHlhbWFuYWthAQ16dWt1" + "IG1pZG9yaXlhAAhqYW5lIGRvZQELZWFubmUgYWx0ZXIHBGRhcmMBD2lnb2t1IG5vIGZ1YnVraQIMbGwgdmFsZW50aW5lAgJueAEJ" + "dWR5IGhvcHBzAgZyaSBoYW4ABWthZmthAgJnYQIMcmluIGtha3VkYXRlAgRzdW1pAQVlcWluZwELaW0gcG9zc2libGUCC3Nha2kg" + "cnl1dWdlARFva29taSBzYW5nb25vbWl5YQAKbGFyYSBjcm9mdAEDaW5rAQRvb25hAQ51Y3kgaGVhcnRmaWxpYQIEbWluZQALbWFi" + "ZWwgcGluZXMCCmkgc2hpcmFudWkCDGtpIG5pc2hpa2lubwQCbWECB3JjaCA3dGgDC2luIGtpdGFnYXdhBAtzYSBraXJpc2FtZQIB" + "eQEGZWd1bWluAgNyY3kDBG1haWQBCmlrYSBtaXNvbm8DCm90byBtaXNha2EDCXUgaGF0c3VuZQUGbmFrYW5vAhBsZXMgdGFpbHMg" + "cHJvd2VyAhBuYW1vdG8gbm8gcmFpa291AgNzdHkCDXRzdXJpIGthbnJvamkBDW9tbyB5YW95b3JvenUCC25hIG1lZ2lzdHVzAg9y" + "cmlnYW4gYWVuc2xhbmQABm5haGlkYQICbWkCDHJ1dG8gdXp1bWFraQEJaWNrIHdpbGRlAwdvIHJvYmluBQZ5YXphd2EECWxlIGRl" + "bWFyYQIDbG91AglubyBuYWthbm8ADm9jaGFrbyB1cmFyYWthAQxyaWhpbWUgaW5vdWUAE3BhdGNob3VsaSBrbm93bGVkZ2UBCWlu" + "a2llIHBpZQEEb3dlcgUFIGdpcmwBEHJpbmNlc3MgY2VsZXN0aWEJBGx1bmEJBXBlYWNoCQV6ZWxkYQIGb2R1Y2VyAQN5cmEADXJh" + "aWRlbiBzaG9ndW4DCW5ib3cgZGFzaAIPbmdpa3UgbWF0c3Vtb3RvAgRyaXR5AgN2ZW4BCmVpIGF5YW5hbWkDCm11IGhha3VyZWkC" + "AW0DDGlsaWEgc2NhcmxldAIFbmFtb24CAnplAQtpYXMgZ3JlbW9yeQIIbiB0b3Nha2ECDG8gdHN1a2F0c3VraQEEb2JpbgICc2EC" + "C3VnZSB0aGUgYmF0AQ11bWkgdXNhZ2l5YW1hAAVzYWJlcgIMaWxvciBqdXBpdGVyBwRtYXJzCAZlcmN1cnkIA29vbgcFdmVudXMC" + "C2t1cmEgaGFydW5vBAl5YSBpemF5b2kCCG11cyBhcmFuAgtuYWUga29jaGl5YQEHY2F0aGFjaAEUZW5yaXRzdSBubyB0YXRzdW1h" + "a2kDA3NlaQEFaGVuaGUCBmllbGRlcgMGbWFrYXplAwluamkgaWthcmkECm9idSBrb2Nob3UDD3Jva28gc3VuYW9va2FtaQEKaWx2" + "ZXIgd29sZgERb25pYyB0aGUgaGVkZ2Vob2cBBnBhcmtsZQIIaWRlci1tYW4BB3RhcmZpcmUCDWV2ZW4gdW5pdmVyc2UBDnVndWhh" + "IGtpcmlnYXlhAgdwZXJnaXJsBQNtYW4ABnRhaWhvdQEGZWl0b2t1AQxpZmEgbG9ja2hhcnQBCW9raSBhc3VtYQEFcmFjZXIBBnN1" + "bmFkZQEPd2lsaWdodCBzcGFya2xlAAd2YW1waXJlAQxlbG1hIGRpbmtsZXkBBGlkZWwABHdoaXABCWlkb3dtYWtlcgIDdGNoAQtv" + "bmRlciB3b21hbgAIeWFlIG1pa28CBG1hdG8BBGVsYW4BCW9yIGZvcmdlcgMNdWljaGkgc2hpaG9pbgILdW11IGtvbnBha3UBDHVr" + "YXJpIHlha3VtbwICcmkCCnVrYSBoYXlhc2UABnpvbWJpZQZhcnRpc3TIAAAAAAMwLWcBBGJha2UBBGswajAAHzEgZG90IG1pZ2kg" + "bmkgenVyYXNoaXRlIGt1ZGFzYWkCCGVxdWFscyAyAQQtZ291AQcwLXNoaW9uAgsweWVuIGxvY2tlcgIFOCBnb3UCA2VraQICbW8C" + "A25pbgEDMTAzAQEzAgEuAQI0NAEGOHNhaS00AQJ1cAABMgEJIGVxdWFscyA4AQItZwEBMAECMjIBATMBATQBAjU0AQM4NmMBA2Js" + "cwEPYyBlcXVhbHMgZ2Fsb3JlAQNnb3UBBmwgY29sYQEDbm8uAQF0AAgzMDAwIGtydwEDMTA0AQMyMmcBBDMyOTcBAjQ2AQc1IG1h" + "Y2hpAQk2MG1iIHlhbm8BATgCAmtiAQFlAQRodXJvAQF1AQJ4MwAJNCBjb3Vsb21iAQExAQI0NQEENWFjcAEJN2FnZHJhZ29uAARh" + "ZnJvBARidWxsAQZoZW1hcnUBB2l1ZSBva2EBBGthZ2kDBXRzdWtpAQJscAEFbmRhdmECBWtvbWFuAQZzYW5hZ2kBBHlhbmUAAmJi" + "AQJlYQEEbGluZAIKdWUgc3RyaWtlcgEFb25uaWUCBHNzaGkBB3V0Y2hhLXUABWNsYW1wAgplIG1hc2FoaXJvAQhyYXp5IGRhZAIF" + "aW1zb24CAm9jAQ51dGVzZXh5cm9idXR0cwIDdmllAAZkYWdhc2kCB2lnYWlqaW4CAnRlAQRpa2swAANlbGYBC3JlY3Qgc2F3YXJ1" + "AA1mYW4gbm8gaGl0b3JpAQhlbGxhdHJpeAEJcmVkIHBlcnJ5AQl1ZXRha2lzaGkCBm1paGlrbwIGbmRvc2hpAw5zZXh5ZHJhZ29u" + "YmFsbAIDcnJ5AAlnYXJhYmF0b3oBBmluaGFoYQEFb2JsaW4CCHRvaCBqdWFuAQNyYW4BBXdlZ3dlAARoYWxvAgJyYQEFaW1lbm8D" + "CnVyYSBraXNla2kCBHNhc2kCBHRvbWkBBW9ub2thAgZyb3N1a2UAAmllAQZuYXp1bWECBGNhc2UDCm9nbml0eW1vdXMBBnNoaWtl" + "aQEMdGFiYSBoaXJvc2hpAANqYWICCHkgbmF5bG9yAAZrYWRhdGgCA25vbgIMcm1hIHRhdHN1cm91AghzZSBkYWlraQMDdW1pAQVp" + "cmFyYQIMc2FyYWdpIGd1bm1hAQZvbi1raXQCA3JyYQEHdW5hYm90bwMFb2ljaGkCCXJvaW51IGp1dQQJc3UgZ2F0YXJpAAZsYW1i" + "ZGEBC2VzbGllIGJyb3duAQVpbGl0aAIDbmRhAQdvbGljZXB0AQR1bmNoAANtYWkCAm5hAwlrYWkga2Fpa2ECA3JpbwIEdGVtaQIB" + "eQEJZGEgc3Rhcm91AQJlaQIEbWU1MAIIb3d3aXRobWUBCGljaGlraW5nAgJrbwIFbW9uZWwCAnl1Agl6dXJ5dSBrZWkBBm9ndWRh" + "bgIEbWlqaQEEdXRzdQANbmFrYWppbWEgeXVrYQIGcnVob2RvAQllcm9tYXNoaW4BDmd0dmlzdWFsc3R1ZGlvAQJ1bgAFb2Jvcm8B" + "DGh0b21vIHRha3VqaQADcGFuAQdpZyBraW5nAQlvcml1cmV0YW4ABnJhYmJpdAIJdGF0YXRhdDc0AgN2ZW4BDG9tdWxvIG1hbmNp" + "bgEFdXpoYWkADXNhaGFyYSB3YXRhcnUCBWlnYWRvAgJraQMDdXJhAgtuYnVuIGt5b2RlbgEJaGlndXJlIHVpAwZtYWthemUDBG5k" + "b2wDAm9uAw13YXN1IG5vIG9raW5hAgp1dGVuIGRvdWppAQhpYyBwaHVjawEDb3JhAQZwYXJyb3cADHRha2FzdWdpIGtvdQQDdHN1" + "Aw1lZGEgaGlyb21pdHN1AgZtYWdvcm8BCGVyYXN1IG1jAQdoZSBraXRlAglpY2N3aXRoYXEBCG9tIHNtaXRoAQxzdWtpbm8ganlv" + "Z2kBEHdpc3RlZHNjYXJsZXR0NjABBnlwZS45MAAFdmlja3kCBWt0cmlhAAl4aWVycmEwOTkADHlhaGlybyBwb2NoaQICaXICBm1h" + "bW90bwQCdG8BCnVpZ2EgbmFvaGECC2tpbm8gbWluYXRvAgt6dWtpIG4gZGFzaAAGem91cmlrCWNvc3BsYXllcrMAAAAAFGEgYmFv" + "IHllc2hpIHR1IG5pYW5nAQZiYW42MDUBC2kgbGVpIGppYW5nAghuIG5ndXllbgEMa2FuZSBhcmFyYWdpAgplbWkxMDF4b3hvAQds" + "aWNla3lvAwluYSBiZWNrZXIBB25pbm55YW4BCW9pIG1vbW9rbwEIcXVhIGFyZWEBEHJhc2hpIGhlYXJ0Z3JhbW0CCHR5IGh1YW5n" + "AQV0c3VraQEJeHVuIGthb3JpAQR6YW1pAAxiYWlsaSBzaGlybHkCBm5iYW5rbwMDZ25pAg1vZXIgbXlzdGVyaWFsAwl6b3Vtb3pp" + "YWEBBmxhY3FrbAEEeW9ydQAKY2FvbWVpeXV5aQIHcnJ5IGtleQIKdGljb3JucGxheQMGdGFzaGFhAQpoZXJyeSBuZWtvAgZ1bm1v" + "bW8BC2llbiBjb3NwbGF5ABlkYSBkYSBqdWFuIGp1YW4geGlhbyBqdWFuAQllbW9uIG1pa2EAC2VseSBjb3NwbGF5AQRuYWtvAQly" + "enVvIG5pc2EBBnRzdSBrbwEGdmVuaW5rAA1mYW5ncWlhbyB5ZXBvAQ9lbmcgamlhbmcgamlhbmcBB3Jhbnhjb3MAE2c0NCB3YSBr" + "aXp1dHN1a2FuYWkBEXJlZW4gY2hhY2hhIGppYW5nAQh1YXhpY2hhbgITb3FpIG1peGlhbnhpYW4gbWlhbwAFaGFjaGkCCG5hIGJ1" + "bm55AwVlIGFtZQESZWxseSB2b24gdmFsZW50aW5lAQppZG9yaSByb3NlAQhvc2hpbGlseQEKdWEgcWkgaGFuYQMJbGluZyBoYW5h" + "AAtqZWFuIHdhbndhbgEQaWFvcm91amkgd2Fsa3VyZQIDdXFpBAV1amVhbgMDeWFuAQp1bmtlbnN0ZWluABFrYWd1cmF6YWthIG1h" + "ZnV5dQIJbGlua2EgZm94AgtuZWtvLWthbWlhbwIIdGllY2FrZXkCCHlhIGh1YW5nBQZuaWxzb24BCGlraSByb3NlAgdtbWllIG1p" + "AgpyaWtvIGNlbGlhAgR0YXJvAQZva3VodWkECHJhIGNoaXlvAQZ1dWtvIHcAEWxhcmlzc2Egcm9jaGVmb3J0AQdlbmZyaWVkAQpp" + "bnppIGppYW5nAQZtdXNpY2wBCW9zdHdpbmQxMAIPdmVseXNwYWNla2l0dGVuAQ11ZXIgZGEgbW93YW5nAg1vIHhpYW9saSBtaWFv" + "AgRzdDc3AAVtYWNoaQIGa2FjaGFuAghyaWEgZGVzdQIJc2FrbyB5dW1lAwloaXJvIHl1a2kBCGVubWVudGFuAglyY3VyeWxhbXAC" + "CnNzaWUgaHVhbmcBDmlhbmJpbmcgeGlhbmVyAglrb2ppYW5nd3cECW1pIGhva2luYQINbmF6dWtpIGhpa2FydQINeWFtb3RvIHNh" + "a3VyYQMDb2tpAgl6aGltYW9xaXUBBm9tb2NhdAAGbmEtc2FuAgRnaXNhAgRpdGFvAgVuZ29uZwILdGggc29rb2xvdmEBCmVrb2tv" + "eW9zaGkCBG5la28BCWlhbm5pYW4gZAIEeWV5ZQEIb3JhIGZhd24BBHlha28AC29raXRhIHJpbmthAQRtaW1pAQluaSBoaXRvbWkD" + "D2tzaXlhIHNvZmluaWt1bQEJdG9oYXJhIGFuAAhwZW5rYXJ1aQEEaWdtYQIFcGluYWkBDm90YXRvIGdvZHppbGxhAQl1cmlucHVw" + "cHkADHFpc2lrdWFpIHdpaQIIdWhlIGtlamkACHJha3VyYWt1AgJuMwEFZWZlZW4CAm5nAQxpbmdvIG1pdHN1a2kCBm8tY2hhbgMC" + "a28CBXNzb2Z0AQlvbmdyb25nemkBCnlua2VyYmVsbGUAC3NhZGFrbyBtb21vAgJrdQQGcmEgbm9hAgZuZHUtNjkCCm90b21lIGxv" + "dmUCBHlha28BDWVubHVvIGNhaXR1YW4BCWhhcmtwYXJ0eQINaWthIHhpYW9sdSBsdQMJbWl6dSBuYWdpCAR5dW5vBAZvdHN1a2kD" + "CnJhZ2EgeWFua28DC3p1a3UgaG9uYW1pAg11YW5nIG11IGZ1IHN1AQhpYW8gZGluZwEDb2xhAAh0YW5ndGFuZwINbyBsaWFuZyBh" + "emhhaQEHaW55IGFzYQIKdGkgY29zcGxheQEEb2thcgIKbW95byBqaWFuZwEHc3Vib21pbgMHa2kgZGVzdQMJbm55YW5jaGFuAQ55" + "b3VkdWtpIG1hcnlvdQAHdW1la28gagEGcG1pbmFhAQlydW1pYnVubnkBA3l1eQANdmFsZXJ5IGhpbWVyYQEJZWN0b3JmaXNoAQdp" + "bm5lZ2FsAgxydHVhbCBnZWlzaGEAB3hhbnNvb24BCWlhIHhpYSB6aQIGZGFpZGFpAgZuZyBsYW4BCnVlIHFpLXNhbWEADnlhbWF6" + "YWtpIHJlaW5hAwVpc3VuZwIEbmd5aQIHb3lhb3F3cQEIaW5nIGxpbGkBCXVraSBhc3RyYQIFcmljaGEEBWtvZHhkAgZ1Zm9yaWEA" + "C3podWltaW5neW91BWdyb3VwyAAAAAAQLi4uIG1vdSBpaSBkZXN1LgEBNwEDbWl6AAcwLXBhcnRzAQMwMDABCTEyMzQ1Njc4OQEB" + "MgEGMy0zMjk3AQE0AgRjdXJhAgl0aCBoZWF2ZW4CAXUBBTcyNWNvAQY4NDZuZXQCBGJhc2UBAjk2AAExAQ4wLWppa2FuIHN1aW1p" + "bgMKbWFuIGJhcmlraQIGLjEwbWh6AggwMDAwMDAwMAQCYXADBGFjcmUDB3llbm1vZmECCzIgZ291c2hpdHN1AgQ2Z291AwFtAgRt" + "aWxlAg9wYXNlYyBubyBrYW5hdGECBndhZGF4eAIJeWVuIGpvbmRvAQIxMAMHLWdyb292ZQMBdQIIMSB0b3ViYW4CAjIyAwFrAQcy" + "LWppZ2VuAgNjdXQCCGthZmZlaW5zAQEzAgJjbQEMNDBrbSBzbGFzaCBoAgQ4YnBtAgZsb2xpdGEBBzUyaGVydHoBBTYgc2FpAgcw" + "MDAgYWxsAgVrZW5tZQEKNzU2IHN0dWRpbwICODcCAmluAgF3AQ44MG1pbGxpIGNhbm5vbgMBcgIBMwIHNSBzb3VrbwIKNyBzZWli" + "dXRzdQIGbWFzdGVyAQc5bGxkZGtrAQNiaXQBBGdheWEBA29yOAAHMiBjYXJhdAEIMCBwbHVzIDECETAwa2NhbCBzaGFrZSBjbHVi" + "AgEzAgs5IGdvdXNoaXRzdQIGbGlxdWlkAgJudAICcjACBnR3ZW50eQEFMy40ZG8CCDExNzlyb2NrAQY0IHBhZ2UCBjEgaW5jLgEK" + "NTBwb25vcm9qaQEBNwICM2sBAzk2MQICOTABAWIBBWN2LnNzAQpkIGNyZWF0aXZlAgUtbm90ZQEBaAEIamltdXN1YmkBAW0BAm5k" + "AwUgbGlmZQEHcC1jb2xvcgEGc3Ryb2tlAQl0YWlscXVlZW4BAnZzAQV6aWdlbgAMMyBjb2xvcnMgY2F0CgVvcm9uYQIFb24gMTAB" + "CC0yIGdhZ2VuAgdtZWdhLm5lAQguNXRvdXNpbgEhMCBrb3VoYW4ga2FyYSBoYWppbWVydSBlcm8gZG91amluAgMwY20CCzEgZ291" + "c2hpdHN1AgttaW4tNTAwMHllbgEIMTA0dHlvbWUBBTIwYnBtAgMxZ28BAjMzAQw2MCBkZWdyZWVzIGMCAWsBATgCBC41IGMCBXNo" + "aWtpAQQ5ZG1wAgV4cmVhbQEGZCBsaXZlAgF0AQNlZ2cBA2pvdQEEbGJveAAINC41c3BhY2UBCTAwMTAgMS1nbwICNDACBmRlbmll" + "cgEKMzRub3Rmb3VuZAEINjQ5IGNsdWIBAjcxAgJzcAEJYy1mYW50YXN5AQNkaXABAWgCBGFuZHMBDGsgc2Vpc2FrdXNobwEJb3I1" + "IHdvcmtzAQZzZWFzb24CC3QgaW5qZWN0aW9uAAQ1IDA2AgdzbGFzaCA0AQswIHNlaWtpIHNleAAHYWhlbWFydQEOa2F0c3VraSBz" + "b3VrZW4BEmxpY2Ugbm8gdGFrYXJhYmFrbwACYmIBCGxhY2sgZG9nBQZud2hpdGUDAnplAgVvc3NvbQAIY2F0dGxleWEBCGhyaXN0" + "bWFzAQVpcGhlcgEFbGVzdGEBBnJpbXNvbgIDb3duAQZ5Y2xvbmUCBW50aGlhAA1kaWdpdGFsIGxvdmVyAQZtbS5jb20AA2VsZgAK" + "ZmF0YWxwdWxzZQEGaXJlZmx5AAVnaG9zdAEGbGFzc2VzAAVoYXJlbQMEbmVzcwEIZW50YWlrZXkBBWliaWtpAAxsYXBpcyBsYXp1" + "bGkBBWlsaXRoAQxvbGl0YWNoYW5uZWwABG1hbmECAXkBAmVpAgx0cm9iYXkgY29taXgBBGlzdHkBBm9ub2V5ZQAKbmFydWhvLWRv" + "dQEPb3JhbmVrby1uby10YW1hAQJ1bgIEdGFrdQAFb2Jvcm8BB3lha29kb24ACHBhbGNvbWl4AgdudHlob3NlAQVvaXNvbgAGcmFi" + "Yml0AQZlYmVjY2EAB3NhaWdhZG8BB2hhZ2Jhc2UCBmltYXBhbgEKaWxlbnQgaGlsbAEEbGF2ZQEFdGVsbGECA29ybQEGdXp1cmFu" + "BAJ5YQAEdGFpbAEFb21ib3kABXZlbm9tAAh5YW1hbW90bwhsYW5ndWFnZVcAAAAACWFmcmlrYWFucwEHbGJhbmlhbgEFcmFiaWMD" + "BG1haWMCBm1lbmlhbgAHYmVuZ2FsaQEGb3NuaWFuAQh1bGdhcmlhbgIFcm1lc2UAB2NhdGFsYW4BBmVidWFubwEGaGluZXNlAQNy" + "ZWUDA29sZQIGb2F0aWFuAQR6ZWNoAAZkYW5pc2gBBHV0Y2gAB2VuZ2xpc2gBCHNwZXJhbnRvAgZ0b25pYW4AB2Zpbm5pc2gBBXJl" + "bmNoAAhnZW9yZ2lhbgIEcm1hbgEEcmVlawEHdWphcmF0aQAGaGVicmV3AQRpbmRpAQRtb25nAQh1bmdhcmlhbgAJaWNlbGFuZGlj" + "AQluZG9uZXNpYW4BBHJpc2gBBnRhbGlhbgAIamFwYW5lc2UCBnZhbmVzZQAHa2FubmFkYQIEemFraAEEaG1lcgEFb3JlYW4BBnVy" + "ZGlzaAAGbGFkaW5vAgFvAgN0aW4DBHZpYW4AB21hcmF0aGkBCG9uZ29saWFuAAduZGViZWxlAQVlcGFsaQEIb3J3ZWdpYW4ABW9y" + "b21vAApwYXBpYW1lbnRvAgRzaHRvAQZlcnNpYW4BBW9saXNoAghydHVndWVzZQEGdW5qYWJpAAdyZXdyaXRlAQdvbWFuaWFuAQZ1" + "c3NpYW4ABXNhbmdvAwVza3JpdAEGZXJiaWFuAQRob25hAQVsb3ZhawQFZW5pYW4BBW9tYWxpAQZwYW5pc2gBBndhaGlsaQIFZWRp" + "c2gAB3RhZ2Fsb2cCA21pbAEFZWx1Z3UCCnh0IGNsZWFuZWQEDmxlc3MgbmFycmF0aXZlAQNoYWkBBmliZXRhbgIGZ3JpbnlhAQly" + "YW5zbGF0ZWQBBnVya2lzaAAJdWtyYWluaWFuAQNyZHUACnZpZXRuYW1lc2UABXdlbHNoAAd5aWRkaXNoAAR6dWx1B3JlY2xhc3ML" + "AAAAAAhhcnRpc3RjZwEIc2lhbnBvcm4AB2Nvc3BsYXkACWRvdWppbnNoaQAGZ2FtZWNnAAhpbWFnZXNldAAFbWFuZ2EBA2lzYwAF" + "bm9uLWgAB3ByaXZhdGUAB3dlc3Rlcm4=";
 
+  // src/tags/codec-header.ts
+  function hasCodecHeader(bytes, magic, version, headerBytes) {
+    if (bytes.length < headerBytes) {
+      return false;
+    }
+    for (let index = 0;index < magic.length; index++) {
+      if (bytes[index] !== magic[index]) {
+        return false;
+      }
+    }
+    return bytes[magic.length] === version;
+  }
+
   // src/tags/index-codec.ts
   var MAGIC = [69, 72, 84, 73];
   var FORMAT_VERSION = 1;
@@ -4846,15 +4696,7 @@ ${defaultKeySummary()}`)) {
     return null;
   }
   function decodeTagVocabulary(bytes) {
-    if (bytes.length < HEADER_BYTES) {
-      return null;
-    }
-    for (let index = 0;index < MAGIC.length; index++) {
-      if (bytes[index] !== MAGIC[index]) {
-        return null;
-      }
-    }
-    if (bytes[4] !== FORMAT_VERSION) {
+    if (!hasCodecHeader(bytes, MAGIC, FORMAT_VERSION, HEADER_BYTES)) {
       return null;
     }
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -5140,15 +4982,7 @@ ${defaultKeySummary()}`)) {
     return Math.round(Math.expm1(quantized / QUANT_MAX * Math.log1p(max)));
   }
   function decodeTagCountsFromBytes(bytes) {
-    if (bytes.length < HEADER_BYTES2) {
-      return null;
-    }
-    for (let index = 0;index < MAGIC2.length; index++) {
-      if (bytes[index] !== MAGIC2[index]) {
-        return null;
-      }
-    }
-    if (bytes[4] !== VERSION5) {
+    if (!hasCodecHeader(bytes, MAGIC2, VERSION5, HEADER_BYTES2)) {
       return null;
     }
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -6625,36 +6459,41 @@ ${defaultKeySummary()}`)) {
   }
   function navSpecs(host) {
     const specs = [
-      { key: "front", label: "Front Page", target: { kind: "internal", path: "/" }, primary: true },
+      {
+        key: "front",
+        label: "Front Page",
+        target: { kind: "internal", path: FRONT_PATH },
+        primary: true
+      },
       {
         key: "watched",
         label: "Watched",
-        target: { kind: "internal", path: "/watched" },
+        target: { kind: "internal", path: WATCHED_PATH },
         primary: true
       },
       {
         key: "popular",
         label: "Popular",
-        target: { kind: "internal", path: "/popular" },
+        target: { kind: "internal", path: POPULAR_PATH },
         primary: true
       },
       {
         key: "torrents",
         label: "Torrents",
-        target: { kind: "internal", path: "/torrents.php" },
+        target: { kind: "internal", path: SITE_PATHS.torrents },
         primary: true
       },
       {
         key: "favorites",
         label: "Favorites",
-        target: { kind: "internal", path: "/favorites.php" },
+        target: { kind: "internal", path: SITE_PATHS.favorites },
         primary: true,
         accountOnly: true
       },
       {
         key: "settings",
         label: "Settings",
-        target: { kind: "internal", path: "/uconfig.php" },
+        target: { kind: "internal", path: SITE_PATHS.uconfig },
         accountOnly: true
       },
       {
@@ -6666,11 +6505,11 @@ ${defaultKeySummary()}`)) {
       {
         key: "mytags",
         label: "My Tags",
-        target: { kind: "internal", path: "/mytags" },
+        target: { kind: "internal", path: SITE_PATHS.myTags },
         accountOnly: true
       },
-      { key: "home", label: "My Home", target: { kind: "internal", path: "/home.php" } },
-      { key: "toplist", label: "Toplists", target: { kind: "internal", path: "/toplist.php" } },
+      { key: "home", label: "My Home", target: { kind: "internal", path: SITE_PATHS.home } },
+      { key: "toplist", label: "Toplists", target: { kind: "internal", path: SITE_PATHS.toplist } },
       { key: "bounty", label: "Bounties", target: { kind: "internal", path: "/bounty.php" } },
       { key: "news", label: "News", target: { kind: "internal", path: "/news.php" } },
       { key: "lofi", label: "LoFi", target: { kind: "internal", path: "/lofi/" } },
@@ -6985,9 +6824,6 @@ ${defaultKeySummary()}`)) {
         return "The site does not offer this download for the gallery.";
     }
   }
-  function metaItem(label, value) {
-    return el("div", { class: "archive-option-meta-item" }, el("span", { class: "archive-option-meta-label", text: label }), el("span", { class: "archive-option-meta-value", text: value }));
-  }
   function optionCard(option, ctx, controls, startDownload, openDownload) {
     const note = unavailableNote(option);
     const status = el("p", { class: "archive-option-status", role: "status", "aria-live": "polite" });
@@ -7028,7 +6864,7 @@ ${defaultKeySummary()}`)) {
       });
     }, { signal: ctx.signal });
     const cost = costText(option.cost);
-    return el("article", { class: "archive-option" }, el("h2", { class: "archive-option-title", text: optionTitle(option) }), el("div", { class: "archive-option-meta" }, metaItem("Size", option.size ?? "N/A"), metaItem("Cost", cost)), option.cost.kind === "gp" ? el("p", {
+    return el("article", { class: "archive-option" }, el("h2", { class: "archive-option-title", text: optionTitle(option) }), el("div", { class: "archive-option-meta" }, factRow("Size", option.size ?? "N/A"), factRow("Cost", cost)), option.cost.kind === "gp" ? el("p", {
       class: "archive-option-note",
       text: `This download spends ${cost} when it starts.`
     }) : null, note === null ? null : el("p", { class: "archive-option-note", text: note }), button, status);
@@ -7085,6 +6921,117 @@ ${defaultKeySummary()}`)) {
         text: "Open native page"
       }))
     ]);
+  }
+
+  // src/data/favorites.ts
+  var FOLDER_COLORS = [
+    "#c8c8c8",
+    "#ff7b7b",
+    "#ffb057",
+    "#ffe066",
+    "#7ee787",
+    "#b6f36b",
+    "#63e6e2",
+    "#8fa8ff",
+    "#c792ea",
+    "#ff8fd1"
+  ];
+  function folderColor(slot) {
+    return FOLDER_COLORS[slot] ?? "#c8c8c8";
+  }
+  var CACHE_TTL = 24 * 60 * 60 * 1000;
+  var folderCache = null;
+  var LOGIN_WALL_TEXT = /sign in|log in|login/i;
+  var FAVORITES_TEXT = /favorites/i;
+  function assertSignedIn(text) {
+    if (LOGIN_WALL_TEXT.test(text) && !FAVORITES_TEXT.test(text)) {
+      throw new LoginRequiredError;
+    }
+  }
+  async function getFolders(signal) {
+    const account = memberId();
+    if (account === null) {
+      return [];
+    }
+    if (folderCache?.memberId === account && Date.now() - folderCache.at < CACHE_TTL) {
+      return folderCache.folders;
+    }
+    const { doc } = await loader.document(siteUrl(SITE_PATHS.uconfig), {
+      priority: priorityOf("background"),
+      tag: "folders",
+      signal
+    });
+    const inputs = doc.querySelectorAll('input[name^="favorite_"]');
+    if (inputs.length === 0) {
+      throw new LoginRequiredError;
+    }
+    const names = [];
+    for (let slot = 0;slot < 10; slot++) {
+      const input = doc.querySelector(`input[name="favorite_${slot}"]`);
+      names.push(input?.value.trim() ?? "");
+    }
+    const folders = names.map((name, slot) => ({
+      slot,
+      name: name || `Folder ${slot}`,
+      color: folderColor(slot)
+    }));
+    folderCache = { memberId: account, folders, at: Date.now() };
+    return folders;
+  }
+  async function setFavorite(gallery, slot, note = "") {
+    if (!isLoggedIn()) {
+      throw new LoginRequiredError;
+    }
+    const url = galleryPopupUrl(gallery.gid, gallery.token, "addfav");
+    const body = new URLSearchParams({
+      favcat: slot === null ? "favdel" : String(slot),
+      favnote: note,
+      ...slot === null ? {} : { apply: "Add to Favorites" },
+      update: "1"
+    });
+    const response = await postForm(url, body, {
+      tag: "favorite",
+      failure: "Favorite request failed"
+    });
+    assertSignedIn(await response.text());
+  }
+  async function getFavoriteNote(gallery, signal) {
+    if (!isLoggedIn()) {
+      return "";
+    }
+    const url = galleryPopupUrl(gallery.gid, gallery.token, "addfav");
+    const { doc } = await loader.document(url, {
+      priority: priorityOf("background"),
+      tag: "favnote",
+      signal,
+      fresh: true
+    });
+    return doc.querySelector('textarea[name="favnote"]')?.value ?? "";
+  }
+  var FAVORITE_SLOTS = 10;
+  async function submitBulk(action, gids, signal) {
+    if (gids.length === 0) {
+      return;
+    }
+    const body = new URLSearchParams({ ddact: action, apply: "Confirm" });
+    for (const gid of gids) {
+      body.append("modifygids[]", gid);
+    }
+    const response = await postForm(siteUrl(SITE_PATHS.favorites), body, {
+      tag: "favorite",
+      failure: "Favorite update failed",
+      signal
+    });
+    assertSignedIn(await response.text());
+  }
+  async function deleteFavorites(gids, signal) {
+    await submitBulk("delete", gids, signal);
+  }
+  async function moveFavorites(gids, slot, signal) {
+    if (!Number.isInteger(slot) || slot < 0 || slot >= FAVORITE_SLOTS) {
+      throw new RangeError(`Invalid favorite folder slot: ${slot}`);
+    }
+    await submitBulk(`fav${slot}`, gids, signal);
   }
 
   // src/ui/view-scale.ts
@@ -7270,6 +7217,27 @@ ${defaultKeySummary()}`)) {
     }
     wrap.hidden = prev === null && next === null && !numbered && info === "";
     return wrap;
+  }
+  function numberedPager({
+    baseUrl,
+    page,
+    total,
+    param,
+    label,
+    navigate,
+    prev = null,
+    next = null,
+    info = ""
+  }) {
+    const href = (target) => pageHref(baseUrl, target, param);
+    return pager({
+      prev,
+      next,
+      info,
+      label,
+      pages: { current: page, total, href },
+      jump: { current: page, go: (target) => navigate(href(target)) }
+    });
   }
 
   // src/ui/stars.ts
@@ -7468,7 +7436,7 @@ ${defaultKeySummary()}`)) {
     });
     activeMenu = { close: () => popover.close(), anchor };
     popover.open();
-    const nativeFavoriteUrl = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(state.gid)}&t=${encodeURIComponent(state.token)}&act=addfav`;
+    const nativeFavoriteUrl = galleryPopupUrl(state.gid, state.token, "addfav");
     const nativeLink = (label) => {
       const link = el("a", {
         class: "fav-link",
@@ -7521,7 +7489,7 @@ ${defaultKeySummary()}`)) {
       }
       content.append(el("a", {
         class: "fav-link",
-        href: `${location.origin}/uconfig.php`,
+        href: siteUrl(SITE_PATHS.uconfig),
         "data-native": "",
         target: "_blank",
         rel: "noopener",
@@ -7828,8 +7796,6 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/views/favorites.ts
-  var FAVORITES_PATH = "/favorites.php";
-  var ORDER_PARAM = { published: "fs_p", favorited: "fs_f" };
   function favoritesLabels(data) {
     const active = data.active === "all" ? null : data.folders.find((folder) => folder.slot === data.active) ?? null;
     return {
@@ -7876,7 +7842,7 @@ ${defaultKeySummary()}`)) {
     return start === null ? `Showing ${count} of ${total} ${noun}` : formatPageRange({ start, end: start + count - 1, total, suffix: ` ${noun}` });
   }
   function folderHref(baseUrl, active) {
-    const url = new URL(FAVORITES_PATH, baseUrl);
+    const url = new URL(SITE_PATHS.favorites, baseUrl);
     for (const [key, value] of new URL(baseUrl).searchParams) {
       if (key !== "favcat" && key !== "next" && key !== "prev" && key !== "page") {
         url.searchParams.set(key, value);
@@ -7889,7 +7855,7 @@ ${defaultKeySummary()}`)) {
   }
   function orderHref(baseUrl, active, order) {
     const url = new URL(folderHref(baseUrl, active));
-    url.searchParams.set("inline_set", ORDER_PARAM[order]);
+    url.searchParams.set("inline_set", orderParam(order));
     return url.href;
   }
   function folderTab(label, count, href, active) {
@@ -8192,7 +8158,7 @@ ${defaultKeySummary()}`)) {
       throw new Error(`${context}: ${error}`);
     }
   }
-  function siteUrl(url) {
+  function siteUrl2(url) {
     const resolved = new URL(url, location.href);
     if (resolved.protocol !== "https:" || !isSiteHost(resolved.hostname)) {
       throw new Error("Gallery request refused: the endpoint is not on this site.");
@@ -8200,7 +8166,7 @@ ${defaultKeySummary()}`)) {
     return resolved.href;
   }
   function postJson2(url, body) {
-    return postJson(siteUrl(url), body, {
+    return postJson(siteUrl2(url), body, {
       tag: "gallery-action",
       failure: "Gallery request failed"
     });
@@ -8272,7 +8238,7 @@ ${defaultKeySummary()}`)) {
     return body;
   }
   function normalizeName(name) {
-    return name.replace(/\s+/gu, " ").trim().toLowerCase();
+    return collapseWhitespace(name).toLowerCase();
   }
   function normalizeWeight(weight) {
     if (weight === null || weight === undefined || !Number.isFinite(weight)) {
@@ -8651,6 +8617,7 @@ ${defaultKeySummary()}`)) {
     const section = el("section", { class: "gallery-comments", "aria-label": "Comments" });
     const list = el("div", { class: "comment-list" });
     const edit = deps.editComment ?? editComment;
+    const postComment2 = deps.postComment ?? postComment;
     section.append(el("h2", { class: "comments-title", text: `Comments (${data.comments.length})` }), list);
     for (const comment of data.comments) {
       list.append(commentCard(comment, config, deps, signal, (commentId, text) => edit(data.url, commentId, text, signal)));
@@ -8706,7 +8673,7 @@ ${defaultKeySummary()}`)) {
       status.textContent = "Posting…";
       (async () => {
         try {
-          await deps.postComment(data.url, text, signal);
+          await postComment2(data.url, text, signal);
           if (signal.aborted) {
             return;
           }
@@ -9819,7 +9786,7 @@ ${defaultKeySummary()}`)) {
     };
     const commentDeps = {
       post: deps.post,
-      postComment: deps.postComment ?? postComment,
+      postComment: deps.postComment,
       editComment: deps.editComment,
       refresh: async () => {
         const next = await reload();
@@ -9909,7 +9876,7 @@ ${defaultKeySummary()}`)) {
       }
       const result = await applyMyTag(tag, change, {
         config,
-        myTagsUrl: new URL("/mytags", data.url).href,
+        myTagsUrl: new URL(SITE_PATHS.myTags, data.url).href,
         loadDocument: load,
         post: deps.post,
         signal: ctx.signal
@@ -10116,16 +10083,16 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/views/gallery-torrents.ts
-  function metaItem2(label, value) {
-    return el("div", { class: "gallery-torrent-meta-item" }, el("span", { class: "gallery-torrent-meta-label", text: label }), el("span", { class: "gallery-torrent-meta-value", text: value === "" ? "—" : value }));
+  function metaItem(label, value) {
+    return factRow(label, value === "" ? "—" : value, "gallery-torrent-meta-item");
   }
   function infoRow(label, href) {
-    return el("div", { class: "gallery-torrent-info-row" }, el("span", { class: "gallery-torrent-info-label", text: label }), href === null ? el("span", { class: "gallery-torrent-info-unavailable", text: "Not available" }) : el("a", {
+    return factRow(label, href === null ? el("span", { class: "gallery-torrent-info-unavailable", text: "Not available" }) : el("a", {
       class: "gallery-torrent-info-link",
       href,
       rel: "nofollow",
       text: "Download torrent"
-    }));
+    }), "gallery-torrent-info-row");
   }
   function infoNodes(info) {
     const nodes = [];
@@ -10192,7 +10159,7 @@ ${defaultKeySummary()}`)) {
         button.disabled = false;
       });
     }, { signal: ctx.signal });
-    return el("article", { class: "gallery-torrent-card" }, el("div", { class: "gallery-torrent-head" }, title, button), el("div", { class: "gallery-torrent-meta" }, metaItem2("Posted", torrent.posted), metaItem2("Size", torrent.size), metaItem2("Seeds", String(torrent.seeds)), metaItem2("Peers", String(torrent.peers)), metaItem2("Downloads", String(torrent.downloads)), metaItem2("Uploader", torrent.uploader)), detailsSlot);
+    return el("article", { class: "gallery-torrent-card" }, el("div", { class: "gallery-torrent-head" }, title, button), el("div", { class: "gallery-torrent-meta" }, metaItem("Posted", torrent.posted), metaItem("Size", torrent.size), metaItem("Seeds", String(torrent.seeds)), metaItem("Peers", String(torrent.peers)), metaItem("Downloads", String(torrent.downloads)), metaItem("Uploader", torrent.uploader)), detailsSlot);
   }
   function backLink(page) {
     if (page.galleryHref === null) {
@@ -10625,19 +10592,7 @@ ${defaultKeySummary()}`)) {
     });
     const reset = el("button", { class: "btn btn-ghost btn-small", type: "button", text: "Reset" });
     reset.addEventListener("click", () => {
-      const next = {
-        ...query,
-        rating: 0,
-        pageFrom: "",
-        pageTo: "",
-        since: "",
-        until: "",
-        expunged: false,
-        torrent: false,
-        disableLanguage: false,
-        disableUploader: false,
-        disableTags: false
-      };
+      const next = { ...query, ...emptyAdvancedFilters() };
       saveListFilters(next);
       ctx.navigate(buildSearchUrl(next));
     }, { signal: ctx.signal });
@@ -10743,23 +10698,8 @@ ${defaultKeySummary()}`)) {
     };
     const footer = el("div");
     const clearFilters = () => {
-      const cleared = {
-        ...urlQuery,
-        text: "",
-        cats: 0,
-        rating: 0,
-        expunged: false,
-        torrent: false,
-        pageFrom: "",
-        pageTo: "",
-        since: "",
-        until: "",
-        disableLanguage: false,
-        disableUploader: false,
-        disableTags: false
-      };
-      saveListFilters(cleared);
-      ctx.navigate("/");
+      saveListFilters(emptySearchQuery());
+      ctx.navigate(FRONT_PATH);
     };
     const canReset = urlQuery.text !== "" || urlQuery.cats !== 0 || narrow > 0 || relaxed > 0 || rangeActive;
     const empty = shownItems.length === 0 ? statePanel({
@@ -11010,6 +10950,28 @@ ${defaultKeySummary()}`)) {
       color: isChecked(inputs.colorEnabled) ? inputs.color.value : null
     };
   }
+  async function runSaveAction({
+    button,
+    idle,
+    busy,
+    error,
+    failure,
+    save,
+    onSaved
+  }) {
+    error.hidden = true;
+    button.disabled = true;
+    button.textContent = busy;
+    try {
+      onSaved(await save());
+    } catch (cause) {
+      error.textContent = errorText(cause, failure);
+      error.hidden = false;
+    } finally {
+      button.disabled = false;
+      button.textContent = idle;
+    }
+  }
   function readOnlyNote(data) {
     return el("p", { class: "my-tags-readonly", role: "status" }, "Editing is unavailable on this page. ", el("a", {
       class: "my-tags-native",
@@ -11079,30 +11041,32 @@ ${defaultKeySummary()}`)) {
           return;
         }
         adding = true;
-        submit.disabled = true;
-        submit.textContent = "Adding…";
-        try {
-          const result = await applyMyTag(tag, readChange(inputs), {
-            config: credentials,
-            myTagsUrl: data.url,
-            loadDocument: load,
-            post: deps?.post,
-            addTag: deps?.addTag,
-            signal: ctx.signal
-          });
-          showToast(result === "added" ? "Tag added to My Tags" : "My Tags updated");
-          form.reset();
-          inputs.weight.value = "10";
-          inputs.color.disabled = true;
-          ctx.reload();
-        } catch (failure) {
-          error.textContent = errorText(failure, "Could not save tag.");
-          error.hidden = false;
-        } finally {
-          adding = false;
-          submit.disabled = false;
-          submit.textContent = "Add tag";
-        }
+        await runSaveAction({
+          button: submit,
+          idle: "Add tag",
+          busy: "Adding…",
+          error,
+          failure: "Could not save tag.",
+          save: async () => {
+            const result = await applyMyTag(tag, readChange(inputs), {
+              config: credentials,
+              myTagsUrl: data.url,
+              loadDocument: load,
+              post: deps?.post,
+              addTag: deps?.addTag,
+              signal: ctx.signal
+            });
+            return result === "added" ? "Tag added to My Tags" : "My Tags updated";
+          },
+          onSaved: (message) => {
+            showToast(message);
+            form.reset();
+            inputs.weight.value = "10";
+            inputs.color.disabled = true;
+            ctx.reload();
+          }
+        });
+        adding = false;
       };
       form.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -11135,37 +11099,35 @@ ${defaultKeySummary()}`)) {
             return;
           }
           busy = true;
-          save.disabled = true;
-          save.textContent = "Saving…";
-          error.hidden = true;
-          try {
-            const change = readChange(inputs);
-            await applyMyTag(tag.name, change, {
-              config: credentials,
-              myTagsUrl: data.url,
-              existing: state,
-              loadDocument: load,
-              post: deps?.post,
-              addTag: deps?.addTag,
-              signal: ctx.signal
-            });
-            const rawWeight = inputs.weight.value.trim();
-            Object.assign(state, {
-              watched: isChecked(inputs.watched),
-              hidden: isChecked(inputs.hidden),
-              color: isChecked(inputs.colorEnabled) ? normalizeColor(inputs.color.value) : "",
-              weight: rawWeight === "" ? state.weight : normalizeWeight(Number(rawWeight))
-            });
-            summary.textContent = describeTag(state);
-            showToast("My Tags updated");
-          } catch (failure) {
-            error.textContent = errorText(failure, "Could not save tag.");
-            error.hidden = false;
-          } finally {
-            busy = false;
-            save.disabled = false;
-            save.textContent = "Save";
-          }
+          await runSaveAction({
+            button: save,
+            idle: "Save",
+            busy: "Saving…",
+            error,
+            failure: "Could not save tag.",
+            save: async () => {
+              await applyMyTag(tag.name, readChange(inputs), {
+                config: credentials,
+                myTagsUrl: data.url,
+                existing: state,
+                loadDocument: load,
+                post: deps?.post,
+                addTag: deps?.addTag,
+                signal: ctx.signal
+              });
+              const rawWeight = inputs.weight.value.trim();
+              Object.assign(state, {
+                watched: isChecked(inputs.watched),
+                hidden: isChecked(inputs.hidden),
+                color: isChecked(inputs.colorEnabled) ? normalizeColor(inputs.color.value) : "",
+                weight: rawWeight === "" ? state.weight : normalizeWeight(Number(rawWeight))
+              });
+              summary.textContent = describeTag(state);
+              return "My Tags updated";
+            },
+            onSaved: showToast
+          });
+          busy = false;
         };
         save.addEventListener("click", () => {
           saveRow();
@@ -11724,7 +11686,7 @@ ${defaultKeySummary()}`)) {
 
   // src/views/settings.ts
   var saveSiteSettings = async (body, signal) => {
-    await postForm(`${location.origin}/uconfig.php`, body, {
+    await postForm(siteUrl(SITE_PATHS.uconfig), body, {
       tag: "uconfig-save",
       failure: "Saving settings failed",
       signal
@@ -11755,6 +11717,9 @@ ${defaultKeySummary()}`)) {
     const hint = field.prompt !== "" && field.prompt !== label ? field.prompt : "";
     return el("div", { class: "settings-field" }, el("label", { class: "eyebrow", for: id, text: label }), control, hint === "" ? null : el("p", { class: "settings-hint", text: hint }));
   }
+  function bindValue(bindings, key, read, write) {
+    bindings.push({ key, read, write });
+  }
   function radioGroup(field, id, bindings) {
     const choices = [];
     const options = field.options.map((option, index) => {
@@ -11770,13 +11735,9 @@ ${defaultKeySummary()}`)) {
       choices.push(choice);
       return el("label", { class: "settings-row", for: inputId }, choice.element, el("span", { text: option.label }));
     });
-    bindings.push({
-      key: field.name,
-      read: () => choices.find((choice) => choice.readChecked())?.element.value ?? "",
-      write: (value) => {
-        for (const choice of choices) {
-          choice.writeChecked(choice.element.value === value);
-        }
+    bindValue(bindings, field.name, () => choices.find((choice) => choice.readChecked())?.element.value ?? "", (value) => {
+      for (const choice of choices) {
+        choice.writeChecked(choice.element.value === value);
       }
     });
     return el("fieldset", { class: "settings-group" }, el("legend", { class: "settings-subhead", text: field.prompt || humanize(field.name) }), el("div", { class: "settings-rows" }, ...options));
@@ -11789,11 +11750,7 @@ ${defaultKeySummary()}`)) {
       checked: field.value !== "",
       disabled: field.disabled
     });
-    bindings.push({
-      key: field.name,
-      read: control.readValue,
-      write: control.writeValue
-    });
+    bindValue(bindings, field.name, control.readValue, control.writeValue);
     return el("div", { class: "settings-row" }, control.element, el("label", { for: id, text: field.label ?? humanize(field.name) }));
   }
   function checkboxGroup(group, sectionIndex, bindings) {
@@ -11817,11 +11774,7 @@ ${defaultKeySummary()}`)) {
         disabled: option.disabled
       }))
     });
-    bindings.push({
-      key: field.name,
-      read: control.read,
-      write: control.write
-    });
+    bindValue(bindings, field.name, control.read, control.write);
     return labeledField(field, id, control.element, sectionTitle);
   }
   function textField2(field, id, bindings, sectionTitle) {
@@ -11835,12 +11788,8 @@ ${defaultKeySummary()}`)) {
       autocomplete: "off",
       disabled: field.disabled ? "" : null
     });
-    bindings.push({
-      key: field.name,
-      read: () => input.value,
-      write: (value) => {
-        input.value = value;
-      }
+    bindValue(bindings, field.name, () => input.value, (value) => {
+      input.value = value;
     });
     return labeledField(field, id, input, sectionTitle);
   }
@@ -11853,23 +11802,15 @@ ${defaultKeySummary()}`)) {
       disabled: field.disabled ? "" : null
     });
     textarea.value = field.value;
-    bindings.push({
-      key: field.name,
-      read: () => textarea.value,
-      write: (value) => {
-        textarea.value = value;
-      }
+    bindValue(bindings, field.name, () => textarea.value, (value) => {
+      textarea.value = value;
     });
     return labeledField(field, id, textarea, sectionTitle);
   }
   function hiddenField2(field, bindings) {
     const input = el("input", { type: "hidden", name: field.name, value: field.value });
-    bindings.push({
-      key: field.name,
-      read: () => input.value,
-      write: (value) => {
-        input.value = value;
-      }
+    bindValue(bindings, field.name, () => input.value, (value) => {
+      input.value = value;
     });
     return input;
   }
@@ -12015,7 +11956,7 @@ ${defaultKeySummary()}`)) {
       summary: [
         el("a", {
           class: "settings-native",
-          href: "/uconfig.php?eh_native=1",
+          href: nativePath(SITE_PATHS.uconfig),
           "data-native": "",
           text: "Native settings",
           title: "Open the site's own settings page (display-name profiles, category switches)"
@@ -12239,20 +12180,16 @@ ${defaultKeySummary()}`)) {
       el("section", { class: "toplist-section", "aria-label": data.title }, rowsList(data.entries))
     ];
     if (data.pager) {
-      nodes.push(pager({
+      nodes.push(numberedPager({
+        baseUrl: data.url,
+        page: data.pager.page,
+        total: data.pager.pages,
+        param: "p",
+        label: "Toplist pages",
+        info: `Page ${data.pager.page} of ${data.pager.pages}`,
         prev: data.pager.prevHref,
         next: data.pager.nextHref,
-        info: `Page ${data.pager.page} of ${data.pager.pages}`,
-        label: "Toplist pages",
-        pages: {
-          current: data.pager.page,
-          total: data.pager.pages,
-          href: (page) => pageHref(data.url, page, "p")
-        },
-        jump: {
-          current: data.pager.page,
-          go: (page) => ctx.navigate(pageHref(data.url, page, "p"))
-        }
+        navigate: ctx.navigate
       }));
     }
     return nodes;
@@ -12535,26 +12472,20 @@ ${defaultKeySummary()}`)) {
     const body = data.rows.length === 0 ? statePanel({
       text: filtered ? "No torrents match this filter." : "No torrents were found on this page.",
       actions: [
-        ...filtered ? [{ label: "Clear filters", primary: true, href: "/torrents.php" }] : [],
+        ...filtered ? [{ label: "Clear filters", primary: true, href: SITE_PATHS.torrents }] : [],
         nativePageAction()
       ]
     }) : el("div", { class: "torrent-table-wrap" }, torrentTable(data));
     host.append(siteNav(ctx.signal), header, filterBar(data, ctx), body);
     const total = data.pages[data.pages.length - 1] ?? data.page;
     if (total > 1) {
-      host.append(pager({
+      host.append(numberedPager({
+        baseUrl: data.url,
+        page: data.page,
+        total,
+        param: "page",
         label: "Torrent pages",
-        prev: null,
-        next: null,
-        pages: {
-          current: data.page,
-          total,
-          href: (page) => pageHref(data.url, page, "page")
-        },
-        jump: {
-          current: data.page,
-          go: (page) => ctx.navigate(pageHref(data.url, page, "page"))
-        }
+        navigate: ctx.navigate
       }));
     }
   }
@@ -14204,7 +14135,7 @@ ${defaultKeySummary()}`)) {
         })
       },
       torrents: {
-        match: (url) => url.pathname === "/torrents.php" ? { kind: "torrents", url: url.href } : null,
+        match: (url) => url.pathname === SITE_PATHS.torrents ? { kind: "torrents", url: url.href } : null,
         ...documentView(deps, {
           tag: "torrents",
           parse: parseTorrents2,
@@ -14214,7 +14145,7 @@ ${defaultKeySummary()}`)) {
         })
       },
       galleryTorrents: {
-        match: (url) => url.pathname === "/gallerytorrents.php" ? { kind: "galleryTorrents", url: url.href } : null,
+        match: (url) => url.pathname === SITE_PATHS.galleryTorrents ? { kind: "galleryTorrents", url: url.href } : null,
         ...documentView(deps, {
           tag: "gallery-torrents",
           parse: parseGalleryTorrents,
@@ -14224,7 +14155,7 @@ ${defaultKeySummary()}`)) {
         })
       },
       archive: {
-        match: (url) => url.pathname === "/archiver.php" ? { kind: "archive", url: url.href } : null,
+        match: (url) => url.pathname === SITE_PATHS.archive ? { kind: "archive", url: url.href } : null,
         ...documentView(deps, {
           tag: "archive",
           parse: parseArchivePage,
@@ -14235,7 +14166,7 @@ ${defaultKeySummary()}`)) {
         })
       },
       home: {
-        match: (url) => url.pathname === "/home.php" ? { kind: "home", url: url.href } : null,
+        match: (url) => url.pathname === SITE_PATHS.home ? { kind: "home", url: url.href } : null,
         ...documentView(deps, {
           tag: "home",
           parse: parseHome,
@@ -14245,7 +14176,7 @@ ${defaultKeySummary()}`)) {
         })
       },
       myTags: {
-        match: (url) => /^\/mytags\/?$/u.test(url.pathname) ? { kind: "myTags", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.myTags) ? { kind: "myTags", url: url.href } : null,
         ...documentView(deps, {
           tag: "my-tags",
           parse: parseMyTags,
@@ -14255,7 +14186,7 @@ ${defaultKeySummary()}`)) {
         })
       },
       favorites: {
-        match: (url) => url.pathname === "/favorites.php" ? { kind: "favorites", url: url.href } : null,
+        match: (url) => url.pathname === SITE_PATHS.favorites ? { kind: "favorites", url: url.href } : null,
         ...documentView(deps, {
           tag: "favorites",
           parse: parseFavorites,
@@ -14265,7 +14196,7 @@ ${defaultKeySummary()}`)) {
         })
       },
       toplist: {
-        match: (url) => url.pathname === "/toplist.php" ? { kind: "toplist", url: url.href } : null,
+        match: (url) => url.pathname === SITE_PATHS.toplist ? { kind: "toplist", url: url.href } : null,
         ...documentView(deps, {
           tag: "toplist",
           parse: parseToplist,
@@ -14275,7 +14206,7 @@ ${defaultKeySummary()}`)) {
         })
       },
       settings: {
-        match: (url) => url.pathname === "/uconfig.php" ? { kind: "settings", url: url.href } : null,
+        match: (url) => url.pathname === SITE_PATHS.uconfig ? { kind: "settings", url: url.href } : null,
         ...documentView(deps, {
           tag: "settings",
           parse: parseUconfig,
@@ -14620,6 +14551,7 @@ ${defaultKeySummary()}`)) {
     --font-weight-semibold: 600;
     --font-weight-bold: 700;
     --font-weight-extrabold: 800;
+    --tracking-normal: 0em;
     --tracking-wide: 0.025em;
     --leading-relaxed: 1.625;
     --blur-sm: 8px;
@@ -15302,6 +15234,22 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-micro);
     color: var(--color-muted);
     font-family: inherit;
+  }
+  .fact-row {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 0.5);
+  }
+  .fact-label {
+    font-size: var(--text-meta);
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .fact-value {
+    font-size: var(--text-body);
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
   }
   .topbar-kbd {
     margin-right: var(--spacing);
@@ -17579,22 +17527,6 @@ ${defaultKeySummary()}`)) {
     column-gap: calc(var(--spacing) * 8);
     row-gap: calc(var(--spacing) * 2);
   }
-  .archive-option-meta-item {
-    display: flex;
-    flex-direction: column;
-    gap: calc(var(--spacing) * 0.5);
-  }
-  .archive-option-meta-label {
-    font-size: var(--text-meta);
-    color: var(--color-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .archive-option-meta-value {
-    font-size: var(--text-body);
-    --tw-font-weight: var(--font-weight-semibold);
-    font-weight: var(--font-weight-semibold);
-  }
   .archive-option-note {
     margin: 0px;
     font-size: var(--text-meta);
@@ -18473,14 +18405,20 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-meta);
   }
   .gallery-torrent-meta-item {
-    display: flex;
+    flex-direction: row;
     align-items: baseline;
     gap: var(--spacing);
   }
-  .gallery-torrent-meta-label {
-    color: var(--color-muted);
+  .gallery-torrent-meta-item .fact-label {
+    font-size: var(--text-meta);
+    --tw-tracking: var(--tracking-normal);
+    letter-spacing: var(--tracking-normal);
+    text-transform: none;
   }
-  .gallery-torrent-meta-value {
+  .gallery-torrent-meta-item .fact-value {
+    font-size: var(--text-meta);
+    --tw-font-weight: var(--font-weight-normal);
+    font-weight: var(--font-weight-normal);
     color: var(--color-fg);
     --tw-numeric-spacing: tabular-nums;
     font-variant-numeric: var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, );
@@ -18497,15 +18435,22 @@ ${defaultKeySummary()}`)) {
     gap: calc(var(--spacing) * 2);
   }
   .gallery-torrent-info-row {
-    display: flex;
+    flex-direction: row;
     flex-wrap: wrap;
     align-items: baseline;
     column-gap: calc(var(--spacing) * 2);
     row-gap: var(--spacing);
-    font-size: var(--text-control);
   }
-  .gallery-torrent-info-label {
-    color: var(--color-muted);
+  .gallery-torrent-info-row .fact-label {
+    font-size: var(--text-control);
+    --tw-tracking: var(--tracking-normal);
+    letter-spacing: var(--tracking-normal);
+    text-transform: none;
+  }
+  .gallery-torrent-info-row .fact-value {
+    font-size: var(--text-control);
+    --tw-font-weight: var(--font-weight-normal);
+    font-weight: var(--font-weight-normal);
   }
   .gallery-torrent-info-link {
     color: var(--color-link);

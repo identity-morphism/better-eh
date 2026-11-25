@@ -2,6 +2,8 @@ import { LoginRequiredError } from "../fetch/errors";
 import { loader } from "../fetch/loader";
 import { postForm } from "../net/http";
 import { priorityOf } from "../net/priority";
+import { isLoggedIn, memberId } from "../session";
+import { galleryPopupUrl, SITE_PATHS, siteUrl } from "../site";
 
 export interface FavoriteFolder {
   slot: number;
@@ -30,15 +32,6 @@ export function folderColor(slot: number): string {
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 let folderCache: { memberId: string; folders: FavoriteFolder[]; at: number } | null = null;
 
-/** Member id of the signed-in account, or null when the site has no session cookie. */
-export function memberId(): string | null {
-  return /(?:^|; )ipb_member_id=(\d+)/.exec(document.cookie)?.[1] ?? null;
-}
-
-export function isLoggedIn(): boolean {
-  return memberId() !== null;
-}
-
 const LOGIN_WALL_TEXT = /sign in|log in|login/i;
 const FAVORITES_TEXT = /favorites/i;
 
@@ -63,7 +56,7 @@ export async function getFolders(signal?: AbortSignal): Promise<FavoriteFolder[]
     return folderCache.folders;
   }
 
-  const { doc } = await loader.document(`${location.origin}/uconfig.php`, {
+  const { doc } = await loader.document(siteUrl(SITE_PATHS.uconfig), {
     priority: priorityOf("background"),
     tag: "folders",
     signal,
@@ -100,7 +93,7 @@ export async function setFavorite(
     throw new LoginRequiredError();
   }
 
-  const url = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(gallery.gid)}&t=${encodeURIComponent(gallery.token)}&act=addfav`;
+  const url = galleryPopupUrl(gallery.gid, gallery.token, "addfav");
   const body = new URLSearchParams({
     favcat: slot === null ? "favdel" : String(slot),
     favnote: note,
@@ -129,7 +122,7 @@ export async function getFavoriteNote(
   if (!isLoggedIn()) {
     return "";
   }
-  const url = `${location.origin}/gallerypopups.php?gid=${encodeURIComponent(gallery.gid)}&t=${encodeURIComponent(gallery.token)}&act=addfav`;
+  const url = galleryPopupUrl(gallery.gid, gallery.token, "addfav");
   // Fresh every time: the dialog is the only place the note is visible, so a cached copy from
   // before a note edit would post the old text back and overwrite it.
   const { doc } = await loader.document(url, {
@@ -163,7 +156,7 @@ async function submitBulk(
     body.append("modifygids[]", gid);
   }
 
-  const response = await postForm(`${location.origin}/favorites.php`, body, {
+  const response = await postForm(siteUrl(SITE_PATHS.favorites), body, {
     tag: "favorite",
     failure: "Favorite update failed",
     signal,

@@ -5,19 +5,21 @@ export interface Category {
   bit: number;
   name: string;
   cls: string;
+  /** Listing path that selects this category. */
+  path: string;
 }
 
 export const CATEGORIES: readonly Category[] = [
-  { bit: 2, name: "Doujinshi", cls: "ct2" },
-  { bit: 4, name: "Manga", cls: "ct3" },
-  { bit: 8, name: "Artist CG", cls: "ct4" },
-  { bit: 16, name: "Game CG", cls: "ct5" },
-  { bit: 512, name: "Western", cls: "cta" },
-  { bit: 256, name: "Non-H", cls: "ct9" },
-  { bit: 32, name: "Image Set", cls: "ct6" },
-  { bit: 64, name: "Cosplay", cls: "ct7" },
-  { bit: 128, name: "Asian Porn", cls: "ct8" },
-  { bit: 1, name: "Misc", cls: "ct1" },
+  { bit: 2, name: "Doujinshi", cls: "ct2", path: "/doujinshi" },
+  { bit: 4, name: "Manga", cls: "ct3", path: "/manga" },
+  { bit: 8, name: "Artist CG", cls: "ct4", path: "/artistcg" },
+  { bit: 16, name: "Game CG", cls: "ct5", path: "/gamecg" },
+  { bit: 512, name: "Western", cls: "cta", path: "/western" },
+  { bit: 256, name: "Non-H", cls: "ct9", path: "/non-h" },
+  { bit: 32, name: "Image Set", cls: "ct6", path: "/imageset" },
+  { bit: 64, name: "Cosplay", cls: "ct7", path: "/cosplay" },
+  { bit: 128, name: "Asian Porn", cls: "ct8", path: "/asianporn" },
+  { bit: 1, name: "Misc", cls: "ct1", path: "/misc" },
 ];
 
 /** Name of the only enabled category, or null when none or several are enabled. */
@@ -46,10 +48,13 @@ export interface SearchQuery extends SearchFilters {
   text: string;
 }
 
-/** The filter half of a query with every filter off, matching a bare gallery index page. */
-export function emptySearchFilters(): SearchFilters {
+/**
+ * Filters owned by the advanced panel, with every one cleared.
+ *
+ * Category chips live outside the panel, so this is also the reset value that must keep `cats`.
+ */
+export function emptyAdvancedFilters(): Omit<SearchFilters, "cats"> {
   return {
-    cats: 0,
     rating: 0,
     expunged: false,
     torrent: false,
@@ -61,6 +66,11 @@ export function emptySearchFilters(): SearchFilters {
     disableUploader: false,
     disableTags: false,
   };
+}
+
+/** The filter half of a query with every filter off, matching a bare gallery index page. */
+export function emptySearchFilters(): SearchFilters {
+  return { cats: 0, ...emptyAdvancedFilters() };
 }
 
 /** An empty query, matching a bare gallery index page. */

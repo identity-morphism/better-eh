@@ -26,6 +26,26 @@ export interface GalleryActionDeps {
   post?: GalleryPost;
 }
 
+/** Comment transports; the view passes overrides and the UI resolves the site defaults. */
+export interface CommentTransports extends GalleryActionDeps {
+  /** Submit the native comment form; defaults to the real endpoint. */
+  postComment?: (url: string, text: string, signal?: AbortSignal) => Promise<void>;
+  /** Save an edited comment; defaults to the native edit endpoint. */
+  editComment?: (
+    url: string,
+    commentId: number,
+    text: string,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+}
+
+/** Vote and batch-add actions the per-tag menu runs. */
+export interface TagVoteTransports {
+  /** Vote on the raw `namespace:tag` form, or add a comma-separated batch. */
+  vote: (tag: string, vote: 1 | -1) => Promise<void>;
+  addTags: (tags: string) => Promise<void>;
+}
+
 /** Read one field of a JSON response after checking that the field exists. */
 function readField(data: unknown, key: string): unknown {
   if (typeof data !== "object" || data === null || !(key in data)) {

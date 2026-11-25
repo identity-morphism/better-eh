@@ -2,8 +2,6 @@ interface NavigateOptions {
   replace?: boolean;
 }
 
-export type { CursorPage, PageSource } from "../ui/page-cursor";
-
 export interface ViewContext {
   signal: AbortSignal;
   navigate: (url: string, options?: NavigateOptions) => void;

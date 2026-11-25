@@ -8,7 +8,7 @@ import type {
 import { el } from "../ui/dom";
 import { trackJumpRow } from "../ui/jump-row";
 import { listHeader } from "../ui/list-header";
-import { pageHref, pager } from "../ui/pager";
+import { numberedPager } from "../ui/pager";
 import { nativePageAction, statePanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
 import { siteNav } from "../ui/topbar";
@@ -183,20 +183,16 @@ function categoryBody(data: ToplistCategory, ctx: ViewContext): readonly HTMLEle
   ];
   if (data.pager) {
     nodes.push(
-      pager({
+      numberedPager({
+        baseUrl: data.url,
+        page: data.pager.page,
+        total: data.pager.pages,
+        param: "p",
+        label: "Toplist pages",
+        info: `Page ${data.pager.page} of ${data.pager.pages}`,
         prev: data.pager.prevHref,
         next: data.pager.nextHref,
-        info: `Page ${data.pager.page} of ${data.pager.pages}`,
-        label: "Toplist pages",
-        pages: {
-          current: data.pager.page,
-          total: data.pager.pages,
-          href: (page) => pageHref(data.url, page, "p"),
-        },
-        jump: {
-          current: data.pager.page,
-          go: (page) => ctx.navigate(pageHref(data.url, page, "p")),
-        },
+        navigate: ctx.navigate,
       }),
     );
   }

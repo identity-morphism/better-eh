@@ -7,6 +7,7 @@
 
 import { isUnknownArray } from "../guards";
 import { createStore, gmStorage } from "../store";
+import { collapseWhitespace } from "../strings";
 
 const HISTORY_KEY = "eh:search-history:v1";
 const VERSION = 1;
@@ -18,10 +19,6 @@ export const RECENT_TTL_MS = 90 * DAY_MS;
 interface RecentQuery {
   text: string;
   usedAt: number;
-}
-
-function normalize(text: string): string {
-  return text.replace(/\s+/gu, " ").trim();
 }
 
 function isRecent(value: unknown): value is RecentQuery {
@@ -45,7 +42,7 @@ export function recentQueries(now = Date.now()): RecentQuery[] {
     if (!isRecent(value) || now - value.usedAt >= RECENT_TTL_MS) {
       continue;
     }
-    const text = normalize(value.text);
+    const text = collapseWhitespace(value.text);
     const key = text.toLowerCase();
     if (text === "" || seen.has(key)) {
       continue;
@@ -58,7 +55,7 @@ export function recentQueries(now = Date.now()): RecentQuery[] {
 
 /** Remember a submitted query, moving a repeat to the front. */
 export function rememberQuery(text: string, now = Date.now()): void {
-  const normalized = normalize(text);
+  const normalized = collapseWhitespace(text);
   if (normalized === "") {
     return;
   }

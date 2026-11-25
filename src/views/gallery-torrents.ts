@@ -3,6 +3,7 @@ import { loadTorrentInfo } from "../data/gallery-torrents";
 import type { GalleryTorrent, GalleryTorrentsPage } from "../parse/gallery-torrents";
 import { el } from "../ui/dom";
 import { errorText } from "../ui/error-text";
+import { factRow } from "../ui/fact-row";
 import { listHeader } from "../ui/list-header";
 import { nativePageAction, statePanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
@@ -21,19 +22,12 @@ export interface GalleryTorrentsViewDeps {
 }
 
 function metaItem(label: string, value: string): HTMLElement {
-  return el(
-    "div",
-    { class: "gallery-torrent-meta-item" },
-    el("span", { class: "gallery-torrent-meta-label", text: label }),
-    el("span", { class: "gallery-torrent-meta-value", text: value === "" ? "—" : value }),
-  );
+  return factRow(label, value === "" ? "—" : value, "gallery-torrent-meta-item");
 }
 
 function infoRow(label: string, href: string | null): HTMLElement {
-  return el(
-    "div",
-    { class: "gallery-torrent-info-row" },
-    el("span", { class: "gallery-torrent-info-label", text: label }),
+  return factRow(
+    label,
     href === null
       ? el("span", { class: "gallery-torrent-info-unavailable", text: "Not available" })
       : el("a", {
@@ -42,6 +36,7 @@ function infoRow(label: string, href: string | null): HTMLElement {
           rel: "nofollow",
           text: "Download torrent",
         }),
+    "gallery-torrent-info-row",
   );
 }
 

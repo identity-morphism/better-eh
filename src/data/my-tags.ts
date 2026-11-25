@@ -12,6 +12,7 @@ import { postForm, postJson } from "../net/http";
 import type { ApiCredentials } from "../parse/gallery";
 import type { TagsetField, TagsetState, UserTagState } from "../parse/my-tags";
 import { normalizeColor, parseUserTags } from "../parse/my-tags";
+import { collapseWhitespace } from "../strings";
 import type { GalleryPost } from "./gallery-actions";
 
 const DEFAULT_WEIGHT = 10;
@@ -71,19 +72,31 @@ export interface MyTagChange {
   weight?: number;
 }
 
-interface MyTagDeps {
+/** Transports for My Tags page loads and mutations, and the menu actions that invoke them. */
+export interface MyTagTransports {
+  /** Fetch the page that holds the saved tag ids; defaults to the shared loader. */
+  loadDocument?: (url: string, options: DocumentOptions) => Promise<HtmlResponse>;
+  /** Transport for the `setusertag` JSON API. */
+  post?: GalleryPost;
+  /** Transport for the native add-form POST. */
+  addTag?: (url: string, body: URLSearchParams, signal?: AbortSignal) => Promise<void>;
+  /** My Tags mutations from the gallery tag menu; omitted on anonymous pages. */
+  watchTag?: (tag: string) => Promise<void>;
+  hideTag?: (tag: string) => Promise<void>;
+  colorTag?: (tag: string, color: string) => Promise<void>;
+}
+
+interface MyTagDeps extends MyTagTransports {
   config: ApiCredentials;
   myTagsUrl: string;
   /** Current tag state; when present the My Tags page is not fetched. */
   existing?: UserTagState;
   loadDocument: (url: string, options: DocumentOptions) => Promise<HtmlResponse>;
-  post?: GalleryPost;
-  addTag?: (url: string, body: URLSearchParams, signal?: AbortSignal) => Promise<void>;
   signal?: AbortSignal;
 }
 
 function normalizeName(name: string): string {
-  return name.replace(/\s+/gu, " ").trim().toLowerCase();
+  return collapseWhitespace(name).toLowerCase();
 }
 
 /** Round a weight and keep it inside the site's -99..99 range; missing input means 10. */

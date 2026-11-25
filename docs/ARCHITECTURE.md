@@ -5,39 +5,48 @@
 - **`src/view-lifecycle.ts`**: the one mount/teardown sequence (abort, panels, view mode, sticky,
   host clear, render, title, scroll) with its side effects injected for tests.
 - **`src/router.ts`**: route parsing, owned-route detection, link interception.
-- **`src/routes/`**: one exhaustive table of route views (`load`, `parse`, `render`, `title`).
-  Document-backed kinds are rows of `parse`/`render`/`title` data behind the shared `documentView`
-  builder, so adding a document kind is one table row; `load` and `parse` share one parse
-  function.
+- **`src/routes/`**: `identity` (the path-shape regexes, scope/category tables and native marker)
+  and one exhaustive table of route views (`load`, `parse`, `render`, `title`). Document-backed
+  kinds are rows of `parse`/`render`/`title` data behind the shared `documentView` builder, so
+  adding a document kind is one table row; `load` and `parse` share one parse function.
 - **`src/net/queue.ts`**: priority request scheduler with concurrency/interval limits.
 - **`src/net/http.ts`**: response classification (HTML bodies, rate-limit notices, login wall) and
   the shared POST helpers (`postForm`, `postJson`) every site mutation goes through.
 - **`src/fetch/`**: page-fetch: one loader over transport and parser, with document and viewer-page
   caches, LRU eviction, image preloading and prefetch.
 - **`src/page-image.ts`**: page image display, retry ladder, and give-up handling.
+- **`src/site.ts`**: the site's domains, display name and owned page paths, document-title
+  joining, and the one builder for site page and per-gallery popup URLs.
 - **`src/parse/`**: `viewer`, `gallery`, `gallery-torrents`, `list`, `favorites`, `toplist`,
   `archive`, `torrents`, `home`, `my-tags`, `uconfig`, `query` (search/tag serialization), `pager`
-  (the shared numeric pager), and shared title parsing.
+  (the shared numeric pager), shared title parsing, and `url` (safe URL and gallery-identity/href
+  helpers, including the `gid`/token query form the popups use).
 - **`src/data/`**: `favorites` (folder cache, add/remove, bulk delete/move), `gallery-actions`
   (rating, tag votes, comment votes, comment posts and edits), `archive` (the archive chooser POST),
   `gallery-torrents` (per-torrent
   details and their personalized/redistributable links), `list-filters` (remembered category and
   advanced filters), `list-date` (the app-owned posted-date range and its date-cursor request),
   `my-tags` (tagset save/rename plus watch/hide/colour/weight changes and the add path), `search-history` (recent queries),
-  and `quick-tags` (named toggle expressions, with the one-time legacy migration).
+  and `quick-tags` (named toggle expressions). `gallery-actions` and `my-tags` also declare the
+  comment, tag-vote and My Tags transport contracts the gallery view and its UI panels share.
 - **`src/tags/`**: `model` (search-expression grammar and tag toggling), `db` (compact index,
   popularity attachment, storage cache, download, usage and prefix-completion history, with the
   generated core vocabulary as the synchronous fallback until the full asset's background upgrade
   lands), `core-vocabulary` (the generated embedded core, built from `assets/`), `counts` +
   `tag-counts-codec` (cached remote popularity and binary decoder), `index-codec` (front-coded
   vocabulary asset), `mirror` (asset hosts, fetch policy and refresh cadence), `base64` (the cached
-  payload encoding), and `suggest` (ranking and namespace completion).
+  payload encoding), `codec-header` (the magic/version guard both binary decoders share), and
+  `suggest` (ranking and namespace completion).
   `scripts/update-tag-counts.ts` and `scripts/update-tag-index.ts` regenerate the remote assets;
   `scripts/update-core-vocabulary.ts` regenerates the embedded core and verifies it with `--check`.
 - **`src/search-draft.ts`**: the tab-scoped committed query and the free-text draft shared by the
   list, gallery and top bar.
 - **`src/store.ts`**: one persistence seam over userscript value storage and session storage —
   versioned envelope, shape guard, swallowed failures; tests use an in-memory adapter.
+- **`src/strings.ts`**: string primitives shared below the UI (`collapseWhitespace`), so storage,
+  parsers and tag normalization fold whitespace the same way.
+- **`src/session.ts`**: the site's signed-in session (member id, login check), the one place other
+  modules read the account cookie.
 - **`src/settings-schema.ts`**: the single declaration of every scalar preference (default, control,
   bounds, hint); the settings store, panel, validation and import/export derive from it.
 - **`src/views/`**: `viewer`, `gallery`, `gallery-torrents`, `archive`, `list`, `favorites`,
@@ -47,8 +56,8 @@
 - **`src/ui/`**: DOM helpers, top bar and site tabs, popover primitive (every panel, including the
   tag combobox), login gate, active filter chips, quick-tag buttons and editor, parsed title
   renderer, favorite popover, gallery rating/comments/tag menu, banner/toast, the result-card
-  assembly, form-control state helpers, live-region helpers, shared pager (prev/next or numbered),
-  paged-region (pager ⇄ infinite sentinel and
+  assembly, label/value fact rows, form-control state helpers, live-region helpers, shared pager
+  (prev/next or numbered, plus the numbered-strip builder), paged-region (pager ⇄ infinite sentinel and
   appended nodes), the empty/error panel builder, the sticky chrome measurer, the in-page jump-row
   tracked, infinite-scroll sentinel, the append-stable card grid, and view scaling.
 - **`src/tailwind.css` / `src/app.css`**: Tailwind v4 theme/utilities, shared components, and one

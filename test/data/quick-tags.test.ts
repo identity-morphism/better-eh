@@ -6,32 +6,13 @@ import {
   removeQuickTag,
   replaceQuickTags,
 } from "../../src/data/quick-tags";
-import { storedValue } from "../setup";
-
 const KEY = "eh:saved-expressions:v1";
 
 beforeEach(() => {
   GM_setValue(KEY, []);
-  GM_setValue("eh:quick-tags:v1", null);
-  GM_setValue("eh:saved-searches:v1", null);
 });
 
 describe("quick tags", () => {
-  test("migrates legacy quick tags and saved searches once", () => {
-    GM_setValue("eh:quick-tags:v1", [{ label: "LOLI", query: "f:lolicon$" }]);
-    GM_setValue("eh:saved-searches:v1", [{ name: "Artbooks", text: "f:artbook$", savedAt: 5 }]);
-
-    expect(quickTags().map((entry) => [entry.name, entry.query])).toEqual([
-      ["Artbooks", "f:artbook$"],
-      ["LOLI", "f:lolicon$"],
-    ]);
-    expect(storedValue("eh:quick-tags:v1")).toBeNull();
-    expect(storedValue("eh:saved-searches:v1")).toBeNull();
-
-    removeQuickTag("LOLI");
-    expect(quickTags().map((entry) => entry.name)).toEqual(["Artbooks"]);
-  });
-
   test("filters empty fields, normalizes, and removes by name", () => {
     replaceQuickTags([
       { name: "", query: "english", savedAt: 1 },

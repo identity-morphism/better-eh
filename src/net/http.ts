@@ -1,4 +1,5 @@
 import { LoginRequiredError } from "../fetch/errors";
+import { collapseWhitespace } from "../strings";
 import { priorityOf } from "./priority";
 import { net } from "./queue";
 
@@ -132,7 +133,7 @@ const NOT_FOUND_HEADINGS: Record<string, true> = {
 
 /** Collapse whitespace and drop the site suffix so both title and heading compare as page names. */
 function normalizeHeading(text: string): string {
-  return text.replace(SITE_SUFFIX, "").replace(/\s+/g, " ").trim().toLowerCase();
+  return collapseWhitespace(text.replace(SITE_SUFFIX, "")).toLowerCase();
 }
 
 /** A 404 can also arrive as a bare sentence with no heading at all. */

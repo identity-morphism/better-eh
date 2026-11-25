@@ -9,7 +9,8 @@ import type { ToplistPage } from "../parse/toplist";
 import type { TorrentPage } from "../parse/torrents";
 import type { UconfigSection } from "../parse/uconfig";
 import type { GalleryData, ListPageData, PageData } from "../types";
-import type { PageSource, ViewContext } from "../views/context";
+import type { PageSource } from "../ui/page-cursor";
+import type { ViewContext } from "../views/context";
 
 /** The listing tab a list route renders: the query's own table or one of the site's variants. */
 export type ListScope = "search" | "popular" | "watched" | "uploader";
