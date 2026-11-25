@@ -46,49 +46,28 @@ function openHistory(): HTMLElement {
   return historyPanel();
 }
 
-/** Open the shared expression editor from the history panel's save button. */
+/** Open the shared editor from the history panel's save button. */
 function openEditor(panel: HTMLElement): HTMLElement {
   panel.querySelector<HTMLButtonElement>(".search-history-save-current")?.click();
-  const editor = document.querySelector<HTMLElement>(".expression-editor-panel");
+  const editor = document.querySelector<HTMLElement>(".quick-tag-editor-panel");
   if (!editor) {
-    throw new Error("missing expression editor");
+    throw new Error("missing quick tag editor");
   }
   return editor;
 }
 
 /** Fill the seeded editor row and submit it; the history panel rerenders on save. */
-function saveCurrent(
-  panel: HTMLElement,
-  name: string,
-  options: { mode?: number; pin?: boolean } = {},
-): void {
+function saveCurrent(panel: HTMLElement, name: string): void {
   const editor = openEditor(panel);
-  const nameInput = editor.querySelector<HTMLInputElement>(".expression-name");
+  const nameInput = editor.querySelector<HTMLInputElement>(".quick-tag-name");
   if (!nameInput) {
-    throw new Error("missing expression name");
+    throw new Error("missing quick tag name");
   }
   nameInput.value = name;
   nameInput.dispatchEvent(new Event("input", { bubbles: true }));
 
-  if (options.mode !== undefined) {
-    const mode = editor.querySelector<HTMLSelectElement>(".expression-mode");
-    if (!mode) {
-      throw new Error("missing expression mode");
-    }
-    mode.selectedIndex = options.mode;
-    mode.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-  if (options.pin === true) {
-    const pin = editor.querySelector<HTMLInputElement>(".expression-pin input[type='checkbox']");
-    if (!pin) {
-      throw new Error("missing expression pin");
-    }
-    pin.checked = true;
-    pin.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
   editor
-    .querySelector<HTMLFormElement>("form.expression-editor")
+    .querySelector<HTMLFormElement>("form.quick-tag-editor")
     ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
@@ -123,7 +102,7 @@ describe("search history panel", () => {
     expect(searched).toEqual(["big breasts", "big breasts"]);
   });
 
-  test("seeds the shared editor with the current query and saves it under a name", () => {
+  test("seeds the editor with the current query and saves it as a quick tag", () => {
     input().value = "f:artbook$";
     const panel = openHistory();
 
@@ -137,21 +116,21 @@ describe("search history panel", () => {
     };
     try {
       const editor = openEditor(panel);
-      const query = editor.querySelector<HTMLInputElement>(".expression-query");
+      const query = editor.querySelector<HTMLInputElement>(".quick-tag-query");
       if (!query) {
         throw new Error("missing seeded query");
       }
       expect(query.value).toBe("f:artbook$");
       expect(focused.at(-1)).toBe(query);
 
-      const name = editor.querySelector<HTMLInputElement>(".expression-name");
+      const name = editor.querySelector<HTMLInputElement>(".quick-tag-name");
       if (!name) {
-        throw new Error("missing expression name");
+        throw new Error("missing quick tag name");
       }
       name.value = "Artbooks";
       name.dispatchEvent(new Event("input", { bubbles: true }));
       editor
-        .querySelector<HTMLFormElement>("form.expression-editor")
+        .querySelector<HTMLFormElement>("form.quick-tag-editor")
         ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     } finally {
       proto.focus = originalFocus;
@@ -160,11 +139,12 @@ describe("search history panel", () => {
     expect(panel.textContent).toContain("Artbooks");
     expect(panel.textContent).toContain("f:artbook$");
 
-    const saved = panel.querySelector<HTMLButtonElement>(
-      ".search-history-saved .search-history-query",
-    );
-    saved?.click();
-    expect(searched).toEqual(["f:artbook$"]);
+    input().value = "cat";
+    input().dispatchEvent(new Event("input", { bubbles: true }));
+    panel
+      .querySelector<HTMLButtonElement>(".search-history-quick-tag .search-history-query")
+      ?.click();
+    expect(searched).toEqual(["cat f:artbook$"]);
   });
 
   test("persists the seeded row when it is saved without a name", () => {
@@ -173,13 +153,13 @@ describe("search history panel", () => {
 
     const editor = openEditor(panel);
     editor
-      .querySelector<HTMLFormElement>("form.expression-editor")
+      .querySelector<HTMLFormElement>("form.quick-tag-editor")
       ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
-    expect(panel.querySelector(".search-history-saved")?.textContent).toContain("f:artbook$");
+    expect(panel.querySelector(".search-history-quick-tag")?.textContent).toContain("f:artbook$");
   });
 
-  test("clears recent searches without touching saved ones", () => {
+  test("clears recent searches without touching quick tags", () => {
     input().value = "english";
     host
       .querySelector<HTMLFormElement>(".topbar-search")
@@ -194,51 +174,41 @@ describe("search history panel", () => {
     expect(panel.textContent).toContain("Language");
   });
 
-  test("removes a saved search and keeps the empty state honest", () => {
+  test("removes a quick tag and keeps the empty state honest", () => {
     input().value = "english";
     let panel = openHistory();
     saveCurrent(panel, "Lang");
 
     panel.querySelector<HTMLButtonElement>(".search-history-remove")?.click();
     panel = historyPanel();
-    expect(panel.querySelector(".search-history-saved")).toBeNull();
+    expect(panel.querySelector(".search-history-quick-tag")).toBeNull();
     expect(panel.querySelector(".search-history-empty")).not.toBeNull();
   });
 
-  test("saves a pinned toggle expression and applies its terms", () => {
+  test("quick tags add and remove their terms instead of running a search", () => {
     input().value = "f:lolicon$";
     input().dispatchEvent(new Event("input", { bubbles: true }));
 
     let panel = openHistory();
-    saveCurrent(panel, "LOLI", { mode: 1, pin: true });
+    saveCurrent(panel, "LOLI");
 
     panel = historyPanel();
+    // There is no run/toggle switch: a quick tag always toggles its terms.
+    expect(panel.querySelector(".search-history-toggle")).toBeNull();
+
     input().value = "cat";
     input().dispatchEvent(new Event("input", { bubbles: true }));
-    // A toggle expression's row does what the expression says.
-    panel.querySelector<HTMLButtonElement>(".search-history-saved .search-history-query")?.click();
-
+    panel
+      .querySelector<HTMLButtonElement>(".search-history-quick-tag .search-history-query")
+      ?.click();
     expect(searched).toEqual(["cat f:lolicon$"]);
-  });
 
-  test("a run expression's row replaces the search, and its button toggles instead", () => {
-    input().value = "f:lolicon$";
-    input().dispatchEvent(new Event("input", { bubbles: true }));
-
-    let panel = openHistory();
-    saveCurrent(panel, "LOLI", { mode: 0 });
-
-    panel = historyPanel();
-    input().value = "cat";
-    input().dispatchEvent(new Event("input", { bubbles: true }));
-    panel.querySelector<HTMLButtonElement>(".search-history-saved .search-history-query")?.click();
-    expect(searched).toEqual(["f:lolicon$"]);
-
-    // The row closed the panel and the field now holds the query; type a fresh draft and reopen.
-    input().value = "cat";
+    input().value = "cat f:lolicon$";
     input().dispatchEvent(new Event("input", { bubbles: true }));
     panel = openHistory();
-    panel.querySelector<HTMLButtonElement>(".search-history-toggle")?.click();
-    expect(searched).toEqual(["f:lolicon$", "cat f:lolicon$"]);
+    panel
+      .querySelector<HTMLButtonElement>(".search-history-quick-tag .search-history-query")
+      ?.click();
+    expect(searched).toEqual(["cat f:lolicon$", "cat"]);
   });
 });

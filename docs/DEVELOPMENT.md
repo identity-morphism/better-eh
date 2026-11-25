@@ -130,8 +130,9 @@ this script), and any minifier would break the unminified requirement.
 - The tag index lives in `eh:tag-index:v2` (refreshed weekly from the compact repository asset),
   tag popularity in `eh:tag-counts:v3` (refreshed weekly from the repository asset), tag usage in
   `eh:tag-usage:v1`, prefix completions in `eh:tag-completions:v1`, recent searches in
-  `eh:search-history:v1`, named searches and quick tags in `eh:saved-expressions:v1` (the old
-  `eh:saved-searches:v1` and `eh:quick-tags:v1` records migrate once), per-gallery reading
+  `eh:search-history:v1`, quick tags in `eh:saved-expressions:v1` (the key keeps its old name;
+  `eh:saved-searches:v1` records import as quick tags and `eh:quick-tags:v1` migrates once),
+  per-gallery reading
   positions in `eh:resume:v1`, and the tab's current search in `eh:search-context:v1` and its draft
   in `eh:search-draft:v1`. Remembered listing filters use `eh:list-filters:v1`, and the filter
   panel's state `eh:list-filters-open:v1`. The bundle embeds the core vocabulary, so suggestions

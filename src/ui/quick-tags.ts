@@ -1,8 +1,8 @@
-import type { SavedExpression } from "../data/saved-expressions";
-import { quickExpressions, subscribeExpressions } from "../data/saved-expressions";
+import type { QuickTag } from "../data/quick-tags";
+import { quickTags, subscribeQuickTags } from "../data/quick-tags";
 import { containsExpression, toggleExpressionInSearch } from "../tags/model";
 import { el } from "./dom";
-import { openExpressionEditor } from "./saved-expressions";
+import { openQuickTagEditor } from "./quick-tags-editor";
 
 interface QuickTagsOptions {
   /** The user's current draft, so a click toggles against what the field shows. */
@@ -18,17 +18,17 @@ export interface QuickTagsHandle {
 }
 
 /**
- * Render the pinned saved expressions as quick-tag buttons.
+ * Render the quick tags as buttons.
  *
- * A quick tag always toggles: a click adds its expression's terms to the current draft, or removes
- * them when all are present. The editor is the shared one, so a name, query or pin changed there is
- * reflected here immediately.
+ * A click adds the tag's expression to the current draft, or removes its terms when all are
+ * present. The editor is the shared one, so a name or query changed there is reflected here
+ * immediately.
  */
 export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
   const { signal } = options;
-  let tags = quickExpressions();
+  let tags = quickTags();
   let text = options.getText();
-  const entries: { tag: SavedExpression; node: HTMLButtonElement }[] = [];
+  const entries: { tag: QuickTag; node: HTMLButtonElement }[] = [];
   const row = el("div", { class: "quick-tags", role: "group", "aria-label": "Quick tags" });
 
   const refresh = (next?: string): void => {
@@ -64,15 +64,15 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
       class: "quick-tag-edit",
       type: "button",
       text: tags.length === 0 ? "+ Quick tags" : "Edit tags",
-      title: "Edit saved searches and quick tags",
+      title: "Edit quick tags",
       "aria-haspopup": "dialog",
       "aria-expanded": "false",
     });
     edit.addEventListener(
       "click",
       () => {
-        openExpressionEditor(edit, signal, () => {
-          tags = quickExpressions();
+        openQuickTagEditor(edit, signal, () => {
+          tags = quickTags();
           render();
         });
       },
@@ -83,8 +83,8 @@ export function renderQuickTags(options: QuickTagsOptions): QuickTagsHandle {
   };
 
   render();
-  const unsubscribe = subscribeExpressions(() => {
-    tags = quickExpressions();
+  const unsubscribe = subscribeQuickTags(() => {
+    tags = quickTags();
     render();
   });
   signal.addEventListener("abort", unsubscribe, { once: true });

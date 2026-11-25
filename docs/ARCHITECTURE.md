@@ -24,7 +24,7 @@
   details and their personalized/redistributable links), `list-filters` (remembered category and
   advanced filters), `list-date` (the app-owned posted-date range and its date-cursor request),
   `my-tags` (tagset save/rename plus watch/hide/colour/weight changes and the add path), `search-history` (recent queries),
-  and `saved-expressions` (named searches and quick tags, with the one-time legacy migration).
+  and `quick-tags` (named toggle expressions, with the one-time legacy migration).
 - **`src/tags/`**: `model` (search-expression grammar and tag toggling), `db` (compact index,
   popularity attachment, storage cache, download, usage and prefix-completion history, with the
   generated core vocabulary as the synchronous fallback until the full asset's background upgrade
