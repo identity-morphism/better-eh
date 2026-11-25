@@ -123,12 +123,6 @@ a {
     background-color 0.15s;
 }
 
-.topbar-clear:hover,
-.topbar-history:hover,
-.quick-tag-remove:hover {
-  @apply bg-panel-hover text-fg;
-}
-
 /* Rows clip their content, so their focus ring sits inside the border. */
 .topbar-tab:focus-visible,
 .term-toggle:focus-visible {
@@ -158,6 +152,9 @@ a {
   @apply flex h-7 cursor-pointer items-center gap-1 rounded-row px-2 text-control text-muted no-underline transition-colors;
 }
 
+.topbar-clear:hover,
+.topbar-history:hover,
+.quick-tag-remove:hover,
 .rail-link:hover,
 .fav-item:hover,
 .favorites-move-item:hover,
@@ -168,7 +165,10 @@ a {
 .action-menu-item:hover,
 .action-menu-item:focus-visible,
 .tag-menu-item:hover,
-.tag-menu-item:focus-visible {
+.tag-menu-item:focus-visible,
+.settings-jump-link:hover,
+.toplist-jump-link:hover,
+.topbar-history[aria-expanded="true"] {
   @apply bg-panel-hover text-fg;
 }
 
@@ -212,7 +212,9 @@ a {
 .search-history-clear:hover,
 .search-history-clear:focus-visible,
 .comment-edit:hover,
-.comment-edit:focus-visible {
+.comment-edit:focus-visible,
+.search-history-edit:hover,
+.search-history-edit:focus-visible {
   @apply text-fg underline;
 }
 
@@ -276,7 +278,8 @@ a {
 .settings-jump::-webkit-scrollbar,
 .toplist-jump::-webkit-scrollbar,
 .topbar-tabs::-webkit-scrollbar,
-.favorites-tabs::-webkit-scrollbar {
+.favorites-tabs::-webkit-scrollbar,
+.topbar-search-submit-icon {
   display: none;
 }
 
@@ -359,7 +362,8 @@ input[type="radio"] {
   @apply pt-3 pb-2.5;
 }
 
-.topbar-filters {
+.topbar-filters,
+.filters[open] {
   @apply w-full;
 }
 
@@ -429,11 +433,8 @@ input[type="radio"] {
   @apply mr-1 h-6 cursor-pointer rounded-control border-0 px-2.5 text-meta font-semibold transition-colors;
 }
 
-.topbar-search-submit-icon {
-  display: none;
-}
-
-.topbar-clear {
+.topbar-clear,
+.topbar-history {
   @apply mr-1 size-6 shrink-0;
 }
 
@@ -462,7 +463,8 @@ input[type="radio"] {
 
 /* -------------------------------------------------------- search filters */
 
-.search-filters {
+.search-filters,
+.cat-row {
   @apply flex flex-wrap items-center gap-1.5;
 }
 
@@ -474,7 +476,8 @@ input[type="radio"] {
   border-color: color-mix(in srgb, var(--color-accent) 70%, var(--color-line-strong));
 }
 
-.term-chip.is-or {
+.term-chip.is-or,
+.tag-chip.is-added.is-or {
   border-style: dashed;
 }
 
@@ -483,7 +486,11 @@ input[type="radio"] {
   font: inherit;
 }
 
-.term-toggle:hover {
+.term-toggle:hover,
+.search-filters-clear:hover,
+.filters-summary:hover,
+.settings-jump-link[aria-current],
+.toplist-jump-link[aria-current] {
   @apply text-fg;
 }
 
@@ -511,10 +518,6 @@ input[type="radio"] {
 
 .search-filters-clear {
   @apply ml-0.5 inline-flex min-h-6 cursor-pointer items-center border-0 bg-transparent px-1.5 py-0.5 text-meta text-muted;
-}
-
-.search-filters-clear:hover {
-  @apply text-fg;
 }
 
 /* -------------------------------------------------------- tag suggestions */
@@ -584,7 +587,8 @@ input[type="radio"] {
   @apply flex shrink-0 items-center justify-between gap-2.5 border-t border-line bg-panel px-2 py-1.5 text-micro text-muted;
 }
 
-.tag-combobox-count {
+.tag-combobox-count,
+.fav-name {
   @apply truncate;
 }
 
@@ -592,7 +596,8 @@ input[type="radio"] {
   @apply flex shrink-0 items-center gap-2;
 }
 
-.tag-combobox-hints {
+.tag-combobox-hints,
+.card-artist {
   @apply text-muted;
 }
 
@@ -605,10 +610,6 @@ input[type="radio"] {
 
 .search-panel {
   @apply grid gap-2.5 border-b border-line pt-2.5 pb-4;
-}
-
-.cat-row {
-  @apply flex flex-wrap items-center gap-1.5;
 }
 
 /* Native `.cs` category buttons: the site's hue, re-tinted for a dark theme. The lightness and
@@ -663,7 +664,8 @@ input[type="radio"] {
   @apply ml-0.5 border border-dashed border-line-strong bg-transparent px-2.5 text-muted;
 }
 
-.quick-tag-edit:hover {
+.quick-tag-edit:hover,
+.tag-chip:hover {
   @apply border-accent text-fg;
 }
 
@@ -711,16 +713,8 @@ input[type="radio"] {
   @apply w-fit rounded-control border border-line bg-surface;
 }
 
-.filters[open] {
-  @apply w-full;
-}
-
 .filters-summary {
   @apply flex cursor-pointer select-none items-center gap-2 px-3 py-2.5 text-control text-muted;
-}
-
-.filters-summary:hover {
-  @apply text-fg;
 }
 
 .filters-count {
@@ -781,7 +775,9 @@ input[type="radio"] {
 
 /* Native-only escape hatches: file search and the site's own settings form. */
 .filters-native,
-.settings-native {
+.settings-native,
+.pager-info,
+.pager-jump-label {
   @apply text-meta text-muted;
 }
 
@@ -827,7 +823,8 @@ input[type="radio"] {
 
 /* The site's list thumbnails already carry the gallery's own aspect; cropping them to 5:7
    upscaled every landscape cover. */
-.card-cover img {
+.card-cover img,
+.gallery-cover img {
   @apply block h-auto w-full;
 }
 
@@ -877,10 +874,6 @@ input[type="radio"] {
   @apply line-clamp-2 font-semibold;
 }
 
-.card-artist {
-  @apply text-muted;
-}
-
 .card-secondary {
   @apply block truncate text-meta text-muted;
 }
@@ -927,10 +920,6 @@ input[type="radio"] {
 
 .gallery-cover {
   @apply w-[250px] overflow-hidden rounded-control border border-line-strong bg-surface;
-}
-
-.gallery-cover img {
-  @apply block h-auto w-full;
 }
 
 .gallery-cover.is-missing {
@@ -1160,10 +1149,6 @@ input[type="radio"] {
   border-color: var(--ns-color, var(--color-line));
 }
 
-.tag-chip:hover {
-  @apply border-accent text-fg;
-}
-
 .tag-chip-wrap {
   @apply inline-flex items-stretch;
 }
@@ -1197,10 +1182,6 @@ input[type="radio"] {
   border-style: dashed;
   text-decoration: line-through;
   opacity: 0.85;
-}
-
-.tag-chip.is-added.is-or {
-  border-style: dashed;
 }
 
 .ns-artist {
@@ -1291,10 +1272,6 @@ input[type="radio"] {
   @apply h-7 px-3 text-control no-underline;
 }
 
-.pager-info {
-  @apply text-meta text-muted;
-}
-
 .pager-nums {
   @apply flex flex-wrap items-center justify-center gap-1;
 }
@@ -1321,16 +1298,6 @@ input[type="radio"] {
 .settings-jump-link,
 .toplist-jump-link {
   @apply inline-flex h-6 shrink-0 items-center rounded-row px-2 no-underline transition-colors;
-}
-
-.settings-jump-link:hover,
-.toplist-jump-link:hover {
-  @apply bg-panel-hover text-fg;
-}
-
-.settings-jump-link[aria-current],
-.toplist-jump-link[aria-current] {
-  @apply text-fg;
 }
 
 /* --------------------------------------------------------- infinite scroll */
@@ -1373,10 +1340,6 @@ input[type="radio"] {
 
 .fav-dot {
   @apply size-2 shrink-0 rounded-full;
-}
-
-.fav-name {
-  @apply truncate;
 }
 
 /* The folder the gallery already sits in: the picker says which choice is a no-op. */
@@ -1551,7 +1514,8 @@ body.is-loading .eh-loading {
     padding: 12px 14px 10px;
   }
 
-  .topbar-kbd {
+  .topbar-kbd,
+  .tag-combobox-hints {
     @apply hidden;
   }
 
@@ -1561,16 +1525,14 @@ body.is-loading .eh-loading {
     padding: 0;
   }
 
-  .topbar-search-submit-label {
+  .topbar-search-submit-label,
+  .search-filters::-webkit-scrollbar,
+  .gallery-meta .meta-dot + .meta-dot::before {
     display: none;
   }
 
   .topbar-search-submit-icon {
     @apply inline-flex;
-  }
-
-  .tag-combobox-hints {
-    @apply hidden;
   }
 
   /* Keep the active filters to one row on a phone. Wrapping made a long query grow the sticky
@@ -1581,10 +1543,6 @@ body.is-loading .eh-loading {
     overscroll-behavior-x: contain;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
-  }
-
-  .search-filters::-webkit-scrollbar {
-    display: none;
   }
 
   .search-filters .term-chip {
@@ -1611,10 +1569,6 @@ body.is-loading .eh-loading {
      separated by space alone. */
   .gallery-meta .meta-dot {
     padding-left: 0;
-  }
-
-  .gallery-meta .meta-dot + .meta-dot::before {
-    display: none;
   }
 
   .gallery-meta {
@@ -1654,10 +1608,6 @@ body.is-loading .eh-loading {
   @apply flex items-center gap-1.5;
 }
 
-.pager-jump-label {
-  @apply text-meta text-muted;
-}
-
 .pager-jump-input {
   @apply h-7 w-16 px-2;
 }
@@ -1667,14 +1617,6 @@ body.is-loading .eh-loading {
 }
 
 /* --------------------------------------------------------- search history */
-
-.topbar-history {
-  @apply mr-1 size-6 shrink-0;
-}
-
-.topbar-history[aria-expanded="true"] {
-  @apply bg-panel-hover text-fg;
-}
 
 .search-history {
   @apply flex max-h-[min(70vh,520px)] w-[min(360px,calc(100vw-16px))] flex-col gap-2 overflow-y-auto p-3;
@@ -1726,11 +1668,6 @@ body.is-loading .eh-loading {
 
 .search-history-edit {
   @apply cursor-pointer self-start border-0 bg-transparent p-0 text-meta text-muted underline-offset-2;
-}
-
-.search-history-edit:hover,
-.search-history-edit:focus-visible {
-  @apply text-fg underline;
 }
 
 .search-history-clear {

@@ -3934,53 +3934,6 @@ ${defaultKeySummary()}`)) {
     return el("div", { class: "list-header" }, el("div", { class: "list-heading" }, el("h1", { text: title })), el("div", { class: "list-summary" }, ...summary));
   }
 
-  // src/ui/error-text.ts
-  function errorText(error, fallback = "Something went wrong.") {
-    return error instanceof Error ? error.message : fallback;
-  }
-
-  // src/ui/pending-action.ts
-  function createPendingAction() {
-    let running = false;
-    return {
-      get busy() {
-        return running;
-      },
-      async run(hooks) {
-        if (running) {
-          return false;
-        }
-        running = true;
-        hooks.setBusy?.(true);
-        let recover = false;
-        try {
-          let result;
-          try {
-            result = await hooks.run();
-          } catch (error) {
-            if (hooks.signal.aborted) {
-              return false;
-            }
-            hooks.failed?.(errorText(error, hooks.failure ?? "The action failed."));
-            recover = true;
-            return false;
-          }
-          if (hooks.signal.aborted) {
-            return false;
-          }
-          hooks.success?.(result);
-          return true;
-        } finally {
-          running = false;
-          hooks.setBusy?.(false);
-          if (recover) {
-            hooks.recover?.()?.focus();
-          }
-        }
-      }
-    };
-  }
-
   // src/data/search-history.ts
   var HISTORY_KEY = "eh:search-history:v1";
   var VERSION3 = 1;
@@ -6813,6 +6766,104 @@ ${defaultKeySummary()}`)) {
     return element;
   }
 
+  // src/ui/page-scaffold.ts
+  function pageScaffold(host, options) {
+    host.replaceChildren(siteNav(options.signal), listHeader({ title: options.title, summary: options.summary }));
+    return host;
+  }
+  function galleryBackLink(href, className) {
+    return el("a", { class: className, href, text: "Back to gallery" });
+  }
+
+  // src/ui/error-text.ts
+  function errorText(error, fallback = "Something went wrong.") {
+    return error instanceof Error ? error.message : fallback;
+  }
+
+  // src/ui/pending-action.ts
+  function createPendingAction() {
+    let running = false;
+    return {
+      get busy() {
+        return running;
+      },
+      async run(hooks) {
+        if (running) {
+          return false;
+        }
+        running = true;
+        hooks.setBusy?.(true);
+        let recover = false;
+        try {
+          let result;
+          try {
+            result = await hooks.run();
+          } catch (error) {
+            if (hooks.signal.aborted) {
+              return false;
+            }
+            hooks.failed?.(errorText(error, hooks.failure ?? "The action failed."));
+            recover = true;
+            return false;
+          }
+          if (hooks.signal.aborted) {
+            return false;
+          }
+          hooks.success?.(result);
+          return true;
+        } finally {
+          running = false;
+          hooks.setBusy?.(false);
+          if (recover) {
+            hooks.recover?.()?.focus();
+          }
+        }
+      }
+    };
+  }
+
+  // src/ui/state-panel.ts
+  function nativePageAction(href = nativeUrl()) {
+    return { label: "Open native page", href, native: true };
+  }
+  function nativeEmptyPanel(text) {
+    return statePanel({ text, actions: [nativePageAction()] });
+  }
+  function actionNode(action) {
+    const classes = action.primary === true ? "btn btn-primary" : "btn";
+    if (action.href !== undefined) {
+      return el("a", {
+        class: classes,
+        href: action.href,
+        "data-native": action.native === true ? "" : null
+      }, action.label);
+    }
+    return buttonEl({ class: classes, text: action.label, onclick: action.onClick });
+  }
+  function statePanel(options) {
+    const tone = options.tone ?? "empty";
+    const children = [];
+    if (tone === "error") {
+      children.push(el("div", { class: "state-icon", "aria-hidden": "true" }, icon("warning")));
+    }
+    if (options.title !== undefined) {
+      const heading = (options.headingLevel ?? 2) === 1 ? "h1" : "h2";
+      children.push(el(heading, { class: "state-title", text: options.title }));
+    }
+    children.push(el("p", { class: "state-text", text: options.text }));
+    if (options.detail !== undefined) {
+      children.push(el("p", { class: "state-text", text: options.detail }));
+    }
+    const actions = options.actions ?? [];
+    if (actions.length > 0) {
+      children.push(el("div", { class: "state-actions" }, ...actions.map(actionNode)));
+    }
+    return el("div", {
+      class: tone === "error" ? "error-view" : "empty-state",
+      role: tone === "error" ? "alert" : null
+    }, ...children);
+  }
+
   // src/views/archive.ts
   function optionTitle(option) {
     return option.kind === "original" ? "Original archive" : "Resampled archive";
@@ -6894,7 +6945,7 @@ ${defaultKeySummary()}`)) {
   function galleryLinks2(data) {
     const links = [];
     if (data.galleryHref !== null) {
-      links.push(el("a", { class: "meta-link", href: data.galleryHref, text: "Back to gallery" }));
+      links.push(galleryBackLink(data.galleryHref, "meta-link"));
     }
     if (data.torrentsHref !== null) {
       links.push(el("a", { class: "meta-link", href: data.torrentsHref, text: "Torrents" }));
@@ -6915,7 +6966,6 @@ ${defaultKeySummary()}`)) {
     return el("p", { class: "archive-funds", text: `Available: ${parts.join(" · ")}` });
   }
   function renderArchive(host, data, ctx, deps = {}) {
-    host.replaceChildren();
     const startDownload = deps.startDownload ?? startArchiveDownload;
     const openDownload = deps.openDownload ?? ((href) => {
       window.location.href = href;
@@ -6925,25 +6975,21 @@ ${defaultKeySummary()}`)) {
     const handoff = { locked: false };
     const options = [data.original, data.resample].filter((option) => option !== null);
     const grid = el("div", { class: "archive-options" }, ...options.map((option) => optionCard(option, ctx, controls, pending, handoff, startDownload, openDownload)));
-    const empty = options.length === 0 ? el("div", { class: "empty-state" }, el("p", { class: "state-title", text: "No archive options" }), el("p", {
-      class: "state-text",
+    const empty = options.length === 0 ? statePanel({
+      title: "No archive options",
       text: "The site did not offer an archive for this gallery."
-    })) : null;
+    }) : null;
+    const native = nativePageAction(nativeUrl(data.url));
+    pageScaffold(host, {
+      title: data.title === "" ? "Archive Download" : data.title,
+      summary: [el("span", { class: "badge", text: "Archive Download" })],
+      signal: ctx.signal
+    });
     appendChildren(host, [
-      siteNav(ctx.signal),
-      listHeader({
-        title: data.title === "" ? "Archive Download" : data.title,
-        summary: [el("span", { class: "badge", text: "Archive Download" })]
-      }),
       fundsLine(data.funds) ?? null,
       empty ?? grid,
       galleryLinks2(data) ?? null,
-      el("div", { class: "archive-footer" }, el("a", {
-        class: "btn btn-ghost",
-        href: nativeUrl(data.url),
-        "data-native": "",
-        text: "Open native page"
-      }))
+      el("div", { class: "archive-footer" }, el("a", { class: "btn btn-ghost", href: native.href, "data-native": "", text: native.label }))
     ]);
   }
 
@@ -7317,48 +7363,6 @@ ${defaultKeySummary()}`)) {
       rows.push(el("span", { text: countText(item.pages, "page") }));
     }
     return rows;
-  }
-
-  // src/ui/state-panel.ts
-  function nativePageAction(href = nativeUrl()) {
-    return { label: "Open native page", href, native: true };
-  }
-  function nativeEmptyPanel(text) {
-    return statePanel({ text, actions: [nativePageAction()] });
-  }
-  function actionNode(action) {
-    const classes = action.primary === true ? "btn btn-primary" : "btn";
-    if (action.href !== undefined) {
-      return el("a", {
-        class: classes,
-        href: action.href,
-        "data-native": action.native === true ? "" : null
-      }, action.label);
-    }
-    return buttonEl({ class: classes, text: action.label, onclick: action.onClick });
-  }
-  function statePanel(options) {
-    const tone = options.tone ?? "empty";
-    const children = [];
-    if (tone === "error") {
-      children.push(el("div", { class: "state-icon", "aria-hidden": "true" }, icon("warning")));
-    }
-    if (options.title !== undefined) {
-      const heading = (options.headingLevel ?? 2) === 1 ? "h1" : "h2";
-      children.push(el(heading, { class: "state-title", text: options.title }));
-    }
-    children.push(el("p", { class: "state-text", text: options.text }));
-    if (options.detail !== undefined) {
-      children.push(el("p", { class: "state-text", text: options.detail }));
-    }
-    const actions = options.actions ?? [];
-    if (actions.length > 0) {
-      children.push(el("div", { class: "state-actions" }, ...actions.map(actionNode)));
-    }
-    return el("div", {
-      class: tone === "error" ? "error-view" : "empty-state",
-      role: tone === "error" ? "alert" : null
-    }, ...children);
   }
 
   // src/ui/login-gate.ts
@@ -7890,7 +7894,6 @@ ${defaultKeySummary()}`)) {
     });
   }
   function renderFavorites(host, data, ctx, deps) {
-    host.replaceChildren();
     const labels = favoritesLabels(data);
     const remove = deps?.remove ?? deleteFavorites;
     const move = deps?.move ?? moveFavorites;
@@ -8074,10 +8077,6 @@ ${defaultKeySummary()}`)) {
     tabs.prepend(folderTab("All", allCount, folderHref(data.url, "all"), data.active === "all"));
     const order = el("div", { class: "favorites-order", role: "group", "aria-label": "Sort favorites" }, el("span", { class: "favorites-order-label", text: "Order:" }), orderLink(data.url, "published", "Published Time", data.active, data.order), orderLink(data.url, "favorited", "Favorited Time", data.active, data.order));
     const toolbar = el("div", { class: "favorites-toolbar" }, data.items.length > 0 ? el("label", { class: "check text-control" }, selectAll, el("span", { text: "Select all on this page" })) : null);
-    const header = listHeader({
-      title: labels.heading,
-      summary: [el("span", { text: summaryText(data) })]
-    });
     const footer = data.items.length === 0 ? statePanel({
       text: data.active === "all" ? "You have no favorites yet." : "This folder has no favorites yet.",
       actions: [
@@ -8113,7 +8112,12 @@ ${defaultKeySummary()}`)) {
       }
       ctx.navigate(`${url.pathname}${url.search}`);
     }, { signal: ctx.signal });
-    host.append(siteNav(ctx.signal), header, search, tabs, order, toolbar);
+    pageScaffold(host, {
+      title: labels.heading,
+      summary: [el("span", { text: summaryText(data) })],
+      signal: ctx.signal
+    });
+    host.append(search, tabs, order, toolbar);
     if (data.items.length > 0) {
       host.append(grid.element);
       grid.refresh();
@@ -10114,27 +10118,15 @@ ${defaultKeySummary()}`)) {
     }, { signal: ctx.signal });
     return el("article", { class: "gallery-torrent-card" }, el("div", { class: "gallery-torrent-head" }, title, button), el("div", { class: "gallery-torrent-meta" }, metaItem("Posted", torrent.posted), metaItem("Size", torrent.size), metaItem("Seeds", String(torrent.seeds)), metaItem("Peers", String(torrent.peers)), metaItem("Downloads", String(torrent.downloads)), metaItem("Uploader", torrent.uploader)), detailsSlot);
   }
-  function backLink(page) {
-    if (page.galleryHref === null) {
-      return null;
-    }
-    return el("a", {
-      class: "gallery-torrents-back",
-      href: page.galleryHref,
-      text: "Back to gallery"
-    });
-  }
   function renderGalleryTorrents(host, data, ctx, deps = {}) {
-    host.replaceChildren();
     const loadInfo = deps.loadInfo ?? loadTorrentInfo;
-    const root = el("div", { id: "gallery-torrents", class: "gallery-torrents" }, siteNav(ctx.signal));
-    root.append(listHeader({
+    const root = pageScaffold(el("div", { id: "gallery-torrents", class: "gallery-torrents" }), {
       title: data.title === "" ? "Gallery torrents" : data.title,
-      summary: [el("span", { text: countText(data.torrents.length, "torrent") })]
-    }));
-    const back = backLink(data);
-    if (back !== null) {
-      root.append(back);
+      summary: [el("span", { text: countText(data.torrents.length, "torrent") })],
+      signal: ctx.signal
+    });
+    if (data.galleryHref !== null) {
+      root.append(galleryBackLink(data.galleryHref, "gallery-torrents-back"));
     }
     if (data.torrents.length === 0) {
       root.append(nativeEmptyPanel("No torrents were found for this gallery."));
@@ -10145,7 +10137,7 @@ ${defaultKeySummary()}`)) {
       }
       root.append(list);
     }
-    host.append(root);
+    host.replaceChildren(root);
   }
 
   // src/views/home.ts
@@ -10187,8 +10179,11 @@ ${defaultKeySummary()}`)) {
     return card;
   }
   function renderHome(host, data, ctx) {
-    host.replaceChildren();
-    host.append(siteNav(ctx.signal), listHeader({ title: "My Home", summary: [el("span", { text: "Account overview" })] }));
+    pageScaffold(host, {
+      title: "My Home",
+      summary: [el("span", { text: "Account overview" })],
+      signal: ctx.signal
+    });
     const nav = navStrip(data);
     if (nav !== null) {
       host.append(nav);
@@ -10393,73 +10388,43 @@ ${defaultKeySummary()}`)) {
     }
     return row;
   }
-  function narrowCount(query) {
-    let count = 0;
-    if (query.rating > 0) {
-      count++;
-    }
-    if (query.expunged) {
-      count++;
-    }
-    if (query.torrent) {
-      count++;
-    }
-    if (query.pageFrom.trim() || query.pageTo.trim()) {
-      count++;
-    }
-    if (isDateRangeActive({ since: query.since, until: query.until })) {
-      count++;
-    }
-    return count;
-  }
-  function relaxedCount(query) {
-    let count = 0;
-    if (query.disableLanguage) {
-      count++;
-    }
-    if (query.disableUploader) {
-      count++;
-    }
-    if (query.disableTags) {
-      count++;
-    }
-    return count;
-  }
-  function activeFilterLabels(query) {
-    const labels = [];
-    if (query.rating > 0) {
-      labels.push(`${query.rating}★ minimum`);
-    }
-    const pageFrom = query.pageFrom.trim();
-    const pageTo = query.pageTo.trim();
-    if (pageFrom !== "" || pageTo !== "") {
-      labels.push(pageFrom !== "" && pageTo !== "" ? `${pageFrom}–${pageTo} pages` : pageFrom !== "" ? `${pageFrom}+ pages` : `≤${pageTo} pages`);
-    }
-    if (isDateRangeActive({ since: query.since, until: query.until })) {
-      const since = query.since.trim();
-      const until = query.until.trim();
-      labels.push(since !== "" && until !== "" ? `Posted ${since} – ${until}` : since !== "" ? `Posted from ${since}` : `Posted until ${until}`);
-    }
-    if (query.expunged) {
-      labels.push("Expunged included");
-    }
-    if (query.torrent) {
-      labels.push("Torrent required");
-    }
-    if (query.disableLanguage) {
-      labels.push("Language filter off");
-    }
-    if (query.disableUploader) {
-      labels.push("Uploader filter off");
-    }
-    if (query.disableTags) {
-      labels.push("Tag filter off");
-    }
-    return labels;
+  var LIST_FILTERS = [
+    {
+      active: (query) => query.rating > 0,
+      label: (query) => `${query.rating}★ minimum`
+    },
+    {
+      active: (query) => query.pageFrom.trim() !== "" || query.pageTo.trim() !== "",
+      label: (query) => {
+        const from = query.pageFrom.trim();
+        const to = query.pageTo.trim();
+        return from !== "" && to !== "" ? `${from}–${to} pages` : from !== "" ? `${from}+ pages` : `≤${to} pages`;
+      }
+    },
+    {
+      active: (query) => isDateRangeActive({ since: query.since, until: query.until }),
+      label: (query) => {
+        const since = query.since.trim();
+        const until = query.until.trim();
+        return since !== "" && until !== "" ? `Posted ${since} – ${until}` : since !== "" ? `Posted from ${since}` : `Posted until ${until}`;
+      }
+    },
+    { active: (query) => query.expunged, label: () => "Expunged included" },
+    { active: (query) => query.torrent, label: () => "Torrent required" },
+    { active: (query) => query.disableLanguage, label: () => "Language filter off", relaxed: true },
+    { active: (query) => query.disableUploader, label: () => "Uploader filter off", relaxed: true },
+    { active: (query) => query.disableTags, label: () => "Tag filter off", relaxed: true }
+  ];
+  function activeFilters(query) {
+    return LIST_FILTERS.filter((filter) => filter.active(query)).map((filter) => ({
+      label: filter.label(query),
+      relaxed: filter.relaxed === true
+    }));
   }
   function advancedPanel(query, ctx) {
-    const activeCount = narrowCount(query) + relaxedCount(query);
-    const activeLabels = activeFilterLabels(query);
+    const active = activeFilters(query);
+    const activeCount = active.length;
+    const activeLabels = active.map((filter) => filter.label);
     const rating = createSelect({
       class: "field-select",
       ariaLabel: "Minimum rating",
@@ -10598,8 +10563,9 @@ ${defaultKeySummary()}`)) {
       quickTags?.refresh(state.text);
     });
     ctx.signal.addEventListener("abort", unsubscribe, { once: true });
-    const narrow = narrowCount(urlQuery);
-    const relaxed = relaxedCount(urlQuery);
+    const active = activeFilters(urlQuery);
+    const narrow = active.filter((filter) => !filter.relaxed).length;
+    const relaxed = active.length - narrow;
     const range = { since: urlQuery.since, until: urlQuery.until };
     const rangeActive = isDateRangeActive(range);
     const shownItems = data.items;
@@ -10908,7 +10874,6 @@ ${defaultKeySummary()}`)) {
     }), ".");
   }
   function renderMyTags(host, data, ctx, deps) {
-    host.replaceChildren();
     const api = writableApi(data);
     const load = deps?.loadDocument ?? ((url, options) => loader.document(url, options));
     const filter = searchInput({
@@ -11076,10 +11041,12 @@ ${defaultKeySummary()}`)) {
       }));
     }
     page.append(noMatch);
-    host.append(siteNav(ctx.signal), listHeader({
+    pageScaffold(host, {
       title: "My Tags",
-      summary: [el("span", { class: "my-tags-count", text: countText(data.tags.length, "tag") })]
-    }), page);
+      summary: [el("span", { class: "my-tags-count", text: countText(data.tags.length, "tag") })],
+      signal: ctx.signal
+    });
+    host.append(page);
   }
 
   // src/ui/settings-draft.ts
@@ -11132,6 +11099,19 @@ ${defaultKeySummary()}`)) {
     };
     capture();
     return draft;
+  }
+
+  // src/ui/settings-field.ts
+  function bindValue(bindings, key, read, write) {
+    bindings.push({ key, read, write });
+  }
+  function labeledField(label, control, hint = "") {
+    return el("div", { class: "settings-field" }, el("label", { class: "eyebrow", for: control.id, text: label }), control, hint === "" ? null : el("p", { class: "settings-hint", text: hint }));
+  }
+  function labeledRow(label, control, hint = "") {
+    const caption = el("label", { for: control.id, text: label });
+    const body = hint === "" ? caption : el("div", { class: "settings-row-text" }, caption, el("p", { class: "settings-hint", text: hint }));
+    return el("div", { class: "settings-row" }, control, body);
   }
 
   // src/ui/settings-panel.ts
@@ -11430,73 +11410,53 @@ ${defaultKeySummary()}`)) {
     }
     function renderBooleanFields() {
       const items = BOOLEAN_FIELDS.map(({ key, label, hint }) => {
-        const control = createCheckbox({
-          id: `settings-userscript-${key}`,
-          checked: synced[key]
-        });
+        const id = `settings-userscript-${key}`;
+        const control = createCheckbox({ id, checked: synced[key] });
         toggles.set(key, control);
-        bindings.push({
-          key,
-          read: control.readChecked,
-          write: control.writeChecked
-        });
-        return el("div", { class: "settings-row" }, control.element, el("div", { class: "settings-row-text" }, el("label", { for: `settings-userscript-${key}`, text: label }), el("span", { class: "settings-hint", text: hint })));
+        bindValue(bindings, key, control.readChecked, control.writeChecked);
+        return labeledRow(label, control.element, hint);
       });
       return el("div", { class: "settings-rows settings-rows-roomy" }, ...items);
     }
     function renderSelectFields() {
       const items = SELECT_FIELDS.map((field) => {
+        const id = `settings-userscript-${field.key}`;
         const control = createSelect({
           class: "field-select settings-select",
-          id: `settings-userscript-${field.key}`,
+          id,
           value: synced[field.key],
           options: field.options
         });
         selects.set(field.key, control);
-        bindings.push({
-          key: field.key,
-          read: control.read,
-          write: control.write
-        });
-        return el("div", { class: "settings-field" }, el("label", {
-          class: "eyebrow",
-          for: `settings-userscript-${field.key}`,
-          text: field.label
-        }), control.element, el("span", { class: "settings-hint", text: field.hint }));
+        bindValue(bindings, field.key, control.read, control.write);
+        return labeledField(field.label, control.element, field.hint);
       });
       return el("div", { class: "settings-number-grid" }, ...items);
     }
     function renderNumberFields() {
       const items = NUMBER_FIELDS.map((field) => {
+        const id = `settings-userscript-${field.key}`;
         const input = el("input", {
           class: "field-input settings-number-input",
           type: "number",
-          id: `settings-userscript-${field.key}`,
+          id,
           min: field.min,
           max: field.max,
           step: 1,
           inputmode: "numeric"
         });
         numbers.set(field, input);
-        bindings.push({
-          key: field.key,
-          read: () => {
-            const raw = input.value.trim();
-            if (raw === "") {
-              return synced[field.key];
-            }
-            const parsed = Number(raw);
-            return Number.isFinite(parsed) ? clampNumber(field.key, parsed) : synced[field.key];
-          },
-          write: (value) => {
-            input.value = String(value);
+        bindValue(bindings, field.key, () => {
+          const raw = input.value.trim();
+          if (raw === "") {
+            return synced[field.key];
           }
+          const parsed = Number(raw);
+          return Number.isFinite(parsed) ? clampNumber(field.key, parsed) : synced[field.key];
+        }, (value) => {
+          input.value = String(value);
         });
-        return el("div", { class: "settings-field" }, el("label", {
-          class: "eyebrow",
-          for: `settings-userscript-${field.key}`,
-          text: field.label
-        }), input, el("span", { class: "settings-hint", text: field.hint }));
+        return labeledField(field.label, input, field.hint);
       });
       return el("div", { class: "settings-number-grid" }, ...items);
     }
@@ -11624,13 +11584,9 @@ ${defaultKeySummary()}`)) {
   function fieldId(sectionIndex, fieldIndex) {
     return `setting-${sectionIndex}-${fieldIndex}`;
   }
-  function labeledField(field, id, control, sectionTitle) {
+  function fieldText2(field, sectionTitle) {
     const label = field.label ?? (sectionTitle !== "" ? sectionTitle : humanize(field.name));
-    const hint = field.prompt !== "" && field.prompt !== label ? field.prompt : "";
-    return el("div", { class: "settings-field" }, el("label", { class: "eyebrow", for: id, text: label }), control, hint === "" ? null : el("p", { class: "settings-hint", text: hint }));
-  }
-  function bindValue(bindings, key, read, write) {
-    bindings.push({ key, read, write });
+    return { label, hint: field.prompt !== "" && field.prompt !== label ? field.prompt : "" };
   }
   function radioGroup(field, id, bindings) {
     const choices = [];
@@ -11663,7 +11619,7 @@ ${defaultKeySummary()}`)) {
       disabled: field.disabled
     });
     bindValue(bindings, field.name, control.readValue, control.writeValue);
-    return el("div", { class: "settings-row" }, control.element, el("label", { for: id, text: field.label ?? humanize(field.name) }));
+    return labeledRow(field.label ?? humanize(field.name), control.element);
   }
   function checkboxGroup(group, sectionIndex, bindings) {
     const items = group.map(({ field, index }) => checkboxItem(field, fieldId(sectionIndex, index), bindings));
@@ -11687,7 +11643,8 @@ ${defaultKeySummary()}`)) {
       }))
     });
     bindValue(bindings, field.name, control.read, control.write);
-    return labeledField(field, id, control.element, sectionTitle);
+    const { label, hint } = fieldText2(field, sectionTitle);
+    return labeledField(label, control.element, hint);
   }
   function textField2(field, id, bindings, sectionTitle) {
     const input = el("input", {
@@ -11703,7 +11660,8 @@ ${defaultKeySummary()}`)) {
     bindValue(bindings, field.name, () => input.value, (value) => {
       input.value = value;
     });
-    return labeledField(field, id, input, sectionTitle);
+    const { label, hint } = fieldText2(field, sectionTitle);
+    return labeledField(label, input, hint);
   }
   function textareaField2(field, id, bindings, sectionTitle) {
     const textarea = el("textarea", {
@@ -11717,7 +11675,8 @@ ${defaultKeySummary()}`)) {
     bindValue(bindings, field.name, () => textarea.value, (value) => {
       textarea.value = value;
     });
-    return labeledField(field, id, textarea, sectionTitle);
+    const { label, hint } = fieldText2(field, sectionTitle);
+    return labeledField(label, textarea, hint);
   }
   function hiddenField2(field, bindings) {
     const input = el("input", { type: "hidden", name: field.name, value: field.value });
@@ -12095,11 +12054,11 @@ ${defaultKeySummary()}`)) {
     return nodes;
   }
   function renderToplist(host, data, ctx) {
-    host.replaceChildren();
-    host.append(siteNav(ctx.signal), listHeader({
+    pageScaffold(host, {
       title: data.kind === "category" ? data.title : "Toplists",
-      summary: [el("span", { text: summary(data) })]
-    }));
+      summary: [el("span", { text: summary(data) })],
+      signal: ctx.signal
+    });
     if (data.tabs.length > 0) {
       host.append(tabStrip(data.tabs));
     }
@@ -12354,14 +12313,14 @@ ${defaultKeySummary()}`)) {
     return el("table", { class: "torrent-table" }, el("caption", { class: "sr-only", text: "Torrents" }), tableHead(data), body);
   }
   function renderTorrents(host, data, ctx) {
-    host.replaceChildren();
-    const header = listHeader({
+    pageScaffold(host, {
       title: "Torrents",
       summary: [
         el("span", {
           text: data.summary ?? countText(data.rows.length, "torrent")
         })
-      ]
+      ],
+      signal: ctx.signal
     });
     const filtered = data.search !== "" || data.status !== "all" || data.uploaderFilter !== null;
     const body = data.rows.length === 0 ? statePanel({
@@ -12371,7 +12330,7 @@ ${defaultKeySummary()}`)) {
         nativePageAction()
       ]
     }) : el("div", { class: "torrent-table-wrap" }, torrentTable(data));
-    host.append(siteNav(ctx.signal), header, filterBar(data, ctx), body);
+    host.append(filterBar(data, ctx), body);
     const total = data.pages[data.pages.length - 1] ?? data.page;
     if (total > 1) {
       host.append(numberedPager({
@@ -13006,6 +12965,17 @@ ${defaultKeySummary()}`)) {
         last: source.lastHref !== null
       });
     };
+    const navigateEnd = (base, end) => {
+      if (base === null) {
+        return;
+      }
+      const target = end === "first" ? base.firstHref : base.lastHref;
+      if (target !== null) {
+        options.navigate(target, { replace: true });
+        return;
+      }
+      options.toast(end === "first" ? "First page" : "Last page");
+    };
     const singleAdapter = () => {
       let base = null;
       let slot = null;
@@ -13042,21 +13012,10 @@ ${defaultKeySummary()}`)) {
         }
         options.toast(direction === "prev" ? "First page" : "Last page");
       };
-      const goEnd = (end) => {
-        if (base === null) {
-          return;
-        }
-        const target = end === "first" ? base.firstHref : base.lastHref;
-        if (target !== null) {
-          options.navigate(target, { replace: true });
-          return;
-        }
-        options.toast(end === "first" ? "First page" : "Last page");
-      };
       return {
         show,
         go,
-        goEnd,
+        goEnd: (end) => navigateEnd(base, end),
         reload: () => slot?.reload() ?? false,
         upgrade: (level) => surface?.upgrade(level),
         surface: () => {
@@ -13211,21 +13170,10 @@ ${defaultKeySummary()}`)) {
           options.toast("First page");
         })();
       };
-      const goEnd = (end) => {
-        if (base === null) {
-          return;
-        }
-        const target = end === "first" ? base.firstHref : base.lastHref;
-        if (target !== null) {
-          options.navigate(target, { replace: true });
-          return;
-        }
-        options.toast(end === "first" ? "First page" : "Last page");
-      };
       return {
         show,
         go,
-        goEnd,
+        goEnd: (end) => navigateEnd(base, end),
         reload: () => mainSlot?.reload() ?? false,
         upgrade: (level) => surface?.upgrade(level),
         surface: () => {
@@ -13426,21 +13374,10 @@ ${defaultKeySummary()}`)) {
           scrollTo(index + 1);
         })();
       };
-      const goEnd = (end) => {
-        if (base === null) {
-          return;
-        }
-        const target = end === "first" ? base.firstHref : base.lastHref;
-        if (target !== null) {
-          options.navigate(target, { replace: true });
-          return;
-        }
-        options.toast(end === "first" ? "First page" : "Last page");
-      };
       return {
         show,
         go,
-        goEnd,
+        goEnd: (end) => navigateEnd(base, end),
         reload: () => surface?.reload() ?? false,
         upgrade: (level) => surface?.upgrade(level),
         surface: () => {
@@ -15093,10 +15030,6 @@ ${defaultKeySummary()}`)) {
     color: var(--color-muted);
     transition: color 0.15s, background-color 0.15s;
   }
-  .topbar-clear:hover, .topbar-history:hover, .quick-tag-remove:hover {
-    background-color: var(--color-panel-hover);
-    color: var(--color-fg);
-  }
   .topbar-tab:focus-visible, .term-toggle:focus-visible {
     outline-offset: -2px;
   }
@@ -15125,7 +15058,7 @@ ${defaultKeySummary()}`)) {
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
-  .rail-link:hover, .fav-item:hover, .favorites-move-item:hover, .favorites-order-link:hover, .topbar-more-link:hover, .toplist-tab:hover, .topbar-tab:hover, .action-menu-item:hover, .action-menu-item:focus-visible, .tag-menu-item:hover, .tag-menu-item:focus-visible {
+  .topbar-clear:hover, .topbar-history:hover, .quick-tag-remove:hover, .rail-link:hover, .fav-item:hover, .favorites-move-item:hover, .favorites-order-link:hover, .topbar-more-link:hover, .toplist-tab:hover, .topbar-tab:hover, .action-menu-item:hover, .action-menu-item:focus-visible, .tag-menu-item:hover, .tag-menu-item:focus-visible, .settings-jump-link:hover, .toplist-jump-link:hover, .topbar-history[aria-expanded="true"] {
     background-color: var(--color-panel-hover);
     color: var(--color-fg);
   }
@@ -15156,7 +15089,7 @@ ${defaultKeySummary()}`)) {
     color: var(--color-muted);
     text-underline-offset: 2px;
   }
-  .search-history-clear:hover, .search-history-clear:focus-visible, .comment-edit:hover, .comment-edit:focus-visible {
+  .search-history-clear:hover, .search-history-clear:focus-visible, .comment-edit:hover, .comment-edit:focus-visible, .search-history-edit:hover, .search-history-edit:focus-visible {
     color: var(--color-fg);
     text-decoration-line: underline;
   }
@@ -15207,7 +15140,7 @@ ${defaultKeySummary()}`)) {
     overscroll-behavior-x: contain;
     scrollbar-width: none;
   }
-  .settings-jump::-webkit-scrollbar, .toplist-jump::-webkit-scrollbar, .topbar-tabs::-webkit-scrollbar, .favorites-tabs::-webkit-scrollbar {
+  .settings-jump::-webkit-scrollbar, .toplist-jump::-webkit-scrollbar, .topbar-tabs::-webkit-scrollbar, .favorites-tabs::-webkit-scrollbar, .topbar-search-submit-icon {
     display: none;
   }
   .settings-jump, .toplist-jump, .topbar-tabs {
@@ -15262,7 +15195,7 @@ ${defaultKeySummary()}`)) {
     padding-top: calc(var(--spacing) * 3);
     padding-bottom: calc(var(--spacing) * 2.5);
   }
-  .topbar-filters {
+  .topbar-filters, .filters[open] {
     width: 100%;
   }
   .icon-btn {
@@ -15387,10 +15320,7 @@ ${defaultKeySummary()}`)) {
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
-  .topbar-search-submit-icon {
-    display: none;
-  }
-  .topbar-clear {
+  .topbar-clear, .topbar-history {
     margin-right: var(--spacing);
     width: calc(var(--spacing) * 6);
     height: calc(var(--spacing) * 6);
@@ -15436,7 +15366,7 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-meta);
     color: var(--color-muted);
   }
-  .search-filters {
+  .search-filters, .cat-row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -15459,7 +15389,7 @@ ${defaultKeySummary()}`)) {
       border-color: color-mix(in srgb, var(--color-accent) 70%, var(--color-line-strong));
     }
   }
-  .term-chip.is-or {
+  .term-chip.is-or, .tag-chip.is-added.is-or {
     border-style: dashed;
   }
   .term-toggle {
@@ -15476,7 +15406,7 @@ ${defaultKeySummary()}`)) {
     color: var(--color-muted);
     font: inherit;
   }
-  .term-toggle:hover {
+  .term-toggle:hover, .search-filters-clear:hover, .filters-summary:hover, .settings-jump-link[aria-current], .toplist-jump-link[aria-current] {
     color: var(--color-fg);
   }
   .term-sign {
@@ -15524,9 +15454,6 @@ ${defaultKeySummary()}`)) {
     padding-block: calc(var(--spacing) * 0.5);
     font-size: var(--text-meta);
     color: var(--color-muted);
-  }
-  .search-filters-clear:hover {
-    color: var(--color-fg);
   }
   .tag-combobox {
     position: fixed;
@@ -15641,7 +15568,7 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-micro);
     color: var(--color-muted);
   }
-  .tag-combobox-count {
+  .tag-combobox-count, .fav-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -15652,7 +15579,7 @@ ${defaultKeySummary()}`)) {
     align-items: center;
     gap: calc(var(--spacing) * 2);
   }
-  .tag-combobox-hints {
+  .tag-combobox-hints, .card-artist {
     color: var(--color-muted);
   }
   .tag-combobox-exclude {
@@ -15677,12 +15604,6 @@ ${defaultKeySummary()}`)) {
     border-color: var(--color-line);
     padding-top: calc(var(--spacing) * 2.5);
     padding-bottom: calc(var(--spacing) * 4);
-  }
-  .cat-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: calc(var(--spacing) * 1.5);
   }
   .cat-chip {
     padding-inline: calc(var(--spacing) * 3);
@@ -15752,7 +15673,7 @@ ${defaultKeySummary()}`)) {
     padding-inline: calc(var(--spacing) * 2.5);
     color: var(--color-muted);
   }
-  .quick-tag-edit:hover {
+  .quick-tag-edit:hover, .tag-chip:hover {
     border-color: var(--color-accent);
     color: var(--color-fg);
   }
@@ -15819,9 +15740,6 @@ ${defaultKeySummary()}`)) {
     border-color: var(--color-line);
     background-color: var(--color-surface);
   }
-  .filters[open] {
-    width: 100%;
-  }
   .filters-summary {
     display: flex;
     cursor: pointer;
@@ -15833,9 +15751,6 @@ ${defaultKeySummary()}`)) {
     color: var(--color-muted);
     -webkit-user-select: none;
     user-select: none;
-  }
-  .filters-summary:hover {
-    color: var(--color-fg);
   }
   .filters-count {
     display: inline-flex;
@@ -15922,7 +15837,7 @@ ${defaultKeySummary()}`)) {
     justify-content: flex-end;
     gap: calc(var(--spacing) * 2);
   }
-  .filters-native, .settings-native {
+  .filters-native, .settings-native, .pager-info, .pager-jump-label {
     font-size: var(--text-meta);
     color: var(--color-muted);
   }
@@ -15971,7 +15886,7 @@ ${defaultKeySummary()}`)) {
     display: block;
     background-color: var(--color-canvas);
   }
-  .card-cover img {
+  .card-cover img, .gallery-cover img {
     display: block;
     height: auto;
     width: 100%;
@@ -16032,9 +15947,6 @@ ${defaultKeySummary()}`)) {
     -webkit-line-clamp: 2;
     --tw-font-weight: var(--font-weight-semibold);
     font-weight: var(--font-weight-semibold);
-  }
-  .card-artist {
-    color: var(--color-muted);
   }
   .card-secondary {
     display: block;
@@ -16110,11 +16022,6 @@ ${defaultKeySummary()}`)) {
     border-width: 1px;
     border-color: var(--color-line-strong);
     background-color: var(--color-surface);
-  }
-  .gallery-cover img {
-    display: block;
-    height: auto;
-    width: 100%;
   }
   .gallery-cover.is-missing {
     display: grid;
@@ -16411,10 +16318,6 @@ ${defaultKeySummary()}`)) {
     transition-duration: var(--tw-duration, var(--default-transition-duration));
     border-color: var(--ns-color, var(--color-line));
   }
-  .tag-chip:hover {
-    border-color: var(--color-accent);
-    color: var(--color-fg);
-  }
   .tag-chip-wrap {
     display: inline-flex;
     align-items: stretch;
@@ -16458,9 +16361,6 @@ ${defaultKeySummary()}`)) {
     border-style: dashed;
     text-decoration: line-through;
     opacity: 0.85;
-  }
-  .tag-chip.is-added.is-or {
-    border-style: dashed;
   }
   .ns-artist {
     --ns-color: var(--ns-artist);
@@ -16557,10 +16457,6 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-control);
     text-decoration-line: none;
   }
-  .pager-info {
-    font-size: var(--text-meta);
-    color: var(--color-muted);
-  }
   .pager-nums {
     display: flex;
     flex-wrap: wrap;
@@ -16611,13 +16507,6 @@ ${defaultKeySummary()}`)) {
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
-  .settings-jump-link:hover, .toplist-jump-link:hover {
-    background-color: var(--color-panel-hover);
-    color: var(--color-fg);
-  }
-  .settings-jump-link[aria-current], .toplist-jump-link[aria-current] {
-    color: var(--color-fg);
-  }
   .infinite-scroll {
     display: flex;
     flex-direction: column;
@@ -16664,11 +16553,6 @@ ${defaultKeySummary()}`)) {
     height: calc(var(--spacing) * 2);
     flex-shrink: 0;
     border-radius: calc(infinity * 1px);
-  }
-  .fav-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .fav-item.is-current {
     background-color: var(--color-panel-hover);
@@ -16902,7 +16786,7 @@ ${defaultKeySummary()}`)) {
       margin: 0 -14px;
       padding: 12px 14px 10px;
     }
-    .topbar-kbd {
+    .topbar-kbd, .tag-combobox-hints {
       display: none;
     }
     .topbar-search-submit {
@@ -16914,14 +16798,11 @@ ${defaultKeySummary()}`)) {
       place-items: center;
       padding: 0;
     }
-    .topbar-search-submit-label {
+    .topbar-search-submit-label, .search-filters::-webkit-scrollbar, .gallery-meta .meta-dot + .meta-dot::before {
       display: none;
     }
     .topbar-search-submit-icon {
       display: inline-flex;
-    }
-    .tag-combobox-hints {
-      display: none;
     }
     .search-filters {
       flex-wrap: nowrap;
@@ -16929,9 +16810,6 @@ ${defaultKeySummary()}`)) {
       overscroll-behavior-x: contain;
       scrollbar-width: none;
       -webkit-overflow-scrolling: touch;
-    }
-    .search-filters::-webkit-scrollbar {
-      display: none;
     }
     .search-filters .term-chip {
       flex: 0 0 auto;
@@ -16950,9 +16828,6 @@ ${defaultKeySummary()}`)) {
     }
     .gallery-meta .meta-dot {
       padding-left: 0;
-    }
-    .gallery-meta .meta-dot + .meta-dot::before {
-      display: none;
     }
     .gallery-meta {
       column-gap: calc(var(--spacing) * 3);
@@ -16986,10 +16861,6 @@ ${defaultKeySummary()}`)) {
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
   }
-  .pager-jump-label {
-    font-size: var(--text-meta);
-    color: var(--color-muted);
-  }
   .pager-jump-input {
     height: calc(var(--spacing) * 7);
     width: calc(var(--spacing) * 16);
@@ -16997,16 +16868,6 @@ ${defaultKeySummary()}`)) {
   }
   .pager-seek-input {
     width: calc(var(--spacing) * 32);
-  }
-  .topbar-history {
-    margin-right: var(--spacing);
-    width: calc(var(--spacing) * 6);
-    height: calc(var(--spacing) * 6);
-    flex-shrink: 0;
-  }
-  .topbar-history[aria-expanded="true"] {
-    background-color: var(--color-panel-hover);
-    color: var(--color-fg);
   }
   .search-history {
     display: flex;
@@ -17103,10 +16964,6 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-meta);
     color: var(--color-muted);
     text-underline-offset: 2px;
-  }
-  .search-history-edit:hover, .search-history-edit:focus-visible {
-    color: var(--color-fg);
-    text-decoration-line: underline;
   }
   .search-history-clear {
     align-self: flex-start;
@@ -17864,7 +17721,7 @@ ${defaultKeySummary()}`)) {
       margin-top: 4px;
       color: var(--color-muted);
     }
-    .torrent-added::before, .torrent-gallery::before, .torrent-uploader::before {
+    .torrent-added::before, .torrent-gallery::before, .torrent-uploader::before, .torrent-size::before, .torrent-seeds::before, .torrent-peers::before, .torrent-downloads::before {
       color: var(--color-muted);
       content: attr(data-label) ": ";
     }
@@ -17875,10 +17732,6 @@ ${defaultKeySummary()}`)) {
     }
     .torrent-size, .torrent-seeds, .torrent-peers, .torrent-downloads {
       margin-right: 12px;
-    }
-    .torrent-size::before, .torrent-seeds::before, .torrent-peers::before, .torrent-downloads::before {
-      color: var(--color-muted);
-      content: attr(data-label) ": ";
     }
   }
   .favorites-search {
@@ -18080,11 +17933,7 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-control);
     color: var(--color-muted);
   }
-  .favorites-delete {
-    border-color: var(--color-accent-text);
-    color: var(--color-accent-text);
-  }
-  .favorites-delete:hover {
+  .favorites-delete, .favorites-delete:hover {
     border-color: var(--color-accent-text);
     color: var(--color-accent-text);
   }
@@ -18196,11 +18045,11 @@ ${defaultKeySummary()}`)) {
     align-items: baseline;
     gap: calc(var(--spacing) * 2);
   }
-  .rating-label {
+  .rating-label, .comment-status {
     font-size: var(--text-control);
     color: var(--color-muted);
   }
-  .rating-count {
+  .rating-count, .comment-posted {
     font-size: var(--text-meta);
     color: var(--color-muted);
   }
@@ -18208,7 +18057,7 @@ ${defaultKeySummary()}`)) {
     width: 240px;
     padding: calc(var(--spacing) * 3);
   }
-  .tag-menu {
+  .tag-menu, .comment-list {
     display: grid;
     gap: calc(var(--spacing) * 2);
   }
@@ -18263,7 +18112,7 @@ ${defaultKeySummary()}`)) {
     cursor: not-allowed;
     opacity: 40%;
   }
-  .tag-title {
+  .tag-title, .comments-title {
     font-size: var(--text-section);
     --tw-font-weight: var(--font-weight-semibold);
     font-weight: var(--font-weight-semibold);
@@ -18296,16 +18145,6 @@ ${defaultKeySummary()}`)) {
     border-color: var(--color-line);
     padding-top: calc(var(--spacing) * 5);
     padding-bottom: calc(var(--spacing) * 10);
-  }
-  .comments-title {
-    font-size: var(--text-section);
-    --tw-font-weight: var(--font-weight-semibold);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-fg);
-  }
-  .comment-list {
-    display: grid;
-    gap: calc(var(--spacing) * 2);
   }
   .comment {
     border-radius: var(--radius-control);
@@ -18341,10 +18180,6 @@ ${defaultKeySummary()}`)) {
     padding-block: 1px;
     font-size: var(--text-micro);
     color: var(--color-star);
-  }
-  .comment-posted {
-    font-size: var(--text-meta);
-    color: var(--color-muted);
   }
   .comment-score-wrap {
     margin-left: auto;
@@ -18406,7 +18241,7 @@ ${defaultKeySummary()}`)) {
     font-size: var(--text-meta);
     color: var(--color-muted);
   }
-  .comment-composer {
+  .comment-composer, .comment-edit-form {
     margin-top: var(--spacing);
     display: grid;
     gap: calc(var(--spacing) * 2);
@@ -18423,10 +18258,6 @@ ${defaultKeySummary()}`)) {
     align-items: center;
     gap: calc(var(--spacing) * 2);
   }
-  .comment-status {
-    font-size: var(--text-control);
-    color: var(--color-muted);
-  }
   .gallery-resume-group {
     display: inline-flex;
     min-width: 0px;
@@ -18440,11 +18271,6 @@ ${defaultKeySummary()}`)) {
     --tw-leading: 1;
     line-height: 1;
     color: var(--color-muted);
-  }
-  .comment-edit-form {
-    margin-top: var(--spacing);
-    display: grid;
-    gap: calc(var(--spacing) * 2);
   }
   .comment-edit-form .comment-input {
     width: 100%;
@@ -18721,17 +18547,17 @@ ${defaultKeySummary()}`)) {
     flex-direction: column;
     gap: calc(var(--spacing) * 4);
   }
-  .my-tags-toolbar {
+  .my-tags-toolbar, .my-tags-add-fields {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
     gap: calc(var(--spacing) * 3);
   }
-  .my-tags-filter-field {
+  .my-tags-filter-field, .my-tags-name-field {
     width: 220px;
     max-width: 100%;
   }
-  .my-tags-filter {
+  .my-tags-filter, .my-tags-name-field .field-input, .my-tags-weight-field .field-input, .my-tags-tagset-name-field .field-input, .my-tags-tagset-color-field .field-input {
     width: 100%;
   }
   .my-tags-count {
@@ -18755,7 +18581,7 @@ ${defaultKeySummary()}`)) {
     margin-left: var(--spacing);
     color: var(--color-accent-text);
   }
-  .my-tags-add {
+  .my-tags-add, .my-tags-row {
     display: flex;
     flex-direction: column;
     gap: calc(var(--spacing) * 2);
@@ -18772,19 +18598,6 @@ ${defaultKeySummary()}`)) {
     font-weight: var(--font-weight-semibold);
     color: var(--color-fg);
   }
-  .my-tags-add-fields {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: calc(var(--spacing) * 3);
-  }
-  .my-tags-name-field {
-    width: 220px;
-    max-width: 100%;
-  }
-  .my-tags-name-field .field-input {
-    width: 100%;
-  }
   .my-tags-hint {
     margin: 0px;
     font-size: var(--text-meta);
@@ -18797,16 +18610,6 @@ ${defaultKeySummary()}`)) {
     display: flex;
     flex-direction: column;
     gap: calc(var(--spacing) * 2);
-  }
-  .my-tags-row {
-    display: flex;
-    flex-direction: column;
-    gap: calc(var(--spacing) * 2);
-    border-style: var(--tw-border-style);
-    border-width: 1px;
-    border-color: var(--color-line);
-    background-color: var(--color-panel);
-    padding: calc(var(--spacing) * 3);
   }
   .my-tags-row-head {
     display: flex;
@@ -18837,9 +18640,6 @@ ${defaultKeySummary()}`)) {
   .my-tags-weight-field {
     width: 84px;
   }
-  .my-tags-weight-field .field-input {
-    width: 100%;
-  }
   .my-tags-color {
     height: calc(var(--spacing) * 8);
     width: calc(var(--spacing) * 12);
@@ -18860,7 +18660,7 @@ ${defaultKeySummary()}`)) {
     display: flex;
     justify-content: flex-end;
   }
-  .my-tags-error {
+  .my-tags-error, .my-tags-tagset-error {
     margin: 0px;
     font-size: var(--text-control);
     color: var(--color-danger-text);
@@ -18869,14 +18669,6 @@ ${defaultKeySummary()}`)) {
     margin: 0px;
     font-size: var(--text-control);
     color: var(--color-muted);
-  }
-  @media (max-width: 720px) {
-    .my-tags-filter-field, .my-tags-name-field {
-      width: 100%;
-    }
-    .my-tags-add-fields {
-      align-items: stretch;
-    }
   }
   .my-tags-tagsets {
     margin-top: calc(var(--spacing) * 3);
@@ -18920,9 +18712,6 @@ ${defaultKeySummary()}`)) {
   .my-tags-tagset-color-field {
     width: 140px;
   }
-  .my-tags-tagset-name-field .field-input, .my-tags-tagset-color-field .field-input {
-    width: 100%;
-  }
   .my-tags-tagset-enable-field {
     min-height: calc(var(--spacing) * 8);
     align-items: center;
@@ -18935,16 +18724,11 @@ ${defaultKeySummary()}`)) {
     align-items: center;
     gap: calc(var(--spacing) * 2);
   }
-  .my-tags-tagset-error {
-    margin: 0px;
-    font-size: var(--text-control);
-    color: var(--color-danger-text);
-  }
   @media (max-width: 720px) {
-    .my-tags-tagset-name-field, .my-tags-tagset-color-field {
+    .my-tags-filter-field, .my-tags-name-field, .my-tags-tagset-name-field, .my-tags-tagset-color-field {
       width: 100%;
     }
-    .my-tags-tagset-actions {
+    .my-tags-add-fields, .my-tags-tagset-actions {
       align-items: stretch;
     }
   }
@@ -19389,7 +19173,10 @@ body.fit-w #main-img,
   -webkit-user-drag: none;
   transition: transform 0.1s ease-out;
 }
-#main-img.no-transition {
+#main-img.no-transition,
+#img-wrap.no-transition,
+#spread-img.no-transition,
+.reader-page-img.no-transition {
   transition: none !important;
 }
 
@@ -19671,7 +19458,8 @@ body.hud-pinned #page-nav button {
   cursor: pointer;
   transition: border-color 0.15s;
 }
-.img-error-retry:hover {
+.img-error-retry:hover,
+.img-error-native:hover {
   border-color: var(--color-accent);
 }
 
@@ -19687,10 +19475,6 @@ body.hud-pinned #page-nav button {
   font-size: var(--text-control);
   font-weight: 600;
   text-decoration: none;
-}
-
-.img-error-native:hover {
-  border-color: var(--color-accent);
 }
 
 /* ---------------------------------------------------------- shortcut help */
@@ -19758,12 +19542,6 @@ body.hud-pinned #page-nav button {
   transition: transform 0.1s ease-out;
 }
 
-#img-wrap.no-transition,
-#spread-img.no-transition,
-.reader-page-img.no-transition {
-  transition: none !important;
-}
-
 /* Spread: the current page and its neighbour share the viewport. RTL puts the current page on
    the right by reversing the flex order. */
 body.reader-spread #img-wrap {
@@ -19811,10 +19589,7 @@ body.fit-w.reader-spread #spread-img {
   }
 
   body.reader-spread #main-img,
-  body.fit-h.reader-spread #main-img {
-    max-width: 100vw;
-  }
-
+  body.fit-h.reader-spread #main-img,
   body.fit-w.reader-spread #main-img {
     max-width: 100vw;
   }

@@ -7,11 +7,10 @@ import type {
 } from "../parse/toplist";
 import { el } from "../ui/dom";
 import { trackJumpRow } from "../ui/jump-row";
-import { listHeader } from "../ui/list-header";
+import { pageScaffold } from "../ui/page-scaffold";
 import { numberedPager } from "../ui/pager";
 import { nativeEmptyPanel } from "../ui/state-panel";
 import { countText } from "../ui/text";
-import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
 
 /** Ranks at or above this get the accent treatment on their badge. */
@@ -198,15 +197,11 @@ function categoryBody(data: ToplistCategory, ctx: ViewContext): readonly HTMLEle
 
 /** Render either toplist shape: the ranked overview blocks or one category list. */
 export function renderToplist(host: HTMLElement, data: ToplistPage, ctx: ViewContext): void {
-  host.replaceChildren();
-
-  host.append(
-    siteNav(ctx.signal),
-    listHeader({
-      title: data.kind === "category" ? data.title : "Toplists",
-      summary: [el("span", { text: summary(data) })],
-    }),
-  );
+  pageScaffold(host, {
+    title: data.kind === "category" ? data.title : "Toplists",
+    summary: [el("span", { text: summary(data) })],
+    signal: ctx.signal,
+  });
   if (data.tabs.length > 0) {
     host.append(tabStrip(data.tabs));
   }

@@ -10,20 +10,6 @@ import type { ReaderMode, ReadingDirection } from "./types";
 
 export type PageIntent = "prev" | "next" | "toggle";
 
-interface ReaderLayout {
-  /** The spread image is part of this layout. */
-  spread: boolean;
-  /** The vertical stack is part of this layout. */
-  continuous: boolean;
-}
-
-export function readerLayout(mode: ReaderMode): ReaderLayout {
-  return {
-    spread: mode === "spread",
-    continuous: mode === "continuous",
-  };
-}
-
 /**
  * Where a click at `ratio` of the viewport width goes. The middle third always pins the HUD, and
  * RTL mirrors the edges because "next" reads leftward.

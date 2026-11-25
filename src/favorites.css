@@ -120,10 +120,7 @@
   @apply mt-3 flex flex-wrap items-center gap-3 text-control text-muted;
 }
 
-.favorites-delete {
-  @apply border-accent-text text-accent-text;
-}
-
+.favorites-delete,
 .favorites-delete:hover {
   @apply border-accent-text text-accent-text;
 }

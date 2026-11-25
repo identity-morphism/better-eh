@@ -24,6 +24,7 @@ import { createCheckbox, createSelect } from "./form-controls";
 import type { CheckboxControl, SelectControl } from "./form-controls";
 import { createSettingsDraft } from "./settings-draft";
 import type { DraftBinding } from "./settings-draft";
+import { bindValue, labeledField, labeledRow } from "./settings-field";
 
 const KEY_LABELS: Record<string, string> = {
   " ": "Space",
@@ -445,75 +446,48 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
 
   function renderBooleanFields(): HTMLElement {
     const items = BOOLEAN_FIELDS.map(({ key, label, hint }) => {
-      const control = createCheckbox({
-        id: `settings-userscript-${key}`,
-        checked: synced[key],
-      });
+      const id = `settings-userscript-${key}`;
+      const control = createCheckbox({ id, checked: synced[key] });
       toggles.set(key, control);
-      bindings.push({
-        key,
-        read: control.readChecked,
-        write: control.writeChecked,
-      });
-      return el(
-        "div",
-        { class: "settings-row" },
-        control.element,
-        el(
-          "div",
-          { class: "settings-row-text" },
-          el("label", { for: `settings-userscript-${key}`, text: label }),
-          el("span", { class: "settings-hint", text: hint }),
-        ),
-      );
+      bindValue(bindings, key, control.readChecked, control.writeChecked);
+      return labeledRow(label, control.element, hint);
     });
     return el("div", { class: "settings-rows settings-rows-roomy" }, ...items);
   }
 
   function renderSelectFields(): HTMLElement {
     const items = SELECT_FIELDS.map((field) => {
+      const id = `settings-userscript-${field.key}`;
       const control = createSelect({
         class: "field-select settings-select",
-        id: `settings-userscript-${field.key}`,
+        id,
         value: synced[field.key],
         options: field.options,
       });
       selects.set(field.key, control);
-      bindings.push({
-        key: field.key,
-        read: control.read,
-        write: control.write,
-      });
-      return el(
-        "div",
-        { class: "settings-field" },
-        el("label", {
-          class: "eyebrow",
-          for: `settings-userscript-${field.key}`,
-          text: field.label,
-        }),
-        control.element,
-        el("span", { class: "settings-hint", text: field.hint }),
-      );
+      bindValue(bindings, field.key, control.read, control.write);
+      return labeledField(field.label, control.element, field.hint);
     });
     return el("div", { class: "settings-number-grid" }, ...items);
   }
 
   function renderNumberFields(): HTMLElement {
     const items = NUMBER_FIELDS.map((field) => {
+      const id = `settings-userscript-${field.key}`;
       const input = el("input", {
         class: "field-input settings-number-input",
         type: "number",
-        id: `settings-userscript-${field.key}`,
+        id,
         min: field.min,
         max: field.max,
         step: 1,
         inputmode: "numeric",
       });
       numbers.set(field, input);
-      bindings.push({
-        key: field.key,
-        read: () => {
+      bindValue(
+        bindings,
+        field.key,
+        () => {
           // An emptied field keeps the value it had when the form was last in sync, so the dirty
           // marker does not flicker while the user replaces the number. `Number("")` is 0, so this
           // has to test the text first or a cleared field would clamp to the minimum.
@@ -524,21 +498,11 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
           const parsed = Number(raw);
           return Number.isFinite(parsed) ? clampNumber(field.key, parsed) : synced[field.key];
         },
-        write: (value) => {
+        (value) => {
           input.value = String(value);
         },
-      });
-      return el(
-        "div",
-        { class: "settings-field" },
-        el("label", {
-          class: "eyebrow",
-          for: `settings-userscript-${field.key}`,
-          text: field.label,
-        }),
-        input,
-        el("span", { class: "settings-hint", text: field.hint }),
       );
+      return labeledField(field.label, input, field.hint);
     });
     return el("div", { class: "settings-number-grid" }, ...items);
   }

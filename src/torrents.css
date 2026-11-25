@@ -170,7 +170,11 @@
 
   .torrent-added::before,
   .torrent-gallery::before,
-  .torrent-uploader::before {
+  .torrent-uploader::before,
+  .torrent-size::before,
+  .torrent-seeds::before,
+  .torrent-peers::before,
+  .torrent-downloads::before {
     color: var(--color-muted);
     content: attr(data-label) ": ";
   }
@@ -185,13 +189,5 @@
   .torrent-peers,
   .torrent-downloads {
     margin-right: 12px;
-  }
-
-  .torrent-size::before,
-  .torrent-seeds::before,
-  .torrent-peers::before,
-  .torrent-downloads::before {
-    color: var(--color-muted);
-    content: attr(data-label) ": ";
   }
 }

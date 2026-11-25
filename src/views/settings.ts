@@ -12,6 +12,7 @@ import { trackJumpRow } from "../ui/jump-row";
 import { listHeader } from "../ui/list-header";
 import { createSettingsDraft } from "../ui/settings-draft";
 import type { DraftBinding } from "../ui/settings-draft";
+import { bindValue, labeledField, labeledRow } from "../ui/settings-field";
 import { renderUserscriptSettings, USERSCRIPT_SETTINGS_SECTION_ID } from "../ui/settings-panel";
 import { showToast } from "../ui/toast";
 import { siteNav } from "../ui/topbar";
@@ -59,31 +60,10 @@ function fieldId(sectionIndex: number, fieldIndex: number): string {
   return `setting-${sectionIndex}-${fieldIndex}`;
 }
 
-function labeledField(
-  field: UconfigField,
-  id: string,
-  control: HTMLElement,
-  sectionTitle: string,
-): HTMLElement {
+/** The label and hint the site's field metadata resolves to for one control. */
+function fieldText(field: UconfigField, sectionTitle: string): { label: string; hint: string } {
   const label = field.label ?? (sectionTitle !== "" ? sectionTitle : humanize(field.name));
-  const hint = field.prompt !== "" && field.prompt !== label ? field.prompt : "";
-  return el(
-    "div",
-    { class: "settings-field" },
-    el("label", { class: "eyebrow", for: id, text: label }),
-    control,
-    hint === "" ? null : el("p", { class: "settings-hint", text: hint }),
-  );
-}
-
-/** Register one form control's read/write pair with the draft. */
-function bindValue(
-  bindings: DraftBinding<string>[],
-  key: string,
-  read: () => string,
-  write: (value: string) => void,
-): void {
-  bindings.push({ key, read, write });
+  return { label, hint: field.prompt !== "" && field.prompt !== label ? field.prompt : "" };
 }
 
 function radioGroup(
@@ -143,12 +123,7 @@ function checkboxItem(
     disabled: field.disabled,
   });
   bindValue(bindings, field.name, control.readValue, control.writeValue);
-  return el(
-    "div",
-    { class: "settings-row" },
-    control.element,
-    el("label", { for: id, text: field.label ?? humanize(field.name) }),
-  );
+  return labeledRow(field.label ?? humanize(field.name), control.element);
 }
 
 function checkboxGroup(
@@ -190,7 +165,8 @@ function selectField(
     })),
   });
   bindValue(bindings, field.name, control.read, control.write);
-  return labeledField(field, id, control.element, sectionTitle);
+  const { label, hint } = fieldText(field, sectionTitle);
+  return labeledField(label, control.element, hint);
 }
 
 function textField(
@@ -218,7 +194,8 @@ function textField(
       input.value = value;
     },
   );
-  return labeledField(field, id, input, sectionTitle);
+  const { label, hint } = fieldText(field, sectionTitle);
+  return labeledField(label, input, hint);
 }
 
 function textareaField(
@@ -243,7 +220,8 @@ function textareaField(
       textarea.value = value;
     },
   );
-  return labeledField(field, id, textarea, sectionTitle);
+  const { label, hint } = fieldText(field, sectionTitle);
+  return labeledField(label, textarea, hint);
 }
 
 function hiddenField(field: UconfigField, bindings: DraftBinding<string>[]): HTMLInputElement {

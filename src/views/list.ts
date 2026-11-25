@@ -126,91 +126,62 @@ function categoryChips(query: SearchQuery, ctx: ViewContext): HTMLElement {
   return row;
 }
 
-/** Filters that narrow the result set. */
-function narrowCount(query: SearchQuery): number {
-  let count = 0;
-  if (query.rating > 0) {
-    count++;
-  }
-  if (query.expunged) {
-    count++;
-  }
-  if (query.torrent) {
-    count++;
-  }
-  if (query.pageFrom.trim() || query.pageTo.trim()) {
-    count++;
-  }
-  if (isDateRangeActive({ since: query.since, until: query.until })) {
-    count++;
-  }
-  return count;
+/** One advanced filter: when it is active, its summary wording, and whether it widens results. */
+interface ListFilter {
+  active: (query: SearchQuery) => boolean;
+  label: (query: SearchQuery) => string;
+  relaxed?: boolean;
 }
 
-/** Switches that widen the result set; they are settings, not filters. */
-function relaxedCount(query: SearchQuery): number {
-  let count = 0;
-  if (query.disableLanguage) {
-    count++;
-  }
-  if (query.disableUploader) {
-    count++;
-  }
-  if (query.disableTags) {
-    count++;
-  }
-  return count;
-}
-
-/** Human labels for the active filters, so the collapsed panel says what the count means. */
-function activeFilterLabels(query: SearchQuery): string[] {
-  const labels: string[] = [];
-  if (query.rating > 0) {
-    labels.push(`${query.rating}★ minimum`);
-  }
-  const pageFrom = query.pageFrom.trim();
-  const pageTo = query.pageTo.trim();
-  if (pageFrom !== "" || pageTo !== "") {
-    labels.push(
-      pageFrom !== "" && pageTo !== ""
-        ? `${pageFrom}–${pageTo} pages`
-        : pageFrom !== ""
-          ? `${pageFrom}+ pages`
-          : `≤${pageTo} pages`,
-    );
-  }
-  if (isDateRangeActive({ since: query.since, until: query.until })) {
-    const since = query.since.trim();
-    const until = query.until.trim();
-    labels.push(
-      since !== "" && until !== ""
+/** The advanced filters, in the order the collapsed summary names them. */
+const LIST_FILTERS: readonly ListFilter[] = [
+  {
+    active: (query) => query.rating > 0,
+    label: (query) => `${query.rating}★ minimum`,
+  },
+  {
+    active: (query) => query.pageFrom.trim() !== "" || query.pageTo.trim() !== "",
+    label: (query) => {
+      const from = query.pageFrom.trim();
+      const to = query.pageTo.trim();
+      return from !== "" && to !== ""
+        ? `${from}–${to} pages`
+        : from !== ""
+          ? `${from}+ pages`
+          : `≤${to} pages`;
+    },
+  },
+  {
+    active: (query) => isDateRangeActive({ since: query.since, until: query.until }),
+    label: (query) => {
+      const since = query.since.trim();
+      const until = query.until.trim();
+      return since !== "" && until !== ""
         ? `Posted ${since} – ${until}`
         : since !== ""
           ? `Posted from ${since}`
-          : `Posted until ${until}`,
-    );
-  }
-  if (query.expunged) {
-    labels.push("Expunged included");
-  }
-  if (query.torrent) {
-    labels.push("Torrent required");
-  }
-  if (query.disableLanguage) {
-    labels.push("Language filter off");
-  }
-  if (query.disableUploader) {
-    labels.push("Uploader filter off");
-  }
-  if (query.disableTags) {
-    labels.push("Tag filter off");
-  }
-  return labels;
+          : `Posted until ${until}`;
+    },
+  },
+  { active: (query) => query.expunged, label: () => "Expunged included" },
+  { active: (query) => query.torrent, label: () => "Torrent required" },
+  { active: (query) => query.disableLanguage, label: () => "Language filter off", relaxed: true },
+  { active: (query) => query.disableUploader, label: () => "Uploader filter off", relaxed: true },
+  { active: (query) => query.disableTags, label: () => "Tag filter off", relaxed: true },
+];
+
+/** The filters a query currently carries, with the labels the collapsed panel shows. */
+function activeFilters(query: SearchQuery): { label: string; relaxed: boolean }[] {
+  return LIST_FILTERS.filter((filter) => filter.active(query)).map((filter) => ({
+    label: filter.label(query),
+    relaxed: filter.relaxed === true,
+  }));
 }
 
 function advancedPanel(query: SearchQuery, ctx: ViewContext): HTMLElement {
-  const activeCount = narrowCount(query) + relaxedCount(query);
-  const activeLabels = activeFilterLabels(query);
+  const active = activeFilters(query);
+  const activeCount = active.length;
+  const activeLabels = active.map((filter) => filter.label);
 
   const rating = createSelect({
     class: "field-select",
@@ -444,8 +415,9 @@ export function renderList(
   });
   ctx.signal.addEventListener("abort", unsubscribe, { once: true });
 
-  const narrow = narrowCount(urlQuery);
-  const relaxed = relaxedCount(urlQuery);
+  const active = activeFilters(urlQuery);
+  const narrow = active.filter((filter) => !filter.relaxed).length;
+  const relaxed = active.length - narrow;
 
   // The route row has already bounded the page and carried the range onto its next link; the view
   // only reports that a range is active.

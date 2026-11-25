@@ -142,6 +142,18 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
     });
   };
 
+  const navigateEnd = (base: PageData | null, end: ReaderEnd): void => {
+    if (base === null) {
+      return;
+    }
+    const target = end === "first" ? base.firstHref : base.lastHref;
+    if (target !== null) {
+      options.navigate(target, { replace: true });
+      return;
+    }
+    options.toast(end === "first" ? "First page" : "Last page");
+  };
+
   const singleAdapter = (): ModeAdapter => {
     let base: PageData | null = null;
     let slot: PageImageSlot<HTMLImageElement> | null = null;
@@ -184,22 +196,10 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
       options.toast(direction === "prev" ? "First page" : "Last page");
     };
 
-    const goEnd = (end: ReaderEnd): void => {
-      if (base === null) {
-        return;
-      }
-      const target = end === "first" ? base.firstHref : base.lastHref;
-      if (target !== null) {
-        options.navigate(target, { replace: true });
-        return;
-      }
-      options.toast(end === "first" ? "First page" : "Last page");
-    };
-
     return {
       show,
       go,
-      goEnd,
+      goEnd: (end) => navigateEnd(base, end),
       reload: () => slot?.reload() ?? false,
       upgrade: (level) => surface?.upgrade(level),
       surface: () => {
@@ -384,22 +384,10 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
       })();
     };
 
-    const goEnd = (end: ReaderEnd): void => {
-      if (base === null) {
-        return;
-      }
-      const target = end === "first" ? base.firstHref : base.lastHref;
-      if (target !== null) {
-        options.navigate(target, { replace: true });
-        return;
-      }
-      options.toast(end === "first" ? "First page" : "Last page");
-    };
-
     return {
       show,
       go,
-      goEnd,
+      goEnd: (end) => navigateEnd(base, end),
       reload: () => mainSlot?.reload() ?? false,
       upgrade: (level) => surface?.upgrade(level),
       surface: () => {
@@ -632,22 +620,10 @@ export function createReaderNavigation(options: ReaderNavigationOptions): Reader
       })();
     };
 
-    const goEnd = (end: ReaderEnd): void => {
-      if (base === null) {
-        return;
-      }
-      const target = end === "first" ? base.firstHref : base.lastHref;
-      if (target !== null) {
-        options.navigate(target, { replace: true });
-        return;
-      }
-      options.toast(end === "first" ? "First page" : "Last page");
-    };
-
     return {
       show,
       go,
-      goEnd,
+      goEnd: (end) => navigateEnd(base, end),
       reload: () => surface?.reload() ?? false,
       upgrade: (level) => surface?.upgrade(level),
       surface: () => {

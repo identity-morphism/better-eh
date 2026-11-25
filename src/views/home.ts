@@ -1,8 +1,7 @@
 import type { HomePage, HomeSection } from "../parse/home";
 import { nativeUrl } from "../routes/identity";
 import { el, icon } from "../ui/dom";
-import { listHeader } from "../ui/list-header";
-import { siteNav } from "../ui/topbar";
+import { pageScaffold } from "../ui/page-scaffold";
 import type { ViewContext } from "./context";
 
 function navStrip(data: HomePage): HTMLElement | null {
@@ -89,11 +88,11 @@ function sectionCard(section: HomeSection, url: string): HTMLElement {
 
 /** Render the signed-in account overview. Actions that spend or reset state stay native. */
 export function renderHome(host: HTMLElement, data: HomePage, ctx: ViewContext): void {
-  host.replaceChildren();
-  host.append(
-    siteNav(ctx.signal),
-    listHeader({ title: "My Home", summary: [el("span", { text: "Account overview" })] }),
-  );
+  pageScaffold(host, {
+    title: "My Home",
+    summary: [el("span", { text: "Account overview" })],
+    signal: ctx.signal,
+  });
 
   const nav = navStrip(data);
   if (nav !== null) {

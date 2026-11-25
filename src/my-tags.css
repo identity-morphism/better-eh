@@ -4,15 +4,21 @@
   @apply mt-4 flex flex-col gap-4;
 }
 
-.my-tags-toolbar {
+.my-tags-toolbar,
+.my-tags-add-fields {
   @apply flex flex-wrap items-end gap-3;
 }
 
-.my-tags-filter-field {
+.my-tags-filter-field,
+.my-tags-name-field {
   @apply w-[220px] max-w-full;
 }
 
-.my-tags-filter {
+.my-tags-filter,
+.my-tags-name-field .field-input,
+.my-tags-weight-field .field-input,
+.my-tags-tagset-name-field .field-input,
+.my-tags-tagset-color-field .field-input {
   @apply w-full;
 }
 
@@ -28,24 +34,13 @@
   @apply ml-1 text-accent-text;
 }
 
-.my-tags-add {
+.my-tags-add,
+.my-tags-row {
   @apply flex flex-col gap-2 border border-line bg-panel p-3;
 }
 
 .my-tags-add-title {
   @apply m-0 text-section font-semibold text-fg;
-}
-
-.my-tags-add-fields {
-  @apply flex flex-wrap items-end gap-3;
-}
-
-.my-tags-name-field {
-  @apply w-[220px] max-w-full;
-}
-
-.my-tags-name-field .field-input {
-  @apply w-full;
 }
 
 .my-tags-hint {
@@ -58,10 +53,6 @@
 
 .my-tags-list {
   @apply flex flex-col gap-2;
-}
-
-.my-tags-row {
-  @apply flex flex-col gap-2 border border-line bg-panel p-3;
 }
 
 .my-tags-row-head {
@@ -85,10 +76,6 @@
   @apply w-[84px];
 }
 
-.my-tags-weight-field .field-input {
-  @apply w-full;
-}
-
 .my-tags-color {
   @apply h-8 w-12 cursor-pointer rounded-control border border-line bg-canvas p-0.5;
   border-color: var(--color-field-line);
@@ -102,24 +89,14 @@
   @apply flex justify-end;
 }
 
-.my-tags-error {
+.my-tags-error,
+.my-tags-tagset-error {
   @apply m-0 text-control text-danger-text;
 }
 
 .my-tags-empty,
 .my-tags-no-match {
   @apply m-0 text-control text-muted;
-}
-
-@media (max-width: 720px) {
-  .my-tags-filter-field,
-  .my-tags-name-field {
-    @apply w-full;
-  }
-
-  .my-tags-add-fields {
-    @apply items-stretch;
-  }
 }
 
 /* Tagset manager: the settings-like block above the per-tag list. */
@@ -153,11 +130,6 @@
   @apply w-[140px];
 }
 
-.my-tags-tagset-name-field .field-input,
-.my-tags-tagset-color-field .field-input {
-  @apply w-full;
-}
-
 .my-tags-tagset-enable-field {
   @apply min-h-8 items-center px-0;
 }
@@ -166,16 +138,15 @@
   @apply mt-3 flex flex-wrap items-center gap-2;
 }
 
-.my-tags-tagset-error {
-  @apply m-0 text-control text-danger-text;
-}
-
 @media (max-width: 720px) {
+  .my-tags-filter-field,
+  .my-tags-name-field,
   .my-tags-tagset-name-field,
   .my-tags-tagset-color-field {
     @apply w-full;
   }
 
+  .my-tags-add-fields,
   .my-tags-tagset-actions {
     @apply items-stretch;
   }

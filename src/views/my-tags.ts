@@ -17,10 +17,9 @@ import { normalizeColor } from "../parse/my-tags";
 import { nativeUrl } from "../routes/identity";
 import { buttonEl, el, searchInput, textInput } from "../ui/dom";
 import { errorText } from "../ui/error-text";
-import { listHeader } from "../ui/list-header";
+import { pageScaffold } from "../ui/page-scaffold";
 import { countText } from "../ui/text";
 import { showToast } from "../ui/toast";
-import { siteNav } from "../ui/topbar";
 import type { ViewContext } from "./context";
 
 /** Save the selected tagset through the page's own form. */
@@ -382,8 +381,6 @@ export function renderMyTags(
   ctx: ViewContext,
   deps?: MyTagsViewDeps,
 ): void {
-  host.replaceChildren();
-
   const api = writableApi(data);
   const load =
     deps?.loadDocument ??
@@ -617,12 +614,10 @@ export function renderMyTags(
   }
   page.append(noMatch);
 
-  host.append(
-    siteNav(ctx.signal),
-    listHeader({
-      title: "My Tags",
-      summary: [el("span", { class: "my-tags-count", text: countText(data.tags.length, "tag") })],
-    }),
-    page,
-  );
+  pageScaffold(host, {
+    title: "My Tags",
+    summary: [el("span", { class: "my-tags-count", text: countText(data.tags.length, "tag") })],
+    signal: ctx.signal,
+  });
+  host.append(page);
 }
