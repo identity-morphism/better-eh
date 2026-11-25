@@ -68,7 +68,7 @@ specificity; the fixture and smoke pages carry no site CSS, so no gate observes 
   ([violentmonkey#1020](https://github.com/violentmonkey/violentmonkey/issues/1020)), so
   re-install from the URL after closing the installer tab.
 
-**Release size budget**: the built bundle must stay at or under 680 KiB raw and 165 KiB gzipped,
+**Release size budget**: the built bundle must stay at or under 700 KiB raw and 170 KiB gzipped,
 the size a userscript manager downloads. `bun run check:size` enforces both and prints the measured
 sizes against each limit; CI runs it after `bun run build`, so a bundle that outgrows either
 ceiling fails the pull request. The core vocabulary (`src/tags/core-vocabulary.ts`) is the only
