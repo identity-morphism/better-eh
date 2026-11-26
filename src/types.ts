@@ -193,6 +193,9 @@ export type ReaderMode = "single" | "spread" | "continuous";
 /** Page order for spreads, click zones, and swipes. */
 export type ReadingDirection = "ltr" | "rtl";
 
+/** How the data-saver gate treats the browser's Save-Data/2G hint. */
+export type DataSaverMode = "auto" | "on" | "off";
+
 export interface UserSettings extends ScalarSettings {
   keymap: KeyMap;
 }

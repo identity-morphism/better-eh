@@ -15,6 +15,8 @@
   Document-backed kinds are rows of data behind the shared `documentView` builder; `load` and
   `parse` share one parse function, and `invalidate` drops a cached page after a view mutates it.
 - **`src/net/queue.ts`**: priority request scheduler with concurrency/interval limits.
+- **`src/net/connection.ts`**: Save-Data/2G detection and the user's data-saver mode, gating the
+  background vocabulary download and reader prefetch.
 - **`src/net/http.ts`**: response classification (HTML bodies, rate-limit notices, login wall) and
   the shared POST helpers (`postForm`, `postJson`) every site mutation goes through.
 - **`src/fetch/`**: page-fetch: one loader over transport and parser, with document and viewer-page

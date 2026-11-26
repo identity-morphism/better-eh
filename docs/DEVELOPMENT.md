@@ -185,7 +185,7 @@ from the Actions tab, or `gh workflow run update-tag-counts.yml`.
   searches learn their own prefix). Remembered picks outweigh the popularity prior, halve in weight
   every 30 days, expire after 90 days, and stay in a bounded 200-entry local store.
 - The **Better EH** section on the settings page edits every userscript preference, including
-  the reader layout/direction, key bindings, and JSON backup. The userscript menu keeps quick toggles for the default reading
+  the reader layout/direction, the data-saver mode, key bindings, and JSON backup. The userscript menu keeps quick toggles for the default reading
   mode, infinite scroll for the feed and gallery pages (independent switches; applied to open views
   immediately), tag suggestions, debug logging, a keymap reset, and refresh/clear commands for the
   cached tag data. A refused userscript-storage write shows one toast instead of failing silently.

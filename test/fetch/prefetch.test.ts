@@ -247,6 +247,7 @@ interface Controls {
   concurrency: number;
   depth: number;
   retryResult: PageData | null;
+  saveData: boolean;
 }
 
 interface Rig {
@@ -273,6 +274,7 @@ function createRig(name: string, total: number, depth = 1): Rig {
     concurrency: 2,
     depth,
     retryResult: null,
+    saveData: false,
   };
 
   const prefetcher = createPrefetcher({
@@ -287,6 +289,7 @@ function createRig(name: string, total: number, depth = 1): Rig {
     activeCount: () => controls.activeCount,
     concurrency: () => controls.concurrency,
     depth: () => controls.depth,
+    saveData: () => controls.saveData,
     clock,
   });
 
@@ -308,6 +311,18 @@ afterEach(() => {
 });
 
 describe("prefetch scheduling", () => {
+  test("skips warming entirely on a metered connection", async () => {
+    const rig = createRig("metered", 3, 1);
+    rig.controls.saveData = true;
+
+    rig.prefetcher.warm(rig.pages.page(2));
+    rig.clock.advance(PREFETCH_IDLE_MS);
+    await flushMicrotasks(2);
+
+    expect(rig.pages.calls).toEqual([]);
+    expect(rig.images.preloaded).toEqual([]);
+  });
+
   test("idle debounce issues nothing before the delay and warms after it", async () => {
     const rig = createRig("debounce", 5, 1);
 

@@ -1,4 +1,4 @@
-import type { ReaderMode, ReadingDirection } from "./types";
+import type { DataSaverMode, ReaderMode, ReadingDirection } from "./types";
 
 /**
  * One declaration of every scalar userscript preference.
@@ -26,6 +26,7 @@ export interface ScalarSettings {
   netIntervalMs: number;
   netTimeoutMs: number;
   tagSuggestions: boolean;
+  dataSaver: DataSaverMode;
   readerMode: ReaderMode;
   readingDirection: ReadingDirection;
 }
@@ -204,6 +205,18 @@ export const SETTINGS_SCHEMA: { readonly [K in ScalarKey]: SchemaEntry<K> } = {
     default: true,
     label: "Tag suggestions",
     hint: "Show the tag combobox while typing in the search bar.",
+  },
+  dataSaver: {
+    control: "select",
+    key: "dataSaver",
+    default: "auto",
+    label: "Data saver",
+    hint: "Skip the background vocabulary and page prefetch on Save-Data or 2G connections.",
+    options: [
+      { value: "auto", label: "Automatic" },
+      { value: "on", label: "Always" },
+      { value: "off", label: "Never" },
+    ],
   },
   readerMode: {
     control: "select",

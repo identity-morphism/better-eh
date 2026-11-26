@@ -49,8 +49,9 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
   keybinding editor and JSON backup.
 - **My Tags**: the `/mytags` manager renders in-app: switch, rename and recolour tag sets, watch
   or hide a tag, set its colour and weight, and add new tags without leaving the shell.
-- **Fast and robust**: request priorities and caching, rate-limit purge with a banner, and a login
-  gate instead of a broken page when a route needs a session.
+- **Fast and robust**: request priorities and caching, rate-limit purge with a banner, a
+  Save-Data/2G gate that keeps the background vocabulary and prefetch off metered connections, and
+  a login gate instead of a broken page when a route needs a session.
 - **Accessible**: keyboard paths, managed dialog focus, forced-colors support, reduced-motion
   handling and touch targets that grow on coarse pointers. The smoke gate runs axe over the shell
   with the WCAG A/AA rules, so a control that fails name, contrast or landmark checks fails CI.

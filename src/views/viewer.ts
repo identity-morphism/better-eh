@@ -4,6 +4,7 @@ import { loader } from "../fetch/loader";
 import { createPrefetcher } from "../fetch/prefetch";
 import { isKey } from "../keymap";
 import { log } from "../log";
+import { shouldSaveData } from "../net/connection";
 import { net } from "../net/queue";
 import type { ReaderHudState } from "../reader-navigation";
 import { createReaderNavigation } from "../reader-navigation";
@@ -75,6 +76,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     activeCount: () => net.activeCount,
     concurrency: () => getSettings().netConcurrency,
     depth: () => getSettings().prefetchCount,
+    saveData: () => shouldSaveData(getSettings().dataSaver),
     clock: {
       setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
       clearTimeout: (handle) => window.clearTimeout(handle),

@@ -8,6 +8,7 @@ import {
 } from "./fetch/errors";
 import { log, LOG_TAG } from "./log";
 import { registerMenuCommands } from "./menu";
+import { shouldSaveData } from "./net/connection";
 import { isLoginPage, isNotFoundPage } from "./net/http";
 import type { Route } from "./router";
 import { nativeUrl, parseRoute, startLinkInterception } from "./router";
@@ -629,13 +630,15 @@ export function createAppShell(env: ShellEnvironment): AppShell {
     }
     revealDocument();
     // Warm the full vocabulary so the first focus on the search field is not limited to the core.
-    // The download is large, so it waits until the boot render has the browser's idle time.
-    if (getSettings().tagSuggestions) {
+    // The download is large, so it waits until the boot render has the browser's idle time, and a
+    // metered connection keeps the embedded core instead.
+    const settings = getSettings();
+    if (settings.tagSuggestions && !shouldSaveData(settings.dataSaver, env.navigator)) {
       whenIdle(() => {
         void loadTagIndex().catch((error: unknown) => log("tag index prefetch failed", error));
       });
     }
-    log("ready", getSettings().fitHeight ? "fit-height" : "natural-width");
+    log("ready", settings.fitHeight ? "fit-height" : "natural-width");
   }
 
   return {

@@ -31,6 +31,8 @@ interface PrefetcherDeps {
   concurrency: () => number;
   /** How many pages to warm in each direction. */
   depth: () => number;
+  /** True when the connection asks for reduced data; warming is skipped entirely. */
+  saveData?: () => boolean;
   /** Timer source, so the idle debounce is controlled by the caller and tests. */
   clock: PrefetcherClock;
 }
@@ -189,6 +191,9 @@ export function createPrefetcher(deps: PrefetcherDeps): Prefetcher {
 
   function warm(data: PageData): void {
     stop();
+    if (deps.saveData?.() === true) {
+      return;
+    }
     const depth = deps.depth();
     if (depth < 1) {
       return;

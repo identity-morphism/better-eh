@@ -276,6 +276,18 @@
       label: "Tag suggestions",
       hint: "Show the tag combobox while typing in the search bar."
     },
+    dataSaver: {
+      control: "select",
+      key: "dataSaver",
+      default: "auto",
+      label: "Data saver",
+      hint: "Skip the background vocabulary and page prefetch on Save-Data or 2G connections.",
+      options: [
+        { value: "auto", label: "Automatic" },
+        { value: "on", label: "Always" },
+        { value: "off", label: "Never" }
+      ]
+    },
     readerMode: {
       control: "select",
       key: "readerMode",
@@ -1829,6 +1841,21 @@ ${defaultKeySummary()}`)) {
       clearTagCountsCache();
       showToast("Cached tag data cleared");
     });
+  }
+
+  // src/net/connection.ts
+  function browserSavesData(nav = globalThis.navigator) {
+    const connection = nav?.connection;
+    return connection?.saveData === true || connection?.effectiveType === "slow-2g" || connection?.effectiveType === "2g";
+  }
+  function shouldSaveData(mode, nav = globalThis.navigator) {
+    if (mode === "on") {
+      return true;
+    }
+    if (mode === "off") {
+      return false;
+    }
+    return browserSavesData(nav);
   }
 
   // src/net/priority.ts
@@ -13440,6 +13467,9 @@ ${defaultKeySummary()}`)) {
     }
     function warm(data) {
       stop();
+      if (deps.saveData?.() === true) {
+        return;
+      }
       const depth = deps.depth();
       if (depth < 1) {
         return;
@@ -14674,6 +14704,7 @@ ${defaultKeySummary()}`)) {
       activeCount: () => net.activeCount,
       concurrency: () => getSettings().netConcurrency,
       depth: () => getSettings().prefetchCount,
+      saveData: () => shouldSaveData(getSettings().dataSaver),
       clock: {
         setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
         clearTimeout: (handle) => window.clearTimeout(handle)
@@ -20916,12 +20947,13 @@ body.fit-h.reader-continuous #reader {
         errorView(error, initialRoute);
       }
       revealDocument();
-      if (getSettings().tagSuggestions) {
+      const settings = getSettings();
+      if (settings.tagSuggestions && !shouldSaveData(settings.dataSaver, env.navigator)) {
         whenIdle(() => {
           loadTagIndex().catch((error) => log("tag index prefetch failed", error));
         });
       }
-      log("ready", getSettings().fitHeight ? "fit-height" : "natural-width");
+      log("ready", settings.fitHeight ? "fit-height" : "natural-width");
     }
     return {
       boot() {
