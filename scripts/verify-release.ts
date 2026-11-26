@@ -7,6 +7,8 @@
  * compared too, but only as a warning: its source sync is not instantaneous.
  */
 
+import { join } from "node:path";
+
 import { readHeaderVersion } from "./version.ts";
 
 interface PackageJson {
@@ -21,22 +23,36 @@ const CDN = `https://cdn.jsdelivr.net/gh/${REPO}@master`;
 const LATEST = `https://github.com/${REPO}/releases/latest/download/better-eh.user.js`;
 const SLEAZY_FORK = "https://sleazyfork.org/en/scripts/606064-better-eh/code.user.js";
 
-function fail(message: string): never {
-  console.error(`verify-release: ${message}`);
-  process.exit(1);
+/** The one place the release preflight addresses its assets. */
+export const RELEASE_URLS = { raw: RAW, cdn: CDN, latest: LATEST, sleazy: SLEAZY_FORK } as const;
+
+/** A release check that could not confirm the published state. */
+export class ReleaseCheckError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReleaseCheckError";
+  }
 }
 
-async function checkAsset(url: string): Promise<void> {
-  const response = await fetch(url, { redirect: "follow" });
-  if (response.status !== 200) {
-    fail(`${url} returned HTTP ${response.status} (repository public and tag pushed?)`);
+function require(condition: boolean, message: string): asserts condition {
+  if (!condition) {
+    throw new ReleaseCheckError(message);
   }
+}
+
+async function checkAsset(
+  fetchImpl: typeof fetch,
+  url: string,
+  log: (message: string) => void,
+): Promise<void> {
+  const response = await fetchImpl(url, { redirect: "follow" });
+  require(response.status ===
+    200, `${url} returned HTTP ${response.status} (repository public and tag pushed?)`);
   const allowOrigin = response.headers.get("access-control-allow-origin");
-  if (allowOrigin !== "*") {
-    fail(`${url} returned access-control-allow-origin: ${allowOrigin ?? "<missing>"}`);
-  }
+  require(allowOrigin ===
+    "*", `${url} returned access-control-allow-origin: ${allowOrigin ?? "<missing>"}`);
   const length = Number(response.headers.get("content-length") ?? "0");
-  console.log(`ok ${url} (${length > 0 ? `${length} bytes` : "200"}, CORS *)`);
+  log(`ok ${url} (${length > 0 ? `${length} bytes` : "200"}, CORS *)`);
 }
 
 /**
@@ -45,54 +61,82 @@ async function checkAsset(url: string): Promise<void> {
  * The listing syncs from this repository's bundle, so a mismatch only means its next sync has not
  * run yet. Report it without failing the publication check.
  */
-async function checkListing(): Promise<void> {
+async function checkListing(
+  fetchImpl: typeof fetch,
+  version: string,
+  warn: (message: string) => void,
+  log: (message: string) => void,
+): Promise<void> {
   try {
-    const response = await fetch(SLEAZY_FORK, { redirect: "follow" });
+    const response = await fetchImpl(SLEAZY_FORK, { redirect: "follow" });
     if (response.status !== 200) {
-      console.warn(`warn ${SLEAZY_FORK} returned HTTP ${response.status}; listing unverified`);
+      warn(`warn ${SLEAZY_FORK} returned HTTP ${response.status}; listing unverified`);
       return;
     }
     const published = readHeaderVersion(await response.text());
-    if (published === pkg.version) {
-      console.log(`ok ${SLEAZY_FORK} (@version ${published})`);
+    if (published === version) {
+      log(`ok ${SLEAZY_FORK} (@version ${published})`);
       return;
     }
-    console.warn(
-      `warn ${SLEAZY_FORK} serves ${published ?? "<missing>"}, expected ${pkg.version}; ` +
+    warn(
+      `warn ${SLEAZY_FORK} serves ${published ?? "<missing>"}, expected ${version}; ` +
         "the listing sync may not have run yet",
     );
   } catch (error) {
-    console.warn(`warn could not check ${SLEAZY_FORK}: ${(error as Error).message}`);
+    warn(
+      `warn could not check ${SLEAZY_FORK}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 
-const pkg = (await Bun.file("./package.json").json()) as PackageJson;
+const pkg = (await Bun.file(join(import.meta.dir, "..", "package.json")).json()) as PackageJson;
 
-for (const path of ASSETS) {
-  await checkAsset(`${RAW}/${path}`);
-  await checkAsset(`${CDN}/${path}`);
+/**
+ * Run the publication checks.
+ *
+ * Injectable so tests can drive the exact URL set and responses without the network.
+ */
+export async function verifyRelease(
+  fetchImpl: typeof fetch = fetch,
+  version: string = pkg.version,
+  warn: (message: string) => void = console.warn,
+  log: (message: string) => void = console.log,
+): Promise<void> {
+  for (const path of ASSETS) {
+    await checkAsset(fetchImpl, `${RAW}/${path}`, log);
+    await checkAsset(fetchImpl, `${CDN}/${path}`, log);
+  }
+
+  const userscript = await fetchImpl(`${RAW}/${USERSCRIPT}`, { redirect: "follow" });
+  require(userscript.status === 200, `${RAW}/${USERSCRIPT} returned HTTP ${userscript.status}`);
+  const published = readHeaderVersion(await userscript.text());
+  require(published ===
+    version, `published @version ${published ?? "<missing>"} does not match package.json ${version}`);
+  log(`ok ${RAW}/${USERSCRIPT} (@version ${published})`);
+
+  const latest = await fetchImpl(LATEST, { redirect: "follow" });
+  require(latest.status ===
+    200, `${LATEST} returned HTTP ${latest.status} (is the release published?)`);
+  const latestVersion = readHeaderVersion(await latest.text());
+  require(latestVersion ===
+    version, `latest release asset is ${latestVersion ?? "<missing>"}, expected ${version}`);
+  log(`ok ${LATEST} (@version ${latestVersion})`);
+
+  await checkListing(fetchImpl, version, warn, log);
 }
 
-const userscript = await fetch(`${RAW}/${USERSCRIPT}`, { redirect: "follow" });
-if (userscript.status !== 200) {
-  fail(`${RAW}/${USERSCRIPT} returned HTTP ${userscript.status}`);
+async function main(): Promise<void> {
+  try {
+    await verifyRelease();
+    console.log("verify-release: all required publication checks passed");
+  } catch (error) {
+    console.error(`verify-release: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
 }
-const published = readHeaderVersion(await userscript.text());
-if (published !== pkg.version) {
-  fail(`published @version ${published ?? "<missing>"} does not match package.json ${pkg.version}`);
-}
-console.log(`ok ${RAW}/${USERSCRIPT} (@version ${published})`);
 
-const latest = await fetch(LATEST, { redirect: "follow" });
-if (latest.status !== 200) {
-  fail(`${LATEST} returned HTTP ${latest.status} (is the release published?)`);
+if (import.meta.main) {
+  await main();
 }
-const latestVersion = readHeaderVersion(await latest.text());
-if (latestVersion !== pkg.version) {
-  fail(`latest release asset is ${latestVersion ?? "<missing>"}, expected ${pkg.version}`);
-}
-console.log(`ok ${LATEST} (@version ${latestVersion})`);
-
-await checkListing();
-
-console.log("verify-release: all required publication checks passed");
