@@ -13,7 +13,7 @@ test("registration is a no-op when the manager has no menu API", () => {
   expect(() => registerMenuCommands()).not.toThrow();
 });
 
-test("registers every toggle followed by the keymap reset", () => {
+test("registers every command in order", () => {
   const commands: string[] = [];
   globals.GM_registerMenuCommand = (caption) => {
     commands.push(caption);
@@ -28,5 +28,7 @@ test("registers every toggle followed by the keymap reset", () => {
     "Toggle infinite scroll (gallery)",
     "Toggle tag suggestions",
     "Reset keymap to defaults",
+    "Refresh tag data now",
+    "Clear cached tag data",
   ]);
 });

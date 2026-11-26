@@ -15,6 +15,7 @@ import type { RouteView } from "./routes/types";
 import { getSettings } from "./settings";
 import { documentTitle, siteLabel } from "./site";
 import { blockSiteAds } from "./site-ads";
+import { onStorageFailure } from "./store";
 import { loadTagIndex } from "./tags/db";
 import { showBanner } from "./ui/banner";
 import { el } from "./ui/dom";
@@ -25,6 +26,7 @@ import { restoreScrollWhenReady } from "./ui/scroll-restore";
 import { nativePageAction, statePanel } from "./ui/state-panel";
 import { trackStickyChrome } from "./ui/sticky";
 import { injectStyles, isAppStyle } from "./ui/styles";
+import { showToast } from "./ui/toast";
 import { siteNav } from "./ui/topbar";
 import { createViewLifecycle } from "./view-lifecycle";
 import { resetViewMode } from "./view-mode";
@@ -609,6 +611,15 @@ export function createAppShell(env: ShellEnvironment): AppShell {
     const initial = view.parse(doc, initialRoute);
     view.seed?.(initialRoute, initial);
     ensureShell();
+    // The shell owns the body now, so a refused write can be reported instead of vanishing.
+    let storageWarned = false;
+    onStorageFailure(() => {
+      if (storageWarned) {
+        return;
+      }
+      storageWarned = true;
+      showToast("Browser storage rejected a save; changes may be lost.");
+    });
     env.history.replaceState({ eh: true, scrollY: 0 }, "", env.location.href);
     try {
       present(initialRoute, view, initial, 0, false);

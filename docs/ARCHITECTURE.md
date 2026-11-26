@@ -53,7 +53,8 @@
 - **`src/search-draft.ts`**: the tab-scoped committed query and the free-text draft shared by the
   list, gallery and top bar.
 - **`src/store.ts`**: one persistence seam over userscript value storage and session storage —
-  versioned envelope, shape guard, swallowed failures; tests use an in-memory adapter.
+  versioned envelope, shape guard, record removal, and one failure channel the shell reports once;
+  tests use an in-memory adapter.
 - **`src/emitter.ts`**: one listener seam (`subscribe`/`emit`) behind every in-app change
   notification — settings, quick tags, the search draft, a favorites selection and cached
   snapshots — so unsubscribe and notify order are written once.

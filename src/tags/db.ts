@@ -384,6 +384,12 @@ export function resetTagIndex(): void {
   indexSnapshot.reset();
 }
 
+/** Drop the downloaded index from memory and userscript storage; the embedded core remains. */
+export function clearTagIndexCache(): void {
+  resetTagIndex();
+  indexStore.remove();
+}
+
 /**
  * Return the index, downloading it when no local copy exists. A stale local copy is served
  * immediately and refreshed in the background so opening the search field never waits on the CDN.

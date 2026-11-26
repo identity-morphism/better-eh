@@ -86,6 +86,12 @@ export function resetTagCounts(): void {
   countsSnapshot.reset();
 }
 
+/** Drop the downloaded popularity snapshot from memory and userscript storage. */
+export function clearTagCountsCache(): void {
+  resetTagCounts();
+  countsStore.remove();
+}
+
 /** Subscribe to a refreshed snapshot. Returns an unsubscribe function. */
 export function onTagCountsChange(listener: (value: TagCounts) => void): () => void {
   return countsSnapshot.onChange((cached) => {

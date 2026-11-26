@@ -11,6 +11,7 @@
  * write silently migrates them to the shared envelope.
  */
 
+import { createEmitter } from "./emitter";
 import { isRecord } from "./guards";
 
 export interface StorageAdapter {
@@ -31,6 +32,20 @@ export interface StoreOptions<T> {
 export interface Store<T> {
   read(): T;
   write(value: T): void;
+  /** Drop the stored record; the next read starts from `empty()`. */
+  remove(): void;
+}
+
+/** One channel for a manager refusing a write, so the shell can tell the reader once. */
+const storageFailures = createEmitter<void>();
+
+/** Subscribe to a failed userscript-storage write. Returns the unsubscribe function. */
+export function onStorageFailure(listener: () => void): () => void {
+  return storageFailures.subscribe(listener);
+}
+
+function reportStorageFailure(): void {
+  storageFailures.emit();
 }
 
 interface Envelope {
@@ -66,6 +81,16 @@ export function createStore<T>(options: StoreOptions<T>, adapter: StorageAdapter
         adapter.write(key, { version, values: value });
       } catch {
         // Persistence is a convenience; the in-memory view keeps working without it.
+        reportStorageFailure();
+      }
+    },
+
+    remove(): void {
+      try {
+        adapter.remove(key);
+      } catch {
+        // Best effort: a failed delete leaves a value the guard will reject.
+        reportStorageFailure();
       }
     },
   };
@@ -94,7 +119,8 @@ export function gmStorage(): StorageAdapter {
       try {
         globals.GM_setValue?.(key, value);
       } catch {
-        // Nothing useful to do when the storage manager refuses a write.
+        // Nothing useful to do when the storage manager refuses a write, but the shell can warn.
+        reportStorageFailure();
       }
     },
 
@@ -107,6 +133,7 @@ export function gmStorage(): StorageAdapter {
         globals.GM_setValue?.(key, null);
       } catch {
         // Best effort: a missing deletion only leaves a value the guard will reject.
+        reportStorageFailure();
       }
     },
   };

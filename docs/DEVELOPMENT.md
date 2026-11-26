@@ -187,7 +187,8 @@ from the Actions tab, or `gh workflow run update-tag-counts.yml`.
 - The **Better EH** section on the settings page edits every userscript preference, including
   the reader layout/direction, key bindings, and JSON backup. The userscript menu keeps quick toggles for the default reading
   mode, infinite scroll for the feed and gallery pages (independent switches; applied to open views
-  immediately), tag suggestions, debug logging, and a keymap reset.
+  immediately), tag suggestions, debug logging, a keymap reset, and refresh/clear commands for the
+  cached tag data. A refused userscript-storage write shows one toast instead of failing silently.
 - Favorites add/remove requires a signed-in session. Without one, the folder menu shows a login
   prompt; if folder loading fails, it links to the site's native dialog instead. The favorites and
   settings pages render a login gate when the session is missing.

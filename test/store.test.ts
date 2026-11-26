@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 
-import { createStore, gmStorage, sessionStorageAdapter } from "../src/store";
+import { createStore, gmStorage, onStorageFailure, sessionStorageAdapter } from "../src/store";
 import type { StorageAdapter, Store } from "../src/store";
 import { testStorage } from "./setup";
 
@@ -55,6 +55,16 @@ describe("the shared store", () => {
     const storage = testStorage({ [KEY]: { version: VERSION, values: [5] } });
 
     expect(numbersStore(storage).read()).toEqual([5]);
+  });
+
+  test("removes the record through the adapter", () => {
+    const storage = testStorage({ [KEY]: { version: VERSION, values: [1] } });
+    const store = numbersStore(storage);
+
+    store.remove();
+
+    expect(storage.values.has(KEY)).toBe(false);
+    expect(store.read()).toEqual([]);
   });
 
   test("contains adapter failures instead of propagating them", () => {
@@ -118,6 +128,21 @@ describe("the userscript storage adapter", () => {
     storage.remove("k");
 
     expect(values.get("k")).toBeNull();
+  });
+
+  test("reports a refused manager write once per listener", () => {
+    let failures = 0;
+    const stop = onStorageFailure(() => {
+      failures += 1;
+    });
+    globals.GM_setValue = () => {
+      throw new Error("quota");
+    };
+
+    gmStorage().write("k", 1);
+    stop();
+
+    expect(failures).toBe(1);
   });
 
   test("contains a throwing manager", () => {

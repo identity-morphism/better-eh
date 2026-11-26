@@ -346,6 +346,13 @@
   }
 
   // src/store.ts
+  var storageFailures = createEmitter();
+  function onStorageFailure(listener) {
+    return storageFailures.subscribe(listener);
+  }
+  function reportStorageFailure() {
+    storageFailures.emit();
+  }
   function isEnvelope(value) {
     if (!isRecord(value)) {
       return false;
@@ -369,7 +376,16 @@
       write(value) {
         try {
           adapter.write(key, { version, values: value });
-        } catch {}
+        } catch {
+          reportStorageFailure();
+        }
+      },
+      remove() {
+        try {
+          adapter.remove(key);
+        } catch {
+          reportStorageFailure();
+        }
       }
     };
   }
@@ -386,7 +402,9 @@
       write(key, value) {
         try {
           globals.GM_setValue?.(key, value);
-        } catch {}
+        } catch {
+          reportStorageFailure();
+        }
       },
       remove(key) {
         try {
@@ -395,7 +413,9 @@
             return;
           }
           globals.GM_setValue?.(key, null);
-        } catch {}
+        } catch {
+          reportStorageFailure();
+        }
       }
     };
   }
@@ -519,207 +539,221 @@
     }
   }
 
-  // src/ui/dom.ts
-  function el(tag, props = {}, ...children) {
-    const node = document.createElement(tag);
-    for (const [key, value] of Object.entries(props)) {
-      if (value === null || value === undefined || value === false) {
-        continue;
+  // src/tags/base64.ts
+  function base64FromBytes(bytes) {
+    let binary = "";
+    for (const byte of bytes) {
+      binary += String.fromCharCode(byte);
+    }
+    return btoa(binary);
+  }
+  function bytesFromBase64(base64) {
+    let binary;
+    try {
+      binary = atob(base64);
+    } catch {
+      return null;
+    }
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0;index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  }
+
+  // src/tags/mirror.ts
+  var ASSET_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  var ASSET_RETRY_MS = 60 * 60 * 1000;
+  var DATA_REPO = "identity-morphism/better-eh";
+  function assetUrls(name) {
+    return [
+      `https://raw.githubusercontent.com/${DATA_REPO}/master/assets/${name}`,
+      `https://cdn.jsdelivr.net/gh/${DATA_REPO}@master/assets/${name}`
+    ];
+  }
+  var MAX_ASSET_BYTES = 2 * 1024 * 1024;
+  async function readCapped(response, limit) {
+    if (Number(response.headers.get("content-length") ?? "0") > limit) {
+      return null;
+    }
+    if (response.body === null) {
+      return new Uint8Array(await response.arrayBuffer());
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    let read = await reader.read();
+    while (!read.done) {
+      total += read.value.byteLength;
+      if (total > limit) {
+        await reader.cancel();
+        return null;
       }
-      if (key === "class") {
-        node.className = String(value);
-      } else if (key === "text") {
-        node.textContent = String(value);
-      } else if (key === "style") {
-        node.style.cssText = String(value);
-      } else if (key.startsWith("on") && typeof value === "function") {
-        node.addEventListener(key.slice(2).toLowerCase(), value);
-      } else {
-        node.setAttribute(key, String(value));
+      chunks.push(read.value);
+      read = await reader.read();
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  }
+  async function fetchAsset(urls, decode, { label, timeoutMs }) {
+    for (const url of urls) {
+      const controller = timeoutMs === undefined ? null : new AbortController;
+      const timer = controller === null ? undefined : setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, {
+          cache: "no-cache",
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+          headers: { accept: "application/octet-stream" },
+          ...controller === null ? {} : { signal: controller.signal }
+        });
+        if (!response.ok) {
+          warn(`${label} returned ${response.status}`, url);
+          continue;
+        }
+        const bytes = await readCapped(response, MAX_ASSET_BYTES);
+        if (bytes === null) {
+          warn(`${label} is larger than ${MAX_ASSET_BYTES} bytes`, url);
+          continue;
+        }
+        const value = decode(bytes);
+        if (value === null) {
+          warn(`${label} returned invalid data`, url);
+          continue;
+        }
+        return { value, bytes };
+      } catch (error) {
+        warn(`${label} failed`, url, error);
+      } finally {
+        clearTimeout(timer);
       }
     }
-    appendChildren(node, children);
-    return node;
+    throw new Error(`Could not download ${label.toLowerCase()}`);
   }
-  function buttonEl(props = {}, ...children) {
-    return el("button", { type: "button", ...props }, ...children);
-  }
-  function appendChildren(parent, children) {
-    for (const child of children) {
-      if (child === null || child === undefined || child === false) {
-        continue;
+
+  // src/tags/snapshot.ts
+  function createSnapshot(options) {
+    const { label, ttlMs, retryMs, load: download, readCache, writeCache, onError } = options;
+    let current = null;
+    let cacheRead = false;
+    let inFlight = null;
+    let generation = 0;
+    let lastAttempt = 0;
+    const listeners = createEmitter();
+    function cached() {
+      if (!cacheRead) {
+        current = readCache();
+        cacheRead = current !== null;
       }
-      parent.append(child instanceof Node ? child : document.createTextNode(String(child)));
+      return current;
     }
+    function notify(value) {
+      listeners.emit(value);
+    }
+    function start(background) {
+      const token = ++generation;
+      lastAttempt = Date.now();
+      let request;
+      try {
+        request = download();
+      } catch (error) {
+        request = Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+      const pending = request.then((value) => {
+        if (token !== generation) {
+          return cached()?.value ?? value;
+        }
+        const updated = Date.now();
+        current = { value, updated };
+        cacheRead = true;
+        writeCache(value, updated);
+        notify(value);
+        return value;
+      }).catch((error) => {
+        if (onError === "cached") {
+          if (token === generation) {
+            warn(`${label} refresh failed`, error);
+          }
+          return cached()?.value ?? null;
+        }
+        throw error;
+      }).finally(() => {
+        if (token === generation) {
+          inFlight = null;
+        }
+      });
+      inFlight = pending;
+      if (background) {
+        pending.catch((error) => {
+          warn(`Background ${label} refresh failed`, error);
+        });
+      }
+      return pending;
+    }
+    function loadFromCache(force = false) {
+      const cachedValue = cached();
+      const now = Date.now();
+      if (force) {
+        return start(false);
+      }
+      if (cachedValue) {
+        if (now - cachedValue.updated <= ttlMs) {
+          return Promise.resolve(cachedValue.value);
+        }
+        if (inFlight || now - lastAttempt <= retryMs) {
+          return Promise.resolve(cachedValue.value);
+        }
+        start(true);
+        return Promise.resolve(cachedValue.value);
+      }
+      if (inFlight) {
+        return inFlight;
+      }
+      return start(false);
+    }
+    return {
+      get() {
+        return cached()?.value ?? null;
+      },
+      updated() {
+        return cached()?.updated ?? 0;
+      },
+      load: loadFromCache,
+      onChange(listener) {
+        return listeners.subscribe(listener);
+      },
+      publish(value) {
+        const known = cached();
+        current = { value, updated: known?.updated ?? Date.now() };
+        cacheRead = true;
+        notify(value);
+      },
+      reset() {
+        generation++;
+        current = null;
+        cacheRead = false;
+        inFlight = null;
+        lastAttempt = 0;
+      }
+    };
   }
-  function textInput(props = {}) {
-    return el("input", {
-      type: "text",
-      autocomplete: "off",
-      autocapitalize: "none",
-      autocorrect: "off",
-      spellcheck: "false",
-      ...props
-    });
-  }
-  function searchInput(props = {}) {
-    return textInput({ type: "search", enterkeyhint: "search", ...props });
-  }
-  function tagInput(className) {
-    return textInput({
-      class: className,
-      name: "new_tags",
-      placeholder: "Add tags, comma separated",
-      "aria-label": "New tags",
-      maxlength: "200"
-    });
-  }
-  var ICON_PATHS = {
-    back: "M15 18l-6-6 6-6",
-    search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm10 2l-4.35-4.35",
-    star: "M12 2.5l2.9 6.1 6.6.9-4.8 4.7 1.2 6.6-5.9-3.2-5.9 3.2 1.2-6.6L2.5 9.5l6.6-.9L12 2.5z",
-    external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
-    warning: "M12 3L2 21h20L12 3zm0 6v6m0 3v.5",
-    close: "M6 6l12 12M18 6L6 18",
-    filter: "M3 5h18l-7 8v6l-4 2v-8L3 5z",
-    arrowRight: "M5 12h14m-6-6 6 6-6 6",
-    arrowLeft: "M19 12H5m6-6-6 6 6 6",
-    chevronLeft: "M15 6l-6 6 6 6",
-    chevronRight: "M9 6l6 6-6 6",
-    first: "M18 6l-6 6 6 6M11 6l-6 6 6 6",
-    last: "M6 6l6 6-6 6M13 6l6 6-6 6",
-    download: "M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M5 19h14",
-    history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"
-  };
-  function icon(name, filled = false) {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("width", "18");
-    svg.setAttribute("height", "18");
-    svg.setAttribute("aria-hidden", "true");
-    svg.setAttribute("focusable", "false");
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", ICON_PATHS[name]);
-    path.setAttribute("stroke", "currentColor");
-    path.setAttribute("stroke-width", filled ? "0" : "2");
-    path.setAttribute("stroke-linecap", "round");
-    path.setAttribute("stroke-linejoin", "round");
-    path.setAttribute("fill", filled ? "currentColor" : "none");
-    svg.append(path);
-    return svg;
-  }
-  function isEditableTarget(target) {
-    if (!(target instanceof HTMLElement)) {
+
+  // src/tags/codec-header.ts
+  function hasCodecHeader(bytes, magic, version, headerBytes) {
+    if (bytes.length < headerBytes) {
       return false;
     }
-    return target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
-  }
-
-  // src/ui/live-region.ts
-  function announceInto(node, text, write) {
-    if (text !== "" && node.textContent === text) {
-      write("");
-      window.setTimeout(() => write(text), 16);
-      return;
-    }
-    write(text);
-  }
-
-  // src/ui/toast.ts
-  var timers = new Map;
-  function durationFor(text) {
-    return Math.min(8000, Math.max(2000, text.length * 70));
-  }
-  function present(node, text, visibleClass) {
-    clearTimeout(timers.get(node));
-    node.classList.remove(visibleClass);
-    const reveal = (value) => {
-      node.textContent = value;
-      if (value === "") {
-        return;
+    for (let index = 0;index < magic.length; index++) {
+      if (bytes[index] !== magic[index]) {
+        return false;
       }
-      node.classList.add(visibleClass);
-      timers.set(node, window.setTimeout(() => {
-        node.classList.remove(visibleClass);
-        node.textContent = "";
-      }, durationFor(value)));
-    };
-    announceInto(node, text, reveal);
-  }
-  function ensureToast() {
-    const existing = document.getElementById("eh-toast");
-    if (existing) {
-      return existing;
     }
-    const toast = el("div", {
-      id: "eh-toast",
-      class: "eh-toast",
-      role: "status",
-      "aria-live": "polite",
-      "aria-atomic": "true"
-    });
-    (document.getElementById("eh-root") ?? document.body).append(toast);
-    return toast;
-  }
-  function showToast(text) {
-    const trimmed = text.trim();
-    if (trimmed === "") {
-      return;
-    }
-    const hudToast = document.getElementById("hud-toast");
-    present(hudToast ?? ensureToast(), trimmed, "show");
-  }
-
-  // src/menu.ts
-  function enabledToast(label) {
-    return (enabled) => `${label} ${enabled ? "enabled" : "disabled"}`;
-  }
-  var TOGGLE_COMMANDS = [
-    {
-      key: "fitHeight",
-      command: "Toggle fit-height / natural-width",
-      toast: (fitHeight) => `Default mode: ${fitHeight ? "fit-height" : "natural-width"}`
-    },
-    { key: "debug", command: "Toggle debug mode", toast: enabledToast("Debug mode") },
-    {
-      key: "listInfiniteScroll",
-      command: "Toggle infinite scroll (feed)",
-      toast: enabledToast("Feed infinite scroll")
-    },
-    {
-      key: "galleryInfiniteScroll",
-      command: "Toggle infinite scroll (gallery)",
-      toast: enabledToast("Gallery infinite scroll")
-    },
-    {
-      key: "tagSuggestions",
-      command: "Toggle tag suggestions",
-      toast: enabledToast("Tag suggestions")
-    }
-  ];
-  function defaultKeySummary() {
-    return KEY_ACTIONS.map(({ action, label }) => `${label}: ${DEFAULT_KEYMAP[action].join("/")}`).join(", ");
-  }
-  function registerMenuCommands() {
-    const register = globalThis.GM_registerMenuCommand;
-    if (register === undefined) {
-      return;
-    }
-    for (const { key, command, toast } of TOGGLE_COMMANDS) {
-      register(command, () => {
-        const next = !getSettings()[key];
-        updateSetting(key, next);
-        showToast(toast(next));
-      });
-    }
-    register("Reset keymap to defaults", () => {
-      if (confirm(`Reset all keys to defaults?
-
-${defaultKeySummary()}`)) {
-        updateSetting("keymap", DEFAULT_KEYMAP);
-        showToast("Keymap reset to defaults");
-      }
-    });
+    return bytes[magic.length] === version;
   }
 
   // src/strings.ts
@@ -729,288 +763,6 @@ ${defaultKeySummary()}`)) {
       return value;
     }
     return value.replace(/\s+/gu, " ").trim();
-  }
-
-  // src/net/priority.ts
-  var VALUES = {
-    critical: 10,
-    navigation: 8,
-    facing: 7,
-    append: 6,
-    background: 4,
-    prefetch: 2
-  };
-  function priorityOf(requestClass) {
-    return VALUES[requestClass];
-  }
-
-  // src/net/queue.ts
-  class RequestQueue {
-    pending = [];
-    active = 0;
-    lastStart = 0;
-    timer;
-    seq = 0;
-    get activeCount() {
-      return this.active;
-    }
-    fetch(url, options = {}) {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      const controller = new AbortController;
-      const userSignal = options.signal;
-      const task = {
-        url,
-        init: options.init ?? {},
-        priority: options.priority ?? priorityOf("background"),
-        tag: options.tag ?? "default",
-        seq: this.seq++,
-        controller,
-        resolve,
-        reject,
-        detach: null
-      };
-      if (userSignal) {
-        if (userSignal.aborted) {
-          reject(userSignal.reason);
-          return promise;
-        }
-        const onAbort = () => {
-          const index = this.pending.indexOf(task);
-          if (index === -1) {
-            controller.abort(userSignal.reason);
-            return;
-          }
-          this.pending.splice(index, 1);
-          this.finish(task);
-          reject(userSignal.reason);
-        };
-        userSignal.addEventListener("abort", onAbort, { once: true });
-        task.detach = () => {
-          userSignal.removeEventListener("abort", onAbort);
-        };
-      }
-      this.pending.push(task);
-      this.pending.sort((a, b) => b.priority - a.priority || a.seq - b.seq);
-      this.pump();
-      return promise;
-    }
-    purge(predicate) {
-      for (let index = this.pending.length - 1;index >= 0; index--) {
-        const task = this.pending[index];
-        if (!task || !predicate(task)) {
-          continue;
-        }
-        this.pending.splice(index, 1);
-        this.finish(task);
-        task.reject(new RequestPurgedError);
-      }
-    }
-    pump() {
-      if (this.timer !== undefined) {
-        clearTimeout(this.timer);
-        this.timer = undefined;
-      }
-      const concurrency = Math.max(1, getSettings().netConcurrency);
-      while (this.active < concurrency) {
-        const task = this.pending.shift();
-        if (!task) {
-          return;
-        }
-        const now = Date.now();
-        const wait = this.lastStart + getSettings().netIntervalMs - now;
-        if (wait > 0) {
-          this.pending.unshift(task);
-          this.timer = setTimeout(() => {
-            this.pump();
-          }, wait);
-          return;
-        }
-        this.active++;
-        this.lastStart = now;
-        this.run(task);
-      }
-    }
-    async run(task) {
-      const timeout = setTimeout(() => {
-        task.controller.abort(new DOMException("Request timed out", "TimeoutError"));
-      }, Math.max(1000, getSettings().netTimeoutMs));
-      try {
-        const response = await fetch(task.url, {
-          ...task.init,
-          signal: task.controller.signal
-        });
-        task.resolve(response);
-      } catch (error) {
-        task.reject(error);
-      } finally {
-        clearTimeout(timeout);
-        this.active--;
-        this.finish(task);
-        this.pump();
-      }
-    }
-    finish(task) {
-      task.detach?.();
-      task.detach = null;
-    }
-  }
-  var net = new RequestQueue;
-
-  // src/net/http.ts
-  async function post(url, body, contentType, options) {
-    const response = await net.fetch(url, {
-      priority: priorityOf("critical"),
-      tag: options.tag,
-      signal: options.signal,
-      init: {
-        method: "POST",
-        body,
-        credentials: "same-origin",
-        headers: { "Content-Type": contentType }
-      }
-    });
-    if (!response.ok) {
-      throw new Error(`${options.failure} (${response.status}).`);
-    }
-    if (isLoginWall(await response.clone().text())) {
-      throw new LoginRequiredError;
-    }
-    return response;
-  }
-  function isLoginWall(body) {
-    return /<input[^>]+type=["']?password/i.test(body);
-  }
-  function postForm(url, body, options) {
-    return post(url, body, "application/x-www-form-urlencoded", options);
-  }
-  async function postJson(url, body, options) {
-    const response = await post(url, JSON.stringify(body), "application/json", options);
-    return await response.json();
-  }
-  var LIMIT_PATTERNS = [
-    /image viewing limit/i,
-    /not have sufficient gp/i,
-    /opening pages too fast/i,
-    /temporarily banned/i,
-    /too many requests/i
-  ];
-  function isRateLimitText(text) {
-    return LIMIT_PATTERNS.some((pattern) => pattern.test(text));
-  }
-  function isHtmlResponse(response, text) {
-    const type = response.headers.get("content-type") ?? "";
-    return type.includes("html") || /^\s*<(!doctype|html|head|body)/i.test(text);
-  }
-  var PAGE_CONTENT_SELECTOR = "#gn, #gdt, #gdd, #i1, #i2, #i3, #profile_form, #usertags_outer, #torrentinfo, .itg";
-  function hasPageContent(doc) {
-    return doc.querySelector(PAGE_CONTENT_SELECTOR) !== null;
-  }
-  function isLoginPage(doc) {
-    if (doc.querySelector("#sadpanda") !== null) {
-      return true;
-    }
-    return !hasPageContent(doc) && /sad panda/i.test(doc.title);
-  }
-  var SITE_SUFFIX = /\s*[-–—|]\s*(?:e-hentai|exhentai)(?:\.org)?(?:\s+galleries)?\s*$/i;
-  var NOT_FOUND_HEADINGS = {
-    "not found": true,
-    "not available": true,
-    "gallery not available": true
-  };
-  function normalizeHeading(text) {
-    return collapseWhitespace(text.replace(SITE_SUFFIX, "")).toLowerCase();
-  }
-  var NOT_FOUND_TEXT = /^(?:gallery not found|gallery not available|page not found|not found)\b/i;
-  function isNotFoundPage(doc) {
-    if (hasPageContent(doc)) {
-      return false;
-    }
-    const title = normalizeHeading(doc.title);
-    const heading = normalizeHeading(doc.querySelector("h1")?.textContent ?? "");
-    const body = doc.body.textContent.trim();
-    const bare = body.length > 0 && body.length < 800 && NOT_FOUND_TEXT.test(body);
-    return [title, heading].some((text) => /^404\b/.test(text) || NOT_FOUND_HEADINGS[text] === true) || bare;
-  }
-
-  // src/data/list-date.ts
-  var ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-  var POSTED_DATE = /^\s*(\d{4})-(\d{2})-(\d{2})(?=\s|$)/;
-  var MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  function isValidDate(value) {
-    const match = ISO_DATE.exec(value.trim());
-    if (!match?.[1] || !match[2] || !match[3]) {
-      return false;
-    }
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    if (month < 1 || month > 12 || day < 1) {
-      return false;
-    }
-    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-    const lastDay = month === 2 && leapYear ? 29 : MONTH_DAYS[month - 1] ?? 0;
-    return day <= lastDay;
-  }
-  function isDateRangeActive(range) {
-    return isValidDate(range.since) || isValidDate(range.until);
-  }
-  function postedDate(posted) {
-    const match = POSTED_DATE.exec(posted);
-    if (!match?.[1] || !match[2] || !match[3]) {
-      return null;
-    }
-    const day = `${match[1]}-${match[2]}-${match[3]}`;
-    return isValidDate(day) ? day : null;
-  }
-  function filterByDateRange(items, range) {
-    const since = isValidDate(range.since) ? range.since.trim() : null;
-    const until = isValidDate(range.until) ? range.until.trim() : null;
-    if (since === null && until === null) {
-      return { items: [...items], crossedSince: false };
-    }
-    const kept = [];
-    let crossedSince = false;
-    for (const item of items) {
-      const day = postedDate(item.posted);
-      if (day === null) {
-        continue;
-      }
-      if (since !== null && day < since) {
-        crossedSince = true;
-        continue;
-      }
-      if (until !== null && day > until) {
-        continue;
-      }
-      kept.push(item);
-    }
-    return { items: kept, crossedSince };
-  }
-  function withDateRange(url, range) {
-    const target = new URL(url);
-    setDateParam(target.searchParams, "eh_since", range.since);
-    setDateParam(target.searchParams, "eh_until", range.until);
-    return target.href;
-  }
-  function setDateParam(params, key, value) {
-    const date = value.trim();
-    if (isValidDate(date)) {
-      params.set(key, date);
-    } else {
-      params.delete(key);
-    }
-  }
-  function listRequestUrl(url) {
-    const target = new URL(url);
-    if (target.searchParams.has("seek")) {
-      return url;
-    }
-    const until = (target.searchParams.get("eh_until") ?? "").trim();
-    if (!isValidDate(until)) {
-      return url;
-    }
-    target.searchParams.set("seek", until);
-    return target.href;
   }
 
   // src/tags/model.ts
@@ -1327,6 +1079,1040 @@ ${defaultKeySummary()}`)) {
     return trimmed === "" ? suffix : `${trimmed} ${suffix}`;
   }
 
+  // src/tags/tag-counts-codec.ts
+  var MAGIC = [66, 69, 84, 67];
+  var VERSION2 = 1;
+  var HEADER_BYTES = 11;
+  var ENTRY_BYTES = 6;
+  var QUANT_MAX = 255;
+  function tagKeyIdFromFolded(folded) {
+    let high = 2166136261;
+    let low = 2654435769;
+    for (let index = 0;index < folded.length; index++) {
+      const code = folded.charCodeAt(index);
+      high = Math.imul(high ^ code, 16777619);
+      low = Math.imul(low ^ code, 16777619);
+    }
+    return (high >>> 0) * 256 + (low >>> 0 & 255);
+  }
+  function dequantiseCount(quantized, max) {
+    if (quantized <= 0 || max <= 0) {
+      return 0;
+    }
+    return Math.round(Math.expm1(quantized / QUANT_MAX * Math.log1p(max)));
+  }
+  function decodeTagCountsFromBytes(bytes) {
+    if (!hasCodecHeader(bytes, MAGIC, VERSION2, HEADER_BYTES)) {
+      return null;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const max = view.getUint32(5, true);
+    const entryCount = view.getUint16(9, true);
+    if (max <= 0 || bytes.length !== HEADER_BYTES + entryCount * ENTRY_BYTES) {
+      return null;
+    }
+    const counts = new Map;
+    for (let index = 0;index < entryCount; index++) {
+      const offset = HEADER_BYTES + index * ENTRY_BYTES;
+      const id = (bytes[offset] ?? 0) + (bytes[offset + 1] ?? 0) * 256 + (bytes[offset + 2] ?? 0) * 65536 + (bytes[offset + 3] ?? 0) * 16777216 + (bytes[offset + 4] ?? 0) * 4294967296;
+      const quantized = bytes[offset + 5] ?? 0;
+      counts.set(id, dequantiseCount(quantized, max));
+    }
+    return { counts, max };
+  }
+  function decodeTagCounts(base64) {
+    const bytes = bytesFromBase64(base64);
+    return bytes ? decodeTagCountsFromBytes(bytes) : null;
+  }
+
+  // src/tags/counts.ts
+  var CACHE_KEY = "eh:tag-counts:v3";
+  var CACHE_VERSION = 3;
+  var REMOTE_URLS = assetUrls("tag-counts.bin");
+  function isStoredCounts(value) {
+    return isRecord(value) && typeof value.updated === "number" && typeof value.payload === "string";
+  }
+  var countsStore = createStore({
+    key: CACHE_KEY,
+    version: CACHE_VERSION,
+    empty: () => ({ updated: 0, payload: "" }),
+    guard: isStoredCounts
+  }, gmStorage());
+  function readCountsCache() {
+    const stored = countsStore.read();
+    if (stored.payload === "") {
+      return null;
+    }
+    const counts = decodeTagCounts(stored.payload);
+    return counts ? { value: { counts, payload: stored.payload }, updated: stored.updated } : null;
+  }
+  async function fetchCounts() {
+    const { value, bytes } = await fetchAsset(REMOTE_URLS, decodeTagCountsFromBytes, {
+      label: "Tag count mirror",
+      timeoutMs: 12000
+    });
+    log(`Tag counts refreshed: ${value.counts.size} tags`);
+    return { counts: value, payload: base64FromBytes(bytes) };
+  }
+  var countsSnapshot = createSnapshot({
+    label: "tag counts",
+    ttlMs: ASSET_TTL_MS,
+    retryMs: ASSET_RETRY_MS,
+    load: fetchCounts,
+    readCache: readCountsCache,
+    writeCache: (cached, updated) => {
+      countsStore.write({ updated, payload: cached.payload });
+    },
+    onError: "cached"
+  });
+  function getTagCounts() {
+    return countsSnapshot.get()?.counts ?? null;
+  }
+  function resetTagCounts() {
+    countsSnapshot.reset();
+  }
+  function clearTagCountsCache() {
+    resetTagCounts();
+    countsStore.remove();
+  }
+  function onTagCountsChange(listener) {
+    return countsSnapshot.onChange((cached) => {
+      listener(cached.counts);
+    });
+  }
+  function loadTagCounts(force = false) {
+    return countsSnapshot.load(force).then((cached) => cached?.counts ?? null);
+  }
+
+  // src/tags/core-vocabulary.ts
+  var CORE_VOCABULARY_BASE64 = "RUhUSQEMAAZmZW1hbGXIAAAAAAZhaGVnYW8BBm1wdXRlZQEDbmFsBAwgaW50ZXJjb3Vyc2UBBHByb24ABGJhbGQBAmJ3AQNkc20B" + "CmVhdXR5IG1hcmsCCHN0aWFsaXR5AQppZyBhcmVvbGFlBQJzcwQFYmFsbHMFBnJlYXN0cwQHbmlwcGxlcwQFcGVuaXMCBGtpbmkC" + "BnNleHVhbAEIbGFja21haWwCB2luZGZvbGQCA29vZAQEbWVycwMEd2pvYgcFIGZhY2UBEG9keSBtb2RpZmljYXRpb24FB3dyaXRp" + "bmcEBHN1aXQCBW5kYWdlAQ9yZWFzdCBleHBhbnNpb24HB2ZlZWRpbmcCA2lkZQEGdWtrYWtlAghubnkgZ2lybAILc2luZXNzIHN1" + "aXQAB2NhdGdpcmwBDGhhc3RpdHkgYmVsdAIGZWF0aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0" + "aW9uAghzcGxheWluZwIFd2dpcmwBDHJvc3NkcmVzc2luZwMKdGNoIHRhdHRvbwEJdW1mbGF0aW9uAglubmlsaW5ndXMADGRhcmsg" + "bmlwcGxlcwUEc2tpbgIGdWdodGVyAQllZXB0aHJvYXQCCWZsb3JhdGlvbgIIbW9uIGdpcmwBE2lja2dpcmwgb24gZGlja2dpcmwM" + "BmZlbWFsZQECb2cDBSBnaXJsAhB1YmxlIHBlbmV0cmF0aW9uAQRydWdzAANlbGYBDHhoaWJpdGlvbmlzbQIOcG9zZWQgY2xvdGhp" + "bmcBEHllLWNvdmVyaW5nIGJhbmcDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2VtYWxlcyBvbmx5AwNkb20BBmlsbWlu" + "ZwIHbmdlcmluZwIWcnN0IHBlcnNvbiBwZXJzcGVjdGl2ZQIGc2huZXRzAwR0aW5nAQZvb3Rqb2ICBnggZ2lybAEHcmVja2xlcwEE" + "dXJyeQIGdGFuYXJpAANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQdpYW50ZXNzAQZsYXNzZXMCBG92ZXMBBW9i" + "bGluAgRra3VuAQRyb3VwAQN1cm8BBHlhcnUACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZ2ggaGVl" + "bHMBBG9ybnMDAnNlBQUgZ2lybAIGdHBhbnRzAQt1Z2UgYnJlYXN0cwUFcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGlt" + "cHJlZ25hdGlvbgEFbmNlc3QCB2ZsYXRpb24CDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxhY3Rh" + "dGlvbgIKcmdlIHRhdHRvbwIDdGV4AQRlYXNoAgVvdGFyZAEHaW5nZXJpZQEGb2xpY29uAAxtYWdpY2FsIGdpcmwCAmlkAgRrZXVw" + "Aglza2VkIGZhY2UDCXR1cmJhdGlvbgEDaWxmAwRraW5nAghuZCBicmVhawUHY29udHJvbAELb25zdGVyIGdpcmwCBHRoZXIBBXVz" + "Y2xlAAluYWthZGFzaGkBB2V0b3JhcmUBCmlwcGxlIGZ1Y2sHCHBpZXJjaW5nBwtzdGltdWxhdGlvbgECdW4CA3JzZQAKb3BwYWkg" + "bG9saQECcmMADXBhaW50ZWQgbmFpbHMDBHp1cmkCB250eWhvc2UCBXN0aWVzARBlbmlzIGVubGFyZ2VtZW50AQdpZXJjaW5nAgd4" + "aWUgY3V0AQdvbnl0YWlsAQdyZWduYW50Agpvc3RpdHV0aW9uAARyYXBlAQVpbWpvYgEEb2JvdAEEeW9uYQAEc2NhdAINaG9vbCBz" + "d2ltc3VpdAYLYm95IHVuaWZvcm0GDGdpcmwgdW5pZm9ybQEHZXggdG95cwEGaGVtYWxlAgVpYmFyaQEFaXN0ZXIBBGxhdmUCBmVl" + "cGluZwEMbWFsbCBicmVhc3RzBgVwZW5pcwIDZWxsAQRudWZmAQxvbGUgZGlja2dpcmwFBmZlbWFsZQEHcGFua2luZwEIcXVpcnRp" + "bmcBCHRvY2tpbmdzAxBtYWNoIGRlZm9ybWF0aW9uAgZyYXAtb24BB3dlYXRpbmcCBmltc3VpdAAEdGFpbAIHbGwgZ2lybAIGbmxp" + "bmVzAQZlYWNoZXICB250YWNsZXMBD2hpZ2ggaGlnaCBib290cwEFb21ib3kCBXJ0dXJlAQ1yYW5zZm9ybWF0aW9uAQh3aW50YWls" + "cwAOdW51c3VhbCBwdXBpbHMBEHJldGhyYSBpbnNlcnRpb24CB2luYXRpb24ADXZhZ2luYWwgYmlydGgBDWVyeSBsb25nIGhhaXIB" + "A29yZQEFdHViZXIABXdpbmdzAgN0Y2gBCG9sZiBnaXJsAAV4LXJheQAEeXVyaQRtYWxlyAAAAAAGYWhlZ2FvAQZtcHV0ZWUBA25h" + "bAQMIGludGVyY291cnNlAQRwcm9uAQtzcGh5eGlhdGlvbgAEYmFsZAECYm0BA2RzbQEKZWF1dHkgbWFyawIIc3RpYWxpdHkBCmln" + "IGFyZW9sYWUFAnNzBAViYWxscwUGcmVhc3RzBARsaXBzBAduaXBwbGVzBAVwZW5pcwIEa2luaQIGc2V4dWFsAQhsYWNrbWFpbAIH" + "aW5kZm9sZAIDb29kBARtZXJzAwR3am9iBwUgZmFjZQEQb2R5IG1vZGlmaWNhdGlvbgUHd3JpdGluZwQEc3VpdAIFbmRhZ2UBD3Jl" + "YXN0IGV4cGFuc2lvbgcHZmVlZGluZwIDaWRlAQZ1a2tha2UCC3NpbmVzcyBzdWl0AAZjYXRib3kBDGhhc3RpdHkgYmVsdAIGZWF0" + "aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0aW9uAghzcGxheWluZwEMcm9zc2RyZXNzaW5nAwp0" + "Y2ggdGF0dG9vAQl1bWZsYXRpb24CCW5uaWxpbmd1cwAMZGFyayBuaXBwbGVzBQRza2luAQllZXB0aHJvYXQCA21vbgEPaWNrZ2ly" + "bCBvbiBtYWxlAgJsZgECb2cDBCBib3kCEHVibGUgcGVuZXRyYXRpb24BBHJ1Z3MDAm5rAANlbGYBDHhoaWJpdGlvbmlzbQIOcG9z" + "ZWQgY2xvdGhpbmcBEHllLWNvdmVyaW5nIGJhbmcDBG1hc2sDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2VtaW5pemF0" + "aW9uAQZpbG1pbmcCFnJzdCBwZXJzb24gcGVyc3BlY3RpdmUCBnNobmV0cwMEdGluZwEJb2N1cyBhbmFsAgpvdCBsaWNraW5nBANq" + "b2ICBXggYm95AQdyZWNrbGVzAQR1cnJ5AANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQZsYXNzZXMCBG92ZXMB" + "BW9ibGluAgRra3VuAQRyb3VwAQN1cm8ACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZGRlbiBzZXgC" + "CGdoIGhlZWxzAQRvcm5zAwJzZQIGdHBhbnRzAQl1Z2UgcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGltcHJlZ25hdGlv" + "bgEFbmNlc3QCB2ZsYXRpb24CBHNla2kCDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxhY3RhdGlv" + "bgIOcmdlIGluc2VydGlvbnMGBnRhdHRvbwIDdGV4AQRlYXNoAgZnIGxvY2sCBW90YXJkAQdpbmdlcmllAgh6YXJkIGd1eQEKb25n" + "IHRvbmd1ZQAMbWFnaWNhbCBnaXJsAgJpZAIEa2V1cAIIbGVzIG9ubHkCCXNrZWQgZmFjZQMJdHVyYmF0aW9uAQNpa28CBWxraW5n" + "AghuZCBicmVhawUHY29udHJvbAEGb25zdGVyAQV1c2NsZQAJbmFrYWRhc2hpAQdldG9yYXJlAQppcHBsZSBmdWNrBwhwaWVyY2lu" + "ZwcLc3RpbXVsYXRpb24BAnVuAgNyc2UAB29sZCBtYW4BAnJjAA1wYWludGVkIG5haWxzAwR6dXJpAgdudHlob3NlAgVzdGllcwEQ" + "ZW5pcyBlbmxhcmdlbWVudAIFdHBsYXkBB2llcmNpbmcCB3hpZSBjdXQBB29ueXRhaWwBB3JlZ25hbnQCCm9zdGl0dXRpb24ABHJh" + "cGUBBWltam9iAQRvYm90AQR5b25hAARzY2F0Ag1ob29sIHN3aW1zdWl0Bgtib3kgdW5pZm9ybQYMZ2lybCB1bmlmb3JtAQdleCB0" + "b3lzAQZoaWJhcmkCBm90YWNvbgEEbGF2ZQIGZWVwaW5nAQptYWxsIHBlbmlzAgNlbGwBBG51ZmYBCG9sZSBtYWxlAQdwYW5raW5n" + "AQh0b2NraW5ncwMQbWFjaCBkZWZvcm1hdGlvbgIGcmFwLW9uAQd3ZWF0aW5nAgZpbXN1aXQABHRhaWwCBmxsIG1hbgIGbmxpbmVz" + "AQZlYWNoZXICB250YWNsZXMBD2hpZ2ggaGlnaCBib290cwEEaWFyYQEGb21naXJsAgVydHVyZQENcmFuc2Zvcm1hdGlvbgEId2lu" + "dGFpbHMADnVudXN1YWwgcHVwaWxzARByZXRocmEgaW5zZXJ0aW9uAgdpbmF0aW9uAA12YWdpbmFsIGJpcnRoAQ1lcnkgbG9uZyBo" + "YWlyAQhpcmdpbml0eQEDb3JlAgd5ZXVyaXNtAQV0dWJlcgAFd2luZ3MCA3RjaAEHb2xmIGJveQAFeC1yYXkABHlhb2kFbWl4ZWQX" + "AAAAABBhbmltYWwgb24gYW5pbWFsAAlib2R5IHN3YXAADWZmbSB0aHJlZXNvbWUBB3JvdHRhZ2UACWdhbmcgcmFwZQEEcm91cAAG" + "aW5jZXN0AgRzZWtpAA1rb2RvbW8gZG91c2hpAApsb3cgaW5jZXN0AA1tbWYgdGhyZWVzb21lAgt0IHRocmVlc29tZQEMdGYgdGhy" + "ZWVzb21lARF1bHRpbW91dGggYmxvd2pvYgUKcGxlIGFzc2pvYgkHZm9vdGpvYgkHaGFuZGpvYgkIcGFpcmluZ3MABm51ZGlzbQAI" + "b3lha29kb24ACXNoaW1haWRvbgANdHRtIHRocmVlc29tZQEEd2lucwVvdGhlcj4AAAAAAjNkAgkgaW1hZ2VzZXQDBW5vbi1oAAxh" + "aSBnZW5lcmF0ZWQDBW5vbi1oAQ9scmVhZHkgdXBsb2FkZWQBB25hZ2x5cGgCBmltYXRlZAIHdGhvbG9neQEGcnRib29rAAdjYXB0" + "aW9uAQRvbWljAwhwaWxhdGlvbgAKZGFraW1ha3VyYQEGZWZhY2VkAA5leHRyYW5lb3VzIGFkcwAGZmlndXJlARBvcmJpZGRlbiBj" + "b250ZW50AQ51bGwgY2Vuc29yc2hpcAYEb2xvcgAJZ291ZG91c2hpAAhoYXJkY29yZQEFb3cgdG8ACmluY29tcGxldGUAC2tvZG9t" + "byBvbmx5AA1taXNzaW5nIGNvdmVyARBvc2FpYyBjZW5zb3JzaGlwARB1bHRpLXdvcmsgc2VyaWVzBQ5wYW5lbCBzZXF1ZW5jZQAO" + "bm8gcGVuZXRyYXRpb24CD24taCBnYW1lIG1hbnVhbAYIaW1hZ2VzZXQEBG51ZGUCA3ZlbAEKdWRpdHkgb25seQAVb2JqZWN0IGlu" + "c2VydGlvbiBvbmx5AQt1dCBvZiBvcmRlcgAKcGFwZXJjaGlsZAEIaXhlbCBhcnQACHJlYWxwb3JuAgRkcmF3AgZwbGFjZWQBDG91" + "Z2ggZ3JhbW1hcgYLdHJhbnNsYXRpb24ABnNhbXBsZQEHY2FubWFyawIJcmVlbnNob3RzAQtrZXRjaCBsaW5lcwEJb3VzaHV1aGVu" + "AQt0ZXJlb3Njb3BpYwIHb3J5IGFyYwAJdGFua291Ym9uAQhoZW1lbGVzcwEIaW1lIHN0b3AACnVuY2Vuc29yZWQAC3ZhcmlhbnQg" + "c2V0AAt3YXRlcm1hcmtlZAEGZWJ0b29uAghzdGVybiBjZwgIaW1hZ2VzZXQIBW5vbi1oAAd5dWtrdXJpCGxvY2F0aW9uCAAAAAAM" + "YmF0aGluZyByb29tAQRlYWNoAAljbGFzc3Jvb20ACWluZmlybWFyeQAFb25zZW4ABXNhdW5hAQVlbnRvdQEMd2ltbWluZyBwb29s" + "BnBhcm9kecgAAAAADmFkdmVudHVyZSB0aW1lAQdtcGhpYmlhAQ5uaW1hbCBjcm9zc2luZwEIcmtuaWdodHMJCSBlbmRmaWVsZAEL" + "dGVsaWVyIHJ5emEBGHZhdGFyIHRoZSBsYXN0IGFpcmJlbmRlcgIGZW5nZXJzAQh6dXIgbGFuZQAOYmFrZW1vbm9nYXRhcmkCCG5n" + "IGRyZWFtAgR0bWFuAgd5b25ldHRhAQVlbiAxMAEIbGFjayBjYXQCBGVhY2gCCnVlIGFyY2hpdmUBDm9jY2hpIHRoZSByb2NrAgRy" + "dXRvABFjYXJkY2FwdG9yIHNha3VyYQELaGFpbnNhdyBtYW4BCW9kZSBnZWFzcwEIeWJlcnB1bmsACGRhbmRhZGFuAwhnYW5yb25w" + "YQIKcmtzdGFsa2VycwMSbGluZyBpbiB0aGUgZnJhbnh4Agl0ZSBhIGxpdmUBDGVhZCBvciBhbGl2ZQIHbHRhcnVuZQINdGVjdGl2" + "ZSBjb25hbgEGaWdpbW9uAQpyYWdvbiBiYWxsCwYgc3VwZXIMAXoHBXF1ZXN0ATZ1bmdlb24gbmkgZGVhaSBvIG1vdG9tZXJ1IG5v" + "IHdhIG1hY2hpZ2F0dGVpcnUgZGFyb3Uga2EACmVsZGVuIHJpbmcBDnF1ZXN0cmlhIGdpcmxzAApmYWlyeSB0YWlsAgVsbG91dAIO" + "dGUgZ3JhbmQgb3JkZXIFGWthbGVpZCBsaW5lciBwcmlzbWEgaWxseWEFCnN0YXkgbmlnaHQBDGluYWwgZmFudGFzeQ0EIHZpaQ4D" + "eGl2AglyZSBlbWJsZW0LBiBmYXRlcwwMdGhyZWUgaG91c2VzAhR2ZSBuaWdodHMgYXQgZnJlZGR5cwEFcm96ZW4BEnVsbG1ldGFs" + "IGFsY2hlbWlzdAAOZ2Vuc2hpbiBpbXBhY3QBDmlybHMgZnJvbnRsaW5lBgp1bmQgcGFuemVyAQxvYmxpbiBzbGF5ZXICGGNodXVt" + "b24gd2EgdXNhZ2kgZGVzdSBrYQIWZGRlc3Mgb2YgdmljdG9yeSBuaWtrZQISdG91YnVuIG5vIGhhbmF5b21lAQ9yYW5ibHVlIGZh" + "bnRhc3kDCnZpdHkgZmFsbHMBCnVpbHR5IGdlYXICBG5kYW0GBSBzZWVkAARoYWxvAgpycnkgcG90dGVyAgp6YmluIGhvdGVsAQhl" + "bGx0YWtlcgQIdXZhIGJvc3MBDWlnaHNjaG9vbCBkeGQLC29mIHRoZSBkZWFkAgNsZGEBB29sb2xpdmUCC25rYWkgZ2FrdWVuBwlz" + "dGFyIHJhaWwBFnlwZXJkaW1lbnNpb24gbmVwdHVuaWEAF2lqaXJhbmFpZGUgbmFnYXRvcm8tc2FuAQ9uZmluaXRlIHN0cmF0b3MC" + "BnV5YXNoYQAOanVqdXRzdSBrYWlzZW4CDHN0aWNlIGxlYWd1ZQAEay1vbgEZYWd1eWEtc2FtYSB3YSBrb2t1cmFzZXRhaQIRbm9q" + "byBva2FyaXNoaW1hc3UDDnRhaSBjb2xsZWN0aW9uAQ1lbW9ubyBmcmllbmRzAQtpbGwgbGEga2lsbAIKbSBwb3NzaWJsZQMNZXRz" + "dSBubyB5YWliYQIObmcgb2YgZmlnaHRlcnMBH29iYXlhc2hpLXNhbi1jaGkgbm8gbWFpZCBkcmFnb24CBmlrYXRzdQIZbWktc2Fu" + "IHdhIGtvbXl1c2hvdSBkZXN1LgIibm8gc3ViYXJhc2hpaSBzZWthaSBuaSBzeXVrdWZ1a3UgbwALbGFzdCBvcmlnaW4BEGVhZ3Vl" + "IG9mIGxlZ2VuZHMBCG92ZSBsaXZlCSEgbmlqaWdhc2FraSBoaWdoIHNjaG9vbCBpZG9sIGNsdWIKCHN1bnNoaW5lAQ15Y29yaXMg" + "cmVjb2lsABttYWhvdSBzaG91am8gbHlyaWNhbCBuYW5vaGECCXNzIGVmZmVjdAEGZXRyb2lkAQZvbnN0ZXIHByBodW50ZXIBDXVz" + "aG9rdSB0ZW5zZWkBD3kgaGVybyBhY2FkZW1pYQMfbGl0dGxlIHBvbnkgZnJpZW5kc2hpcCBpcyBtYWdpYwAGbmFydXRvARZlb24g" + "Z2VuZXNpcyBldmFuZ2VsaW9uAQxpZXIgYXV0b21hdGECB2ppc2FuamkACW9uZSBwaWVjZQUIdW5jaCBtYW4BK3JlIG5vIGltb3V0" + "byBnYSBrb25uYSBuaSBrYXdhaWkgd2FrZSBnYSBuYWkCBmlnaW5hbAEJc2hpIG5vIGtvAQd2ZXJsb3JkBAV3YXRjaAAicGFudHkg" + "YW5kIHN0b2NraW5nIHdpdGggZ2FydGVyYmVsdAEGZXJzb25hBwIgMwgBNAgBNQEGb2tlbW9uAQpyZXR0eSBjdXJlAg5pbmNlc3Mg" + "Y29ubmVjdAEYdWVsbGEgbWFnaSBtYWRva2EgbWFnaWNhAAxxdWVlbnMgYmxhZGUACHJhbm1hIDEyASRlIHplcm8ga2FyYSBoYWpp" + "bWVydSBpc2VrYWkgc2Vpa2F0c3UCC3NpZGVudCBldmlsAgV3cml0ZQEDd2J5AAtzYWlsb3IgbW9vbgEJY29vYnktZG9vARdlbmtp" + "IHplc3Nob3Ugc3ltcGhvZ2VhcgMKcmFuIGthZ3VyYQEGaGFudGFlAhBpbmdla2kgbm8ga3lvamluAg9va3VnZWtpIG5vIHNvbWEB" + "EW9uaWMgdGhlIGhlZGdlaG9nAxtvIGJpc3F1ZSBkb2xsIHdhIGtvaSBvIHN1cnUCCXVsY2FsaWJ1cgMOc291IG5vIGZyaWVyZW4B" + "CXBpZGVyLW1hbgIGbGF0b29uAgp5IHggZmFtaWx5AQtzc3MuZ3JpZG1hbgEHdGFyIGZveAUWdnMuIHRoZSBmb3JjZXMgb2YgZXZp" + "bAUEd2FycwINZXZlbiB1bml2ZXJzZQIMcmVldCBmaWdodGVyAwtpa2Ugd2l0Y2hlcwETdXBlciBtYXJpbyBicm90aGVycwUDbWFu" + "AQ93b3JkIGFydCBvbmxpbmUADnRhaW1hbmluIGFzYWdpCQh5dWtpa2F6ZQIZdGUgbm8geXV1c2hhIG5vIG5hcmlhZ2FyaQEKZWVu" + "IHRpdGFucwQYYWdlIG11dGFudCBuaW5qYSB0dXJ0bGVzAgRra2VuAhhuZ2VuIHRvcHBhIGd1cnJlbiBsYWdhbm4DG3NlaSBzaGl0" + "YXJhIHNsaW1lIGRhdHRhIGtlbgEQaGUgZWxkZXIgc2Nyb2xscwQRZmFpcmx5IG9kZHBhcmVudHMECmlkb2xtYXN0ZXIFCm5jcmVk" + "aWJsZXMED2xlZ2VuZCBvZiBrb3JyYQ4FemVsZGEFCW91ZCBob3VzZQQdbWVsYW5jaG9seSBvZiBoYXJ1aGkgc3V6dW1peWEECW93" + "bCBob3VzZQQIc2ltcHNvbnMEB3dpdGNoZXIBCW8gbG92ZS1ydQILYXJ1IHByb2plY3QCNWtpZG9raSBib3NvdHRvIHJ1c3NpYS1n" + "byBkZSBkZXJlcnUgdG9uYXJpIG5vIGFseWEtc2FuAgltYiByYWlkZXICDHVob3UgcHJvamVjdAEIc3VraWhpbWUACHVsdHJhbWFu" + "ARZtYSBtdXN1bWUgcHJldHR5IGRlcmJ5AQhuZGVydGFsZQEVemFraS1jaGFuIHdhIGFzb2JpdGFpAAh2b2NhbG9pZAAJd2FyaGFt" + "bWVyAQtvbmRlciB3b21hbgIPcmxkIG9mIHdhcmNyYWZ0AQ51dGhlcmluZyB3YXZlcwAFeC1tZW4BFWVub2JsYWRlIGNocm9uaWNs" + "ZXMgMgAweWFoYXJpIG9yZSBubyBzZWlzaHVuIGxvdmUgY29tZSB3YSBtYWNoaWdhdHRlaXJ1AS5vdWtvc28gaml0c3VyeW9rdSBz" + "aGlqb3Ugc2h1Z2kgbm8ga3lvdXNoaXRzdSBlAQd1LWdpLW9oABF6ZW5sZXNzIHpvbmUgemVybwEHb290b3BpYQljaGFyYWN0ZXLI" + "AAAAAAIyYgAIYWRhIHdvbmcBEmVyaXRoIGdhaW5zYm9yb3VnaAIEdGhlcgEDaHJpAQdrbyBhbWF1AQVsYmVkbwIOaWNlIG1hcmdh" + "dHJvaWQBB215IHJvc2UBCW5kcm9pZCAxOAIDZ2VsAQhwcGxlamFjawEDcXVhAQlybGVjY2hpbm8CD3RvcmlhIHBlbmRyYWdvbgEG" + "c3RvbGZvAhF1a2EgbGFuZ2xleSBzb3J5dQMLbmEgaWNoaW5vc2UGBXl1dWtpAQR0YWdvAQ15YSBzaGFtZWltYXJ1AwtrYSBrYW1p" + "c2F0bwAMYmFyYmFyYSBwZWdnAgR0bWFuAgd5b25ldHRhAQRlbGxlAQpvYSBoYW5jb2NrAQhyZW1lcnRvbgELdWxtYSBicmllZnMA" + "C2NhbW15IHdoaXRlAQZoaSBjaGkDDnNhdG8gbmlzaGlraWdpAgV1bi1saQEEcm93bgEGeW50aGlhAARkLnZhARFhcmsgbWFnaWNp" + "YW4gZ2lybAQEbmVzcwADZWxmAgdsZW4gam9lAQVtaWxpYQELcnphIHNjYXJsZXQBDHVsYSBsYXdyZW5jZQAEZmVybgEGaXJlZmx5" + "AQ5sYW5kcmUgc2NhcmxldAIIdXR0ZXJzaHkBB29jYWxvcnMBBnJpZXJlbgAFZ2FueXUCB3JkZXZvaXICB3dyIGd1cmEBBHVkYW8B" + "CXdlbiBzdGFjeQUIdGVubnlzb24ADGhhcmxleSBxdWlubgEEaWxkYQILbmEgc29yYXNha2kECHRhIGh5dWdhAgp0b3JpIGdvdG91" + "ARBvc2hpbWFjaGkgc3Vpc2VpAgx1c2hvdSBtYXJpbmUBBXUgdGFvABdpbGx5YXN2aWVsIHZvbiBlaW56YmVybgELbm8geWFtYW5h" + "a2EBDXp1a3UgbWlkb3JpeWEACGphbmUgZG9lAQtlYW5uZSBhbHRlcgcEZGFyYwEPaWdva3Ugbm8gZnVidWtpAgxsbCB2YWxlbnRp" + "bmUCAm54AQl1ZHkgaG9wcHMCBnJpIGhhbgAFa2Fma2ECAmdhAgxyaW4ga2FrdWRhdGUCBHN1bWkBBWVxaW5nAQtpbSBwb3NzaWJs" + "ZQILc2FraSByeXV1Z2UBEW9rb21pIHNhbmdvbm9taXlhAApsYXJhIGNyb2Z0AQNpbmsBBG9vbmEBDnVjeSBoZWFydGZpbGlhAgRt" + "aW5lAAttYWJlbCBwaW5lcwIKaSBzaGlyYW51aQIMa2kgbmlzaGlraW5vBAJtYQIHcmNoIDd0aAMLaW4ga2l0YWdhd2EEC3NhIGtp" + "cmlzYW1lAgF5AQZlZ3VtaW4CA3JjeQMEbWFpZAEKaWthIG1pc29ubwMKb3RvIG1pc2FrYQMJdSBoYXRzdW5lBQZuYWthbm8CEGxl" + "cyB0YWlscyBwcm93ZXICEG5hbW90byBubyByYWlrb3UCA3N0eQINdHN1cmkga2Fucm9qaQENb21vIHlhb3lvcm96dQILbmEgbWVn" + "aXN0dXMCD3JyaWdhbiBhZW5zbGFuZAAGbmFoaWRhAgJtaQIMcnV0byB1enVtYWtpAQlpY2sgd2lsZGUDB28gcm9iaW4FBnlhemF3" + "YQQJbGUgZGVtYXJhAgNsb3UCCW5vIG5ha2FubwAOb2NoYWtvIHVyYXJha2EBDHJpaGltZSBpbm91ZQATcGF0Y2hvdWxpIGtub3ds" + "ZWRnZQEJaW5raWUgcGllAQRvd2VyBQUgZ2lybAEQcmluY2VzcyBjZWxlc3RpYQkEbHVuYQkFcGVhY2gJBXplbGRhAgZvZHVjZXIB" + "A3lyYQANcmFpZGVuIHNob2d1bgMJbmJvdyBkYXNoAg9uZ2lrdSBtYXRzdW1vdG8CBHJpdHkCA3ZlbgEKZWkgYXlhbmFtaQMKbXUg" + "aGFrdXJlaQIBbQMMaWxpYSBzY2FybGV0AgVuYW1vbgICemUBC2lhcyBncmVtb3J5AghuIHRvc2FrYQIMbyB0c3VrYXRzdWtpAQRv" + "YmluAgJzYQILdWdlIHRoZSBiYXQBDXVtaSB1c2FnaXlhbWEABXNhYmVyAgxpbG9yIGp1cGl0ZXIHBG1hcnMIBmVyY3VyeQgDb29u" + "BwV2ZW51cwILa3VyYSBoYXJ1bm8ECXlhIGl6YXlvaQIIbXVzIGFyYW4CC25hZSBrb2NoaXlhAQdjYXRoYWNoARRlbnJpdHN1IG5v" + "IHRhdHN1bWFraQMDc2VpAQVoZW5oZQIGaWVsZGVyAwZtYWthemUDCW5qaSBpa2FyaQQKb2J1IGtvY2hvdQMPcm9rbyBzdW5hb29r" + "YW1pAQppbHZlciB3b2xmARFvbmljIHRoZSBoZWRnZWhvZwEGcGFya2xlAghpZGVyLW1hbgEHdGFyZmlyZQINZXZlbiB1bml2ZXJz" + "ZQEOdWd1aGEga2lyaWdheWECB3BlcmdpcmwFA21hbgAGdGFpaG91AQZlaXRva3UBDGlmYSBsb2NraGFydAEJb2tpIGFzdW1hAQVy" + "YWNlcgEGc3VuYWRlAQ93aWxpZ2h0IHNwYXJrbGUAB3ZhbXBpcmUBDGVsbWEgZGlua2xleQEEaWRlbAAEd2hpcAEJaWRvd21ha2Vy" + "AgN0Y2gBC29uZGVyIHdvbWFuAAh5YWUgbWlrbwIEbWF0bwEEZWxhbgEJb3IgZm9yZ2VyAw11aWNoaSBzaGlob2luAgt1bXUga29u" + "cGFrdQEMdWthcmkgeWFrdW1vAgJyaQIKdWthIGhheWFzZQAGem9tYmllBmFydGlzdMgAAAAAAzAtZwEEYmFrZQEEazBqMAAfMSBk" + "b3QgbWlnaSBuaSB6dXJhc2hpdGUga3VkYXNhaQIIZXF1YWxzIDIBBC1nb3UBBzAtc2hpb24CCzB5ZW4gbG9ja2VyAgU4IGdvdQID" + "ZWtpAgJtbwIDbmluAQMxMDMBATMCAS4BAjQ0AQY4c2FpLTQBAnVwAAEyAQkgZXF1YWxzIDgBAi1nAQEwAQIyMgEBMwEBNAECNTQB" + "Azg2YwEDYmxzAQ9jIGVxdWFscyBnYWxvcmUBA2dvdQEGbCBjb2xhAQNuby4BAXQACDMwMDAga3J3AQMxMDQBAzIyZwEEMzI5NwEC" + "NDYBBzUgbWFjaGkBCTYwbWIgeWFubwEBOAICa2IBAWUBBGh1cm8BAXUBAngzAAk0IGNvdWxvbWIBATEBAjQ1AARhZnJvBARidWxs" + "AQZoZW1hcnUBB2l1ZSBva2EBBGthZ2kDBXRzdWtpAQJscAEFbmRhdmECBWtvbWFuAQZzYW5hZ2kBBHlhbmUAAmJiAQJlYQEEbGlu" + "ZAIKdWUgc3RyaWtlcgEFb25uaWUCBHNzaGkBB3V0Y2hhLXUABWNsYW1wAgplIG1hc2FoaXJvAQhyYXp5IGRhZAIFaW1zb24CAm9j" + "AQ51dGVzZXh5cm9idXR0cwIDdmllAAZkYWdhc2kCB2lnYWlqaW4CAnRlAQRpa2swAANlbGYBC3JlY3Qgc2F3YXJ1AA1mYW4gbm8g" + "aGl0b3JpAQhlbGxhdHJpeAEJcmVkIHBlcnJ5AQl1ZXRha2lzaGkCBm1paGlrbwIGbmRvc2hpAw5zZXh5ZHJhZ29uYmFsbAIDcnJ5" + "AAlnYXJhYmF0b3oBBmluaGFoYQEFb2JsaW4CCHRvaCBqdWFuAQNyYW4BBXdlZ3dlAARoYWxvAgJyYQEFaW1lbm8DCnVyYSBraXNl" + "a2kCBHNhc2kCBHRvbWkBBW9ub2thAgZyb3N1a2UAAmllAQZuYXp1bWECBGNhc2UDCm9nbml0eW1vdXMBBnNoaWtlaQEMdGFiYSBo" + "aXJvc2hpAANqYWICCHkgbmF5bG9yAAZrYWRhdGgCA25vbgIMcm1hIHRhdHN1cm91AghzZSBkYWlraQMDdW1pAQVpcmFyYQIMc2Fy" + "YWdpIGd1bm1hAQZvbi1raXQCA3JyYQEHdW5hYm90bwMFb2ljaGkCCXJvaW51IGp1dQQJc3UgZ2F0YXJpAAZsYW1iZGEBC2VzbGll" + "IGJyb3duAQVpbGl0aAIDbmRhAQdvbGljZXB0AQR1bmNoAANtYWkCAm5hAwlrYWkga2Fpa2ECA3JpbwIEdGVtaQIBeQMBYQEJZGEg" + "c3Rhcm91AQJlaQIEbWU1MAIIb3d3aXRobWUBCGljaGlraW5nAgJrbwIFbW9uZWwCAnl1Agl6dXJ5dSBrZWkBBm9ndWRhbgIEbWlq" + "aQEEdXRzdQANbmFrYWppbWEgeXVrYQIGcnVob2RvAQllcm9tYXNoaW4BDmd0dmlzdWFsc3R1ZGlvAQJ1bgAFb2Jvcm8BDGh0b21v" + "IHRha3VqaQEEb3VzbwADcGFuAQdpZyBraW5nAQlvcml1cmV0YW4ABnJhYmJpdAIJdGF0YXRhdDc0AgN2ZW4BDG9tdWxvIG1hbmNp" + "bgEFdXpoYWkADXNhaGFyYSB3YXRhcnUCBWlnYWRvAgJraQMDdXJhAgtuYnVuIGt5b2RlbgEJaGlndXJlIHVpAwZtYWthemUDBG5k" + "b2wDAm9uAw13YXN1IG5vIG9raW5hAgp1dGVuIGRvdWppAQhpYyBwaHVjawEDb3JhAQZwYXJyb3cADHRha2FzdWdpIGtvdQQDdHN1" + "Aw1lZGEgaGlyb21pdHN1AgZtYWdvcm8BCGVyYXN1IG1jAQdoZSBraXRlAglpY2N3aXRoYXEBCG9tIHNtaXRoAQxzdWtpbm8ganlv" + "Z2kBEHdpc3RlZHNjYXJsZXR0NjABBnlwZS45MAAFdmlja3kCBWt0cmlhAAl4aWVycmEwOTkADHlhaGlybyBwb2NoaQICaXICBm1h" + "bW90bwQCdG8BCnVpZ2EgbmFvaGECC2tpbm8gbWluYXRvAgt6dWtpIG4gZGFzaAAGem91cmlrCWNvc3BsYXllcrQAAAAAFGEgYmFv" + "IHllc2hpIHR1IG5pYW5nAQZiYW42MDUBC2kgbGVpIGppYW5nAghuIG5ndXllbgEMa2FuZSBhcmFyYWdpAgplbWkxMDF4b3hvAQds" + "aWNla3lvAwluYSBiZWNrZXIBB25pbm55YW4BCW9pIG1vbW9rbwEIcXVhIGFyZWEBEHJhc2hpIGhlYXJ0Z3JhbW0CCHR5IGh1YW5n" + "AQV0c3VraQEJeHVuIGthb3JpAQR6YW1pAAxiYWlsaSBzaGlybHkCBm5iYW5rbwMDZ25pAg1vZXIgbXlzdGVyaWFsAwl6b3Vtb3pp" + "YWEBBmxhY3FrbAEEeW9ydQAKY2FvbWVpeXV5aQIHcnJ5IGtleQIKdGljb3JucGxheQMGdGFzaGFhAQxoZWVzZSBlZ2cwdjADCHJy" + "eSBuZWtvAgZ1bm1vbW8BC2llbiBjb3NwbGF5ABlkYSBkYSBqdWFuIGp1YW4geGlhbyBqdWFuAQllbW9uIG1pa2EAC2VseSBjb3Nw" + "bGF5AQRuYWtvAQlyenVvIG5pc2EBBnRzdSBrbwEGdmVuaW5rAA1mYW5ncWlhbyB5ZXBvAQ9lbmcgamlhbmcgamlhbmcBB3Jhbnhj" + "b3MAE2c0NCB3YSBraXp1dHN1a2FuYWkBEXJlZW4gY2hhY2hhIGppYW5nAQh1YXhpY2hhbgITb3FpIG1peGlhbnhpYW4gbWlhbwAF" + "aGFjaGkCCG5hIGJ1bm55AwVlIGFtZQESZWxseSB2b24gdmFsZW50aW5lAQppZG9yaSByb3NlAQhvc2hpbGlseQEKdWEgcWkgaGFu" + "YQMJbGluZyBoYW5hAAtqZWFuIHdhbndhbgEQaWFvcm91amkgd2Fsa3VyZQIDdXFpBAV1amVhbgMDeWFuAQp1bmtlbnN0ZWluABFr" + "YWd1cmF6YWthIG1hZnV5dQIJbGlua2EgZm94AgtuZWtvLWthbWlhbwIIdGllY2FrZXkCCHlhIGh1YW5nBQZuaWxzb24BCGlraSBy" + "b3NlAgdtbWllIG1pAgpyaWtvIGNlbGlhAgR0YXJvAQZva3VodWkECHJhIGNoaXlvAQZ1dWtvIHcAEWxhcmlzc2Egcm9jaGVmb3J0" + "AQdlbmZyaWVkAQppbnppIGppYW5nAQZtdXNpY2wBCW9zdHdpbmQxMAIPdmVseXNwYWNla2l0dGVuAQ11ZXIgZGEgbW93YW5nAg1v" + "IHhpYW9saSBtaWFvAgRzdDc3AAVtYWNoaQIGa2FjaGFuAghyaWEgZGVzdQIJc2FrbyB5dW1lAwloaXJvIHl1a2kBCGVubWVudGFu" + "AglyY3VyeWxhbXACCnNzaWUgaHVhbmcBDmlhbmJpbmcgeGlhbmVyAglrb2ppYW5nd3cECW1pIGhva2luYQINbmF6dWtpIGhpa2Fy" + "dQINeWFtb3RvIHNha3VyYQMDb2tpAgl6aGltYW9xaXUBBm9tb2NhdAAGbmEtc2FuAgRnaXNhAgRpdGFvAgVuZ29uZwILdGggc29r" + "b2xvdmEBCmVrb2tveW9zaGkCBG5la28BCWlhbm5pYW4gZAIEeWV5ZQEIb3JhIGZhd24BBHlha28AC29raXRhIHJpbmthAQRtaW1p" + "AQluaSBoaXRvbWkDD2tzaXlhIHNvZmluaWt1bQEJdG9oYXJhIGFuAAhwZW5rYXJ1aQEEaWdtYQIFcGluYWkBDm90YXRvIGdvZHpp" + "bGxhAQl1cmlucHVwcHkADHFpc2lrdWFpIHdpaQIIdWhlIGtlamkACHJha3VyYWt1AgJuMwEFZWZlZW4CAm5nAQxpbmdvIG1pdHN1" + "a2kCBm8tY2hhbgMCa28CBXNzb2Z0AQlvbmdyb25nemkBCnlua2VyYmVsbGUAC3NhZGFrbyBtb21vAgJrdQQGcmEgbm9hAgZuZHUt" + "NjkCCm90b21lIGxvdmUCBHlha28BDWVubHVvIGNhaXR1YW4BCWhhcmtwYXJ0eQINaWthIHhpYW9sdSBsdQMJbWl6dSBuYWdpCAR5" + "dW5vBAZvdHN1a2kDCnJhZ2EgeWFua28DC3p1a3UgaG9uYW1pAg11YW5nIG11IGZ1IHN1AQhpYW8gZGluZwEDb2xhAAh0YW5ndGFu" + "ZwINbyBsaWFuZyBhemhhaQEHaW55IGFzYQIKdGkgY29zcGxheQEEb2thcgIKbW95byBqaWFuZwEHc3Vib21pbgMHa2kgZGVzdQMJ" + "bm55YW5jaGFuAQ55b3VkdWtpIG1hcnlvdQAHdW1la28gagEGcG1pbmFhAQlydW1pYnVubnkBA3l1eQANdmFsZXJ5IGhpbWVyYQEJ" + "ZWN0b3JmaXNoAQdpbm5lZ2FsAgxydHVhbCBnZWlzaGEAB3hhbnNvb24BCWlhIHhpYSB6aQIGZGFpZGFpAgZuZyBsYW4BCnVlIHFp" + "LXNhbWEADnlhbWF6YWtpIHJlaW5hAwVpc3VuZwIEbmd5aQIHb3lhb3F3cQEIaW5nIGxpbGkBCXVraSBhc3RyYQIFcmljaGEEBWtv" + "ZHhkAgZ1Zm9yaWEAC3podWltaW5neW91BWdyb3VwyAAAAAAQLi4uIG1vdSBpaSBkZXN1LgEBNwEDbWl6AAcwLXBhcnRzAQMwMDAB" + "CTEyMzQ1Njc4OQEBMgEGMy0zMjk3AQE0AgRjdXJhAgl0aCBoZWF2ZW4CAXUBBTcyNWNvAQY4NDZuZXQCBGJhc2UBAjk2AAExAQ4w" + "LWppa2FuIHN1aW1pbgMKbWFuIGJhcmlraQIGLjEwbWh6AggwMDAwMDAwMAQCYXADBGFjcmUDB3llbm1vZmECCzIgZ291c2hpdHN1" + "AgQ2Z291AwFtAgRtaWxlAg9wYXNlYyBubyBrYW5hdGECBndhZGF4eAIJeWVuIGpvbmRvAQIxMAMHLWdyb292ZQMBdQIIMSB0b3Vi" + "YW4CAjIyAwFrAQcyLWppZ2VuAgNjdXQCCGthZmZlaW5zAQEzAgJjbQEMNDBrbSBzbGFzaCBoAgQ4YnBtAgZsb2xpdGEBBzUyaGVy" + "dHoBBTYgc2FpAgcwMDAgYWxsAgVrZW5tZQEKNzU2IHN0dWRpbwICODcCAmluAgF3AQ44MG1pbGxpIGNhbm5vbgMBcgIBMwIHNSBz" + "b3VrbwIKNyBzZWlidXRzdQIGbWFzdGVyAQc5bGxkZGtrAQNiaXQBBGdheWEBA29yOAAHMiBjYXJhdAEIMCBwbHVzIDECETAwa2Nh" + "bCBzaGFrZSBjbHViAgEzAgs5IGdvdXNoaXRzdQIGbGlxdWlkAgJudAICcjACBnR3ZW50eQEFMy40ZG8CCDExNzlyb2NrAQY0IHBh" + "Z2UCBjEgaW5jLgEKNTBwb25vcm9qaQEBNwICM2sBAzk2MQICOTABAWIBBWN2LnNzAQpkIGNyZWF0aXZlAgUtbm90ZQEBaAEIamlt" + "dXN1YmkBAW0BAm5kAwUgbGlmZQEHcC1jb2xvcgEGc3Ryb2tlAQl0YWlscXVlZW4BAnZzAQV6aWdlbgAMMyBjb2xvcnMgY2F0CgVv" + "cm9uYQIFb24gMTABCC0yIGdhZ2VuAgdtZWdhLm5lAQguNXRvdXNpbgEhMCBrb3VoYW4ga2FyYSBoYWppbWVydSBlcm8gZG91amlu" + "AgMwY20CCzEgZ291c2hpdHN1AgttaW4tNTAwMHllbgEIMTA0dHlvbWUBBTIwYnBtAgMxZ28BAjMzAQw2MCBkZWdyZWVzIGMCAWsB" + "ATgCBC41IGMCBXNoaWtpAQQ5ZG1wAgV4cmVhbQEGZCBsaXZlAgF0AQNlZ2cBA2pvdQEEbGJveAAINC41c3BhY2UBCTAwMTAgMS1n" + "bwICNDACBmRlbmllcgEKMzRub3Rmb3VuZAEINjQ5IGNsdWIBAjcxAgJzcAEJYy1mYW50YXN5AQNkaXABAWgCBGFuZHMBDGsgc2Vp" + "c2FrdXNobwEJb3I1IHdvcmtzAQZzZWFzb24CC3QgaW5qZWN0aW9uAAQ1IDA2AgdzbGFzaCA0AAdhaGVtYXJ1AQ5rYXRzdWtpIHNv" + "dWtlbgESbGljZSBubyB0YWthcmFiYWtvAAJiYgEIbGFjayBkb2cFBm53aGl0ZQMCemUCBW9zc29tAAhjYXR0bGV5YQEIaHJpc3Rt" + "YXMBBWlwaGVyAQVsZXN0YQEGcmltc29uAgNvd24BBnljbG9uZQIFbnRoaWEADWRpZ2l0YWwgbG92ZXIBBm1tLmNvbQADZWxmAApm" + "YXRhbHB1bHNlAQZpcmVmbHkABWdob3N0AQZsYXNzZXMABWhhcmVtAwRuZXNzAQhlbnRhaWtleQEFaWJpa2kADGxhcGlzIGxhenVs" + "aQEFaWxpdGgBDG9saXRhY2hhbm5lbAAEbWFuYQIBeQECZWkCDHRyb2JheSBjb21peAEEaXN0eQEGb25vZXllAApuYXJ1aG8tZG91" + "AgR5dXRhAQ9vcmFuZWtvLW5vLXRhbWEBAnVuAgR0YWt1AAVvYm9ybwEHeWFrb2RvbgAIcGFsY29taXgCB250eWhvc2UBBW9pc29u" + "AAZyYWJiaXQBBmViZWNjYQAHc2FpZ2FkbwEHaGFnYmFzZQIGaW1hcGFuAQppbGVudCBoaWxsAQRsYXZlAQV0ZWxsYQIDb3JtAQZ1" + "enVyYW4EAnlhAAR0YWlsAQVvbWJveQAFdmVub20ACHlhbWFtb3RvCGxhbmd1YWdlVwAAAAAJYWZyaWthYW5zAQdsYmFuaWFuAQVy" + "YWJpYwMEbWFpYwIGbWVuaWFuAAdiZW5nYWxpAQZvc25pYW4BCHVsZ2FyaWFuAgVybWVzZQAHY2F0YWxhbgEGZWJ1YW5vAQZoaW5l" + "c2UBA3JlZQMDb2xlAgZvYXRpYW4BBHplY2gABmRhbmlzaAEEdXRjaAAHZW5nbGlzaAEIc3BlcmFudG8CBnRvbmlhbgAHZmlubmlz" + "aAEFcmVuY2gACGdlb3JnaWFuAgRybWFuAQRyZWVrAQd1amFyYXRpAAZoZWJyZXcBBGluZGkBBG1vbmcBCHVuZ2FyaWFuAAlpY2Vs" + "YW5kaWMBCW5kb25lc2lhbgEEcmlzaAEGdGFsaWFuAAhqYXBhbmVzZQIGdmFuZXNlAAdrYW5uYWRhAgR6YWtoAQRobWVyAQVvcmVh" + "bgEGdXJkaXNoAAZsYWRpbm8CAW8CA3RpbgMEdmlhbgAHbWFyYXRoaQEIb25nb2xpYW4AB25kZWJlbGUBBWVwYWxpAQhvcndlZ2lh" + "bgAFb3JvbW8ACnBhcGlhbWVudG8CBHNodG8BBmVyc2lhbgEFb2xpc2gCCHJ0dWd1ZXNlAQZ1bmphYmkAB3Jld3JpdGUBB29tYW5p" + "YW4BBnVzc2lhbgAFc2FuZ28DBXNrcml0AQZlcmJpYW4BBGhvbmEBBWxvdmFrBAVlbmlhbgEFb21hbGkBBnBhbmlzaAEGd2FoaWxp" + "AgVlZGlzaAAHdGFnYWxvZwIDbWlsAQVlbHVndQIKeHQgY2xlYW5lZAQObGVzcyBuYXJyYXRpdmUBA2hhaQEGaWJldGFuAgZncmlu" + "eWEBCXJhbnNsYXRlZAEGdXJraXNoAAl1a3JhaW5pYW4BA3JkdQAKdmlldG5hbWVzZQAFd2Vsc2gAB3lpZGRpc2gABHp1bHUHcmVj" + "bGFzcwsAAAAACGFydGlzdGNnAQhzaWFucG9ybgAHY29zcGxheQAJZG91amluc2hpAAZnYW1lY2cACGltYWdlc2V0AAVtYW5nYQED" + "aXNjAAVub24taAAHcHJpdmF0ZQAHd2VzdGVybg==";
+  var CORE_COUNTS_BASE64 = "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" + "/52qdruz/8M=";
+
+  // src/tags/index-codec.ts
+  var MAGIC2 = [69, 72, 84, 73];
+  var FORMAT_VERSION = 1;
+  var HEADER_BYTES2 = 7;
+  var MAX_NAMESPACES = 128;
+  var MAX_KEYS_PER_NAMESPACE = 200000;
+  var MAX_KEY_BYTES = 4096;
+  function readVarint(bytes, offset) {
+    let value = 0;
+    let shift = 0;
+    let position = offset;
+    while (position < bytes.length && shift <= 21) {
+      const byte = bytes[position];
+      position++;
+      if (byte === undefined) {
+        return null;
+      }
+      value |= (byte & 127) << shift;
+      if ((byte & 128) === 0) {
+        return { value, next: position };
+      }
+      shift += 7;
+    }
+    return null;
+  }
+  function decodeTagVocabulary(bytes) {
+    if (!hasCodecHeader(bytes, MAGIC2, FORMAT_VERSION, HEADER_BYTES2)) {
+      return null;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const namespaceCount = view.getUint16(5, true);
+    if (namespaceCount === 0 || namespaceCount > MAX_NAMESPACES) {
+      return null;
+    }
+    let offset = HEADER_BYTES2;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const groups = new Map;
+    try {
+      for (let groupIndex = 0;groupIndex < namespaceCount; groupIndex++) {
+        if (offset >= bytes.length) {
+          return null;
+        }
+        const idLength = bytes[offset];
+        offset++;
+        if (idLength === undefined || idLength === 0 || offset + idLength + 4 > bytes.length) {
+          return null;
+        }
+        const namespace = decoder.decode(bytes.subarray(offset, offset + idLength));
+        offset += idLength;
+        const keyCount = view.getUint32(offset, true);
+        offset += 4;
+        if (keyCount > MAX_KEYS_PER_NAMESPACE) {
+          return null;
+        }
+        const keys = [];
+        let previous = "";
+        for (let keyIndex = 0;keyIndex < keyCount; keyIndex++) {
+          if (offset >= bytes.length) {
+            return null;
+          }
+          const prefix = bytes[offset];
+          offset++;
+          const length = readVarint(bytes, offset);
+          if (prefix === undefined || length === null) {
+            return null;
+          }
+          offset = length.next;
+          if (prefix > previous.length || length.value > MAX_KEY_BYTES || offset + length.value > bytes.length) {
+            return null;
+          }
+          const suffix = decoder.decode(bytes.subarray(offset, offset + length.value));
+          offset += length.value;
+          const key = previous.slice(0, prefix) + suffix;
+          if (key === "") {
+            return null;
+          }
+          keys.push(key);
+          previous = key;
+        }
+        groups.set(namespace, keys);
+      }
+    } catch {
+      return null;
+    }
+    return offset === bytes.length ? groups : null;
+  }
+
+  // src/tags/core.ts
+  var data;
+  function coreTagData() {
+    if (data !== undefined) {
+      return data;
+    }
+    const bytes = bytesFromBase64(CORE_VOCABULARY_BASE64);
+    const groups = bytes === null ? null : decodeTagVocabulary(bytes);
+    if (groups === null) {
+      data = null;
+      return null;
+    }
+    const countBytes = bytesFromBase64(CORE_COUNTS_BASE64);
+    const counts = countBytes === null ? null : decodeTagCountsFromBytes(countBytes);
+    data = { groups, counts };
+    return data;
+  }
+
+  // src/tags/db.ts
+  var CACHE_KEY2 = "eh:tag-index:v2";
+  var USAGE_KEY = "eh:tag-usage:v1";
+  var TAG_COMPLETIONS_KEY = "eh:tag-completions:v1";
+  var CACHE_VERSION2 = 2;
+  var USAGE_LIMIT = 200;
+  var COMPLETION_LIMIT = 200;
+  var DAY_MS = 24 * 60 * 60 * 1000;
+  var COMPLETION_TTL_MS = 90 * DAY_MS;
+  var COMPLETION_HALF_LIFE_MS = 30 * DAY_MS;
+  var DOWNLOAD_TIMEOUT_MS = 12000;
+  var INDEX_URLS = assetUrls("tag-index.bin");
+  function isStoredIndex(value) {
+    return isRecord(value) && typeof value.updated === "number" && isRecord(value.payload);
+  }
+  var indexStore = createStore({
+    key: CACHE_KEY2,
+    version: CACHE_VERSION2,
+    empty: () => ({ updated: 0, payload: {} }),
+    guard: isStoredIndex
+  }, gmStorage());
+  var usageStore = createStore({ key: USAGE_KEY, version: 1, empty: () => ({}), guard: isRecord }, gmStorage());
+  var completionStore = createStore({ key: TAG_COMPLETIONS_KEY, version: 1, empty: () => ({}), guard: isRecord }, gmStorage());
+  function tagId(ns, key) {
+    return `${ns}\x00${key}`;
+  }
+  function attachCounts(entries, counts) {
+    if (!counts || counts.max <= 0) {
+      return 0;
+    }
+    const { counts: byId, max } = counts;
+    for (const entry of entries) {
+      entry.count = byId.get(tagKeyIdFromFolded(entry.folded)) ?? 0;
+    }
+    return max;
+  }
+  function keysAreSorted(entries) {
+    for (let index = 1;index < entries.length; index++) {
+      const previous = entries[index - 1];
+      const current = entries[index];
+      if (previous !== undefined && current !== undefined && previous.key > current.key) {
+        return false;
+      }
+    }
+    return true;
+  }
+  function buildIndex(groups, updated, counts) {
+    const entries = [];
+    const byNamespace = new Map;
+    for (const namespace of TAG_NAMESPACES) {
+      const keys = groups.get(namespace.id);
+      if (!keys || keys.length === 0) {
+        continue;
+      }
+      const scoped = [];
+      for (const key of keys) {
+        const folded = fold(key);
+        const entry = { ns: namespace, key, folded, count: 0 };
+        entries.push(entry);
+        scoped.push(entry);
+      }
+      if (!keysAreSorted(scoped)) {
+        scoped.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+      }
+      byNamespace.set(namespace.id, scoped);
+    }
+    const maxCount = attachCounts(entries, counts);
+    let lookup = null;
+    return {
+      entries,
+      updated,
+      byNamespace,
+      maxCount,
+      get lookup() {
+        if (lookup === null) {
+          lookup = new Map;
+          for (const entry of entries) {
+            lookup.set(tagId(entry.ns.id, entry.key), entry);
+          }
+        }
+        return lookup;
+      }
+    };
+  }
+  function buildTagIndexFromGroups(groups, updated = Date.now(), counts) {
+    const index = buildIndex(groups, updated, counts);
+    if (index.entries.length === 0) {
+      throw new Error("Tag database is empty");
+    }
+    return index;
+  }
+  function encodeIndex(index) {
+    const payload = {};
+    for (const [id, entries] of index.byNamespace) {
+      payload[id] = entries.map((entry) => entry.key);
+    }
+    return payload;
+  }
+  function decodeIndex(payload, updated, counts) {
+    const groups = new Map;
+    for (const [id, keys] of Object.entries(payload)) {
+      if (Array.isArray(keys)) {
+        const cleaned = [];
+        for (const key of keys) {
+          if (typeof key !== "string") {
+            continue;
+          }
+          const value = cleanTagKey(key);
+          if (value !== "") {
+            cleaned.push(value);
+          }
+        }
+        groups.set(id, cleaned);
+      }
+    }
+    const index = buildIndex(groups, updated, counts);
+    return index.entries.length === 0 ? null : index;
+  }
+  function withTagCounts(current, counts) {
+    if (!counts || counts.max <= 0) {
+      return current;
+    }
+    const maxCount = attachCounts(current.entries, counts);
+    return {
+      entries: current.entries,
+      updated: current.updated,
+      byNamespace: current.byNamespace,
+      maxCount,
+      get lookup() {
+        return current.lookup;
+      }
+    };
+  }
+  function readIndexCache() {
+    const stored = indexStore.read();
+    const counts = getTagCounts();
+    const index = decodeIndex(stored.payload, stored.updated, counts ?? undefined);
+    return index ? { value: { index, counts }, updated: stored.updated } : null;
+  }
+  var core;
+  var coreCounts = null;
+  function coreIndex() {
+    if (core === undefined) {
+      const generated = coreTagData();
+      const counts = getTagCounts() ?? generated?.counts ?? null;
+      core = generated === null ? null : buildTagIndexFromGroups(generated.groups, 0, counts ?? undefined);
+      coreCounts = counts;
+    }
+    return core;
+  }
+  async function fetchVocabulary() {
+    const { value } = await fetchAsset(INDEX_URLS, decodeTagVocabulary, {
+      label: "Tag index mirror",
+      timeoutMs: DOWNLOAD_TIMEOUT_MS
+    });
+    return value;
+  }
+  async function fetchIndex() {
+    try {
+      const vocabulary = await fetchVocabulary();
+      const counts = getTagCounts();
+      const index = buildTagIndexFromGroups(vocabulary, Date.now(), counts ?? undefined);
+      log(`Tag index downloaded: ${index.entries.length} tags`);
+      return { index, counts };
+    } catch (error) {
+      warn("Tag vocabulary download failed", error);
+      throw error;
+    }
+  }
+  var indexSnapshot = createSnapshot({
+    label: "tag index",
+    ttlMs: ASSET_TTL_MS,
+    retryMs: ASSET_RETRY_MS,
+    load: fetchIndex,
+    readCache: readIndexCache,
+    writeCache: (bound, updated) => {
+      indexStore.write({ updated, payload: encodeIndex(bound.index) });
+    },
+    onError: "throw"
+  });
+  var coreChanges = createEmitter();
+  function onTagIndexChange(listener) {
+    const offSnapshot = indexSnapshot.onChange(listener);
+    const offCore = coreChanges.subscribe(listener);
+    return () => {
+      offSnapshot();
+      offCore();
+    };
+  }
+  function applyTagCounts(counts) {
+    const current = indexSnapshot.get();
+    if (current !== null && current.counts !== counts) {
+      const next = withTagCounts(current.index, counts);
+      if (next !== current.index) {
+        indexSnapshot.publish({ index: next, counts });
+      }
+    }
+    if (core !== undefined && core !== null && coreCounts !== counts) {
+      const next = withTagCounts(core, counts);
+      if (next !== core) {
+        core = next;
+        coreCounts = counts;
+        if (current === null) {
+          coreChanges.emit();
+        }
+      }
+    }
+  }
+  onTagCountsChange(applyTagCounts);
+  function getTagIndex() {
+    return indexSnapshot.get()?.index ?? coreIndex();
+  }
+  function resetTagIndex() {
+    indexSnapshot.reset();
+  }
+  function clearTagIndexCache() {
+    resetTagIndex();
+    indexStore.remove();
+  }
+  async function loadTagIndex(force = false) {
+    loadTagCounts().catch((error) => {
+      warn("Tag popularity refresh failed", error);
+    });
+    if (!force) {
+      const cached = indexSnapshot.get();
+      if (cached) {
+        const loaded = await indexSnapshot.load(false);
+        return loaded?.index ?? cached.index;
+      }
+      const fallback = coreIndex();
+      if (fallback) {
+        indexSnapshot.load(false).catch((error) => {
+          warn("Tag index background download failed", error);
+        });
+        return fallback;
+      }
+    }
+    const loaded = await indexSnapshot.load(force);
+    if (!loaded) {
+      throw new Error("Could not load the tag index");
+    }
+    return loaded.index;
+  }
+  function readTimedCounts(stored, ttl, now = Date.now()) {
+    const counts = new Map;
+    for (const [id, value] of Object.entries(stored)) {
+      if (typeof value !== "object" || value === null) {
+        continue;
+      }
+      const count = "count" in value ? value.count : null;
+      const lastUsed = "lastUsed" in value ? value.lastUsed : null;
+      if (typeof count !== "number" || typeof lastUsed !== "number") {
+        continue;
+      }
+      if (ttl !== undefined && now - lastUsed >= ttl) {
+        continue;
+      }
+      counts.set(id, { count, lastUsed });
+    }
+    return counts;
+  }
+  function writePruned(counts, limit, write) {
+    if (counts.size > limit) {
+      const oldest = [...counts.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed).slice(0, counts.size - limit);
+      for (const [idToDrop] of oldest) {
+        counts.delete(idToDrop);
+      }
+    }
+    write(Object.fromEntries(counts));
+  }
+  var usage = null;
+  function readUsage() {
+    if (usage) {
+      return usage;
+    }
+    usage = readTimedCounts(usageStore.read());
+    return usage;
+  }
+  function tagUsage() {
+    return readUsage();
+  }
+  function recordTagUse(ns, key) {
+    const current = readUsage();
+    const id = tagId(ns, key);
+    const previous = current.get(id);
+    current.set(id, {
+      count: (previous?.count ?? 0) + 1,
+      lastUsed: Date.now()
+    });
+    writePruned(current, USAGE_LIMIT, (value) => usageStore.write(value));
+  }
+  function normalizePrefix(prefix) {
+    return fold(prefix).trim();
+  }
+  function completionId(input) {
+    return [input.prefixNs, normalizePrefix(input.prefix), input.ns, input.key].join("\x00");
+  }
+  function tagCompletions(now = Date.now()) {
+    return readTimedCounts(completionStore.read(), COMPLETION_TTL_MS, now);
+  }
+  function recordTagCompletion(input, now = Date.now()) {
+    if (normalizePrefix(input.prefix) === "") {
+      return;
+    }
+    const completions = readTimedCounts(completionStore.read(), COMPLETION_TTL_MS, now);
+    const id = completionId(input);
+    const previous = completions.get(id);
+    completions.set(id, { count: (previous?.count ?? 0) + 1, lastUsed: now });
+    writePruned(completions, COMPLETION_LIMIT, (value) => completionStore.write(value));
+  }
+
+  // src/ui/error-text.ts
+  function errorText(error, fallback = "Something went wrong.") {
+    return error instanceof Error ? error.message : fallback;
+  }
+
+  // src/ui/dom.ts
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (value === null || value === undefined || value === false) {
+        continue;
+      }
+      if (key === "class") {
+        node.className = String(value);
+      } else if (key === "text") {
+        node.textContent = String(value);
+      } else if (key === "style") {
+        node.style.cssText = String(value);
+      } else if (key.startsWith("on") && typeof value === "function") {
+        node.addEventListener(key.slice(2).toLowerCase(), value);
+      } else {
+        node.setAttribute(key, String(value));
+      }
+    }
+    appendChildren(node, children);
+    return node;
+  }
+  function buttonEl(props = {}, ...children) {
+    return el("button", { type: "button", ...props }, ...children);
+  }
+  function appendChildren(parent, children) {
+    for (const child of children) {
+      if (child === null || child === undefined || child === false) {
+        continue;
+      }
+      parent.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+  }
+  function textInput(props = {}) {
+    return el("input", {
+      type: "text",
+      autocomplete: "off",
+      autocapitalize: "none",
+      autocorrect: "off",
+      spellcheck: "false",
+      ...props
+    });
+  }
+  function searchInput(props = {}) {
+    return textInput({ type: "search", enterkeyhint: "search", ...props });
+  }
+  function tagInput(className) {
+    return textInput({
+      class: className,
+      name: "new_tags",
+      placeholder: "Add tags, comma separated",
+      "aria-label": "New tags",
+      maxlength: "200"
+    });
+  }
+  var ICON_PATHS = {
+    back: "M15 18l-6-6 6-6",
+    search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm10 2l-4.35-4.35",
+    star: "M12 2.5l2.9 6.1 6.6.9-4.8 4.7 1.2 6.6-5.9-3.2-5.9 3.2 1.2-6.6L2.5 9.5l6.6-.9L12 2.5z",
+    external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+    warning: "M12 3L2 21h20L12 3zm0 6v6m0 3v.5",
+    close: "M6 6l12 12M18 6L6 18",
+    filter: "M3 5h18l-7 8v6l-4 2v-8L3 5z",
+    arrowRight: "M5 12h14m-6-6 6 6-6 6",
+    arrowLeft: "M19 12H5m6-6-6 6 6 6",
+    chevronLeft: "M15 6l-6 6 6 6",
+    chevronRight: "M9 6l6 6-6 6",
+    first: "M18 6l-6 6 6 6M11 6l-6 6 6 6",
+    last: "M6 6l6 6-6 6M13 6l6 6-6 6",
+    download: "M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M5 19h14",
+    history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"
+  };
+  function icon(name, filled = false) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "18");
+    svg.setAttribute("height", "18");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", ICON_PATHS[name]);
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", filled ? "0" : "2");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("fill", filled ? "currentColor" : "none");
+    svg.append(path);
+    return svg;
+  }
+  function isEditableTarget(target) {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    return target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+  }
+
+  // src/ui/live-region.ts
+  function announceInto(node, text, write) {
+    if (text !== "" && node.textContent === text) {
+      write("");
+      window.setTimeout(() => write(text), 16);
+      return;
+    }
+    write(text);
+  }
+
+  // src/ui/toast.ts
+  var timers = new Map;
+  function durationFor(text) {
+    return Math.min(8000, Math.max(2000, text.length * 70));
+  }
+  function present(node, text, visibleClass) {
+    clearTimeout(timers.get(node));
+    node.classList.remove(visibleClass);
+    const reveal = (value) => {
+      node.textContent = value;
+      if (value === "") {
+        return;
+      }
+      node.classList.add(visibleClass);
+      timers.set(node, window.setTimeout(() => {
+        node.classList.remove(visibleClass);
+        node.textContent = "";
+      }, durationFor(value)));
+    };
+    announceInto(node, text, reveal);
+  }
+  function ensureToast() {
+    const existing = document.getElementById("eh-toast");
+    if (existing) {
+      return existing;
+    }
+    const toast = el("div", {
+      id: "eh-toast",
+      class: "eh-toast",
+      role: "status",
+      "aria-live": "polite",
+      "aria-atomic": "true"
+    });
+    (document.getElementById("eh-root") ?? document.body).append(toast);
+    return toast;
+  }
+  function showToast(text) {
+    const trimmed = text.trim();
+    if (trimmed === "") {
+      return;
+    }
+    const hudToast = document.getElementById("hud-toast");
+    present(hudToast ?? ensureToast(), trimmed, "show");
+  }
+
+  // src/menu.ts
+  function enabledToast(label) {
+    return (enabled) => `${label} ${enabled ? "enabled" : "disabled"}`;
+  }
+  var TOGGLE_COMMANDS = [
+    {
+      key: "fitHeight",
+      command: "Toggle fit-height / natural-width",
+      toast: (fitHeight) => `Default mode: ${fitHeight ? "fit-height" : "natural-width"}`
+    },
+    { key: "debug", command: "Toggle debug mode", toast: enabledToast("Debug mode") },
+    {
+      key: "listInfiniteScroll",
+      command: "Toggle infinite scroll (feed)",
+      toast: enabledToast("Feed infinite scroll")
+    },
+    {
+      key: "galleryInfiniteScroll",
+      command: "Toggle infinite scroll (gallery)",
+      toast: enabledToast("Gallery infinite scroll")
+    },
+    {
+      key: "tagSuggestions",
+      command: "Toggle tag suggestions",
+      toast: enabledToast("Tag suggestions")
+    }
+  ];
+  function defaultKeySummary() {
+    return KEY_ACTIONS.map(({ action, label }) => `${label}: ${DEFAULT_KEYMAP[action].join("/")}`).join(", ");
+  }
+  async function refreshTagData() {
+    clearTagIndexCache();
+    clearTagCountsCache();
+    try {
+      await loadTagCounts(true);
+      await loadTagIndex(true);
+      showToast("Tag data refreshed");
+    } catch (error) {
+      showToast(errorText(error, "Could not refresh tag data."));
+    }
+  }
+  function registerMenuCommands() {
+    const register = globalThis.GM_registerMenuCommand;
+    if (register === undefined) {
+      return;
+    }
+    for (const { key, command, toast } of TOGGLE_COMMANDS) {
+      register(command, () => {
+        const next = !getSettings()[key];
+        updateSetting(key, next);
+        showToast(toast(next));
+      });
+    }
+    register("Reset keymap to defaults", () => {
+      if (confirm(`Reset all keys to defaults?
+
+${defaultKeySummary()}`)) {
+        updateSetting("keymap", DEFAULT_KEYMAP);
+        showToast("Keymap reset to defaults");
+      }
+    });
+    register("Refresh tag data now", () => {
+      refreshTagData();
+    });
+    register("Clear cached tag data", () => {
+      clearTagIndexCache();
+      clearTagCountsCache();
+      showToast("Cached tag data cleared");
+    });
+  }
+
+  // src/net/priority.ts
+  var VALUES = {
+    critical: 10,
+    navigation: 8,
+    facing: 7,
+    append: 6,
+    background: 4,
+    prefetch: 2
+  };
+  function priorityOf(requestClass) {
+    return VALUES[requestClass];
+  }
+
+  // src/net/queue.ts
+  class RequestQueue {
+    pending = [];
+    active = 0;
+    lastStart = 0;
+    timer;
+    seq = 0;
+    get activeCount() {
+      return this.active;
+    }
+    fetch(url, options = {}) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const controller = new AbortController;
+      const userSignal = options.signal;
+      const task = {
+        url,
+        init: options.init ?? {},
+        priority: options.priority ?? priorityOf("background"),
+        tag: options.tag ?? "default",
+        seq: this.seq++,
+        controller,
+        resolve,
+        reject,
+        detach: null
+      };
+      if (userSignal) {
+        if (userSignal.aborted) {
+          reject(userSignal.reason);
+          return promise;
+        }
+        const onAbort = () => {
+          const index = this.pending.indexOf(task);
+          if (index === -1) {
+            controller.abort(userSignal.reason);
+            return;
+          }
+          this.pending.splice(index, 1);
+          this.finish(task);
+          reject(userSignal.reason);
+        };
+        userSignal.addEventListener("abort", onAbort, { once: true });
+        task.detach = () => {
+          userSignal.removeEventListener("abort", onAbort);
+        };
+      }
+      this.pending.push(task);
+      this.pending.sort((a, b) => b.priority - a.priority || a.seq - b.seq);
+      this.pump();
+      return promise;
+    }
+    purge(predicate) {
+      for (let index = this.pending.length - 1;index >= 0; index--) {
+        const task = this.pending[index];
+        if (!task || !predicate(task)) {
+          continue;
+        }
+        this.pending.splice(index, 1);
+        this.finish(task);
+        task.reject(new RequestPurgedError);
+      }
+    }
+    pump() {
+      if (this.timer !== undefined) {
+        clearTimeout(this.timer);
+        this.timer = undefined;
+      }
+      const concurrency = Math.max(1, getSettings().netConcurrency);
+      while (this.active < concurrency) {
+        const task = this.pending.shift();
+        if (!task) {
+          return;
+        }
+        const now = Date.now();
+        const wait = this.lastStart + getSettings().netIntervalMs - now;
+        if (wait > 0) {
+          this.pending.unshift(task);
+          this.timer = setTimeout(() => {
+            this.pump();
+          }, wait);
+          return;
+        }
+        this.active++;
+        this.lastStart = now;
+        this.run(task);
+      }
+    }
+    async run(task) {
+      const timeout = setTimeout(() => {
+        task.controller.abort(new DOMException("Request timed out", "TimeoutError"));
+      }, Math.max(1000, getSettings().netTimeoutMs));
+      try {
+        const response = await fetch(task.url, {
+          ...task.init,
+          signal: task.controller.signal
+        });
+        task.resolve(response);
+      } catch (error) {
+        task.reject(error);
+      } finally {
+        clearTimeout(timeout);
+        this.active--;
+        this.finish(task);
+        this.pump();
+      }
+    }
+    finish(task) {
+      task.detach?.();
+      task.detach = null;
+    }
+  }
+  var net = new RequestQueue;
+
+  // src/net/http.ts
+  async function post(url, body, contentType, options) {
+    const response = await net.fetch(url, {
+      priority: priorityOf("critical"),
+      tag: options.tag,
+      signal: options.signal,
+      init: {
+        method: "POST",
+        body,
+        credentials: "same-origin",
+        headers: { "Content-Type": contentType }
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`${options.failure} (${response.status}).`);
+    }
+    if (isLoginWall(await response.clone().text())) {
+      throw new LoginRequiredError;
+    }
+    return response;
+  }
+  function isLoginWall(body) {
+    return /<input[^>]+type=["']?password/i.test(body);
+  }
+  function postForm(url, body, options) {
+    return post(url, body, "application/x-www-form-urlencoded", options);
+  }
+  async function postJson(url, body, options) {
+    const response = await post(url, JSON.stringify(body), "application/json", options);
+    return await response.json();
+  }
+  var LIMIT_PATTERNS = [
+    /image viewing limit/i,
+    /not have sufficient gp/i,
+    /opening pages too fast/i,
+    /temporarily banned/i,
+    /too many requests/i
+  ];
+  function isRateLimitText(text) {
+    return LIMIT_PATTERNS.some((pattern) => pattern.test(text));
+  }
+  function isHtmlResponse(response, text) {
+    const type = response.headers.get("content-type") ?? "";
+    return type.includes("html") || /^\s*<(!doctype|html|head|body)/i.test(text);
+  }
+  var PAGE_CONTENT_SELECTOR = "#gn, #gdt, #gdd, #i1, #i2, #i3, #profile_form, #usertags_outer, #torrentinfo, .itg";
+  function hasPageContent(doc) {
+    return doc.querySelector(PAGE_CONTENT_SELECTOR) !== null;
+  }
+  function isLoginPage(doc) {
+    if (doc.querySelector("#sadpanda") !== null) {
+      return true;
+    }
+    return !hasPageContent(doc) && /sad panda/i.test(doc.title);
+  }
+  var SITE_SUFFIX = /\s*[-–—|]\s*(?:e-hentai|exhentai)(?:\.org)?(?:\s+galleries)?\s*$/i;
+  var NOT_FOUND_HEADINGS = {
+    "not found": true,
+    "not available": true,
+    "gallery not available": true
+  };
+  function normalizeHeading(text) {
+    return collapseWhitespace(text.replace(SITE_SUFFIX, "")).toLowerCase();
+  }
+  var NOT_FOUND_TEXT = /^(?:gallery not found|gallery not available|page not found|not found)\b/i;
+  function isNotFoundPage(doc) {
+    if (hasPageContent(doc)) {
+      return false;
+    }
+    const title = normalizeHeading(doc.title);
+    const heading = normalizeHeading(doc.querySelector("h1")?.textContent ?? "");
+    const body = doc.body.textContent.trim();
+    const bare = body.length > 0 && body.length < 800 && NOT_FOUND_TEXT.test(body);
+    return [title, heading].some((text) => /^404\b/.test(text) || NOT_FOUND_HEADINGS[text] === true) || bare;
+  }
+
+  // src/data/list-date.ts
+  var ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  var POSTED_DATE = /^\s*(\d{4})-(\d{2})-(\d{2})(?=\s|$)/;
+  var MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  function isValidDate(value) {
+    const match = ISO_DATE.exec(value.trim());
+    if (!match?.[1] || !match[2] || !match[3]) {
+      return false;
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (month < 1 || month > 12 || day < 1) {
+      return false;
+    }
+    const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const lastDay = month === 2 && leapYear ? 29 : MONTH_DAYS[month - 1] ?? 0;
+    return day <= lastDay;
+  }
+  function isDateRangeActive(range) {
+    return isValidDate(range.since) || isValidDate(range.until);
+  }
+  function postedDate(posted) {
+    const match = POSTED_DATE.exec(posted);
+    if (!match?.[1] || !match[2] || !match[3]) {
+      return null;
+    }
+    const day = `${match[1]}-${match[2]}-${match[3]}`;
+    return isValidDate(day) ? day : null;
+  }
+  function filterByDateRange(items, range) {
+    const since = isValidDate(range.since) ? range.since.trim() : null;
+    const until = isValidDate(range.until) ? range.until.trim() : null;
+    if (since === null && until === null) {
+      return { items: [...items], crossedSince: false };
+    }
+    const kept = [];
+    let crossedSince = false;
+    for (const item of items) {
+      const day = postedDate(item.posted);
+      if (day === null) {
+        continue;
+      }
+      if (since !== null && day < since) {
+        crossedSince = true;
+        continue;
+      }
+      if (until !== null && day > until) {
+        continue;
+      }
+      kept.push(item);
+    }
+    return { items: kept, crossedSince };
+  }
+  function withDateRange(url, range) {
+    const target = new URL(url);
+    setDateParam(target.searchParams, "eh_since", range.since);
+    setDateParam(target.searchParams, "eh_until", range.until);
+    return target.href;
+  }
+  function setDateParam(params, key, value) {
+    const date = value.trim();
+    if (isValidDate(date)) {
+      params.set(key, date);
+    } else {
+      params.delete(key);
+    }
+  }
+  function listRequestUrl(url) {
+    const target = new URL(url);
+    if (target.searchParams.has("seek")) {
+      return url;
+    }
+    const until = (target.searchParams.get("eh_until") ?? "").trim();
+    if (!isValidDate(until)) {
+      return url;
+    }
+    target.searchParams.set("seek", until);
+    return target.href;
+  }
+
   // src/parse/url.ts
   function safeUrl(value, base) {
     try {
@@ -1592,7 +2378,7 @@ ${defaultKeySummary()}`)) {
   // src/data/list-filters.ts
   var KEY = "eh:list-filters:v1";
   var PANEL_KEY = "eh:list-filters-open:v1";
-  var VERSION2 = 1;
+  var VERSION3 = 1;
   var FILTER_PARAMS = [
     "f_cats",
     "f_srdd",
@@ -1609,10 +2395,10 @@ ${defaultKeySummary()}`)) {
   function isStoredFilters(value) {
     return isRecord(value);
   }
-  var filters = createStore({ key: KEY, version: VERSION2, empty: () => ({}), guard: isStoredFilters }, gmStorage());
+  var filters = createStore({ key: KEY, version: VERSION3, empty: () => ({}), guard: isStoredFilters }, gmStorage());
   var panel = createStore({
     key: PANEL_KEY,
-    version: VERSION2,
+    version: VERSION3,
     empty: () => false,
     guard: (value) => typeof value === "boolean"
   }, gmStorage());
@@ -4193,10 +4979,10 @@ ${defaultKeySummary()}`)) {
 
   // src/data/search-history.ts
   var HISTORY_KEY = "eh:search-history:v1";
-  var VERSION3 = 1;
-  var DAY_MS = 24 * 60 * 60 * 1000;
+  var VERSION4 = 1;
+  var DAY_MS2 = 24 * 60 * 60 * 1000;
   var RECENT_LIMIT = 20;
-  var RECENT_TTL_MS = 90 * DAY_MS;
+  var RECENT_TTL_MS = 90 * DAY_MS2;
   function isRecent(value) {
     if (typeof value !== "object" || value === null) {
       return false;
@@ -4204,7 +4990,7 @@ ${defaultKeySummary()}`)) {
     const record = value;
     return typeof record.text === "string" && typeof record.usedAt === "number";
   }
-  var historyStore = createStore({ key: HISTORY_KEY, version: VERSION3, empty: () => [], guard: isUnknownArray }, gmStorage());
+  var historyStore = createStore({ key: HISTORY_KEY, version: VERSION4, empty: () => [], guard: isUnknownArray }, gmStorage());
   function recentQueries(now = Date.now()) {
     const seen = new Set;
     const recent = [];
@@ -5090,7 +5876,7 @@ ${defaultKeySummary()}`)) {
 
   // src/data/quick-tags.ts
   var KEY2 = "eh:saved-expressions:v1";
-  var VERSION4 = 1;
+  var VERSION5 = 1;
   var QUICK_TAG_LIMIT = 30;
   function isQuickTag(value) {
     if (typeof value !== "object" || value === null) {
@@ -5099,7 +5885,7 @@ ${defaultKeySummary()}`)) {
     const record = value;
     return typeof record.name === "string" && typeof record.query === "string" && typeof record.savedAt === "number";
   }
-  var store2 = createStore({ key: KEY2, version: VERSION4, empty: () => [], guard: isUnknownArray }, gmStorage());
+  var store2 = createStore({ key: KEY2, version: VERSION5, empty: () => [], guard: isUnknownArray }, gmStorage());
   var quickTagsChanged = createEmitter();
   function subscribeQuickTags(listener) {
     return quickTagsChanged.subscribe(listener);
@@ -5125,734 +5911,6 @@ ${defaultKeySummary()}`)) {
   function replaceQuickTags(tags) {
     store2.write(cleanTags(tags).slice(0, QUICK_TAG_LIMIT));
     notify2();
-  }
-
-  // src/tags/base64.ts
-  function base64FromBytes(bytes) {
-    let binary = "";
-    for (const byte of bytes) {
-      binary += String.fromCharCode(byte);
-    }
-    return btoa(binary);
-  }
-  function bytesFromBase64(base64) {
-    let binary;
-    try {
-      binary = atob(base64);
-    } catch {
-      return null;
-    }
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0;index < binary.length; index++) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    return bytes;
-  }
-
-  // src/tags/core-vocabulary.ts
-  var CORE_VOCABULARY_BASE64 = "RUhUSQEMAAZmZW1hbGXIAAAAAAZhaGVnYW8BBm1wdXRlZQEDbmFsBAwgaW50ZXJjb3Vyc2UBBHByb24ABGJhbGQBAmJ3AQNkc20B" + "CmVhdXR5IG1hcmsCCHN0aWFsaXR5AQppZyBhcmVvbGFlBQJzcwQFYmFsbHMFBnJlYXN0cwQHbmlwcGxlcwQFcGVuaXMCBGtpbmkC" + "BnNleHVhbAEIbGFja21haWwCB2luZGZvbGQCA29vZAQEbWVycwMEd2pvYgcFIGZhY2UBEG9keSBtb2RpZmljYXRpb24FB3dyaXRp" + "bmcEBHN1aXQCBW5kYWdlAQ9yZWFzdCBleHBhbnNpb24HB2ZlZWRpbmcCA2lkZQEGdWtrYWtlAghubnkgZ2lybAILc2luZXNzIHN1" + "aXQAB2NhdGdpcmwBDGhhc3RpdHkgYmVsdAIGZWF0aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0" + "aW9uAghzcGxheWluZwIFd2dpcmwBDHJvc3NkcmVzc2luZwMKdGNoIHRhdHRvbwEJdW1mbGF0aW9uAglubmlsaW5ndXMADGRhcmsg" + "bmlwcGxlcwUEc2tpbgIGdWdodGVyAQllZXB0aHJvYXQCCWZsb3JhdGlvbgIIbW9uIGdpcmwBE2lja2dpcmwgb24gZGlja2dpcmwM" + "BmZlbWFsZQECb2cDBSBnaXJsAhB1YmxlIHBlbmV0cmF0aW9uAQRydWdzAANlbGYBDHhoaWJpdGlvbmlzbQIOcG9zZWQgY2xvdGhp" + "bmcBEHllLWNvdmVyaW5nIGJhbmcDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2VtYWxlcyBvbmx5AwNkb20BBmlsbWlu" + "ZwIHbmdlcmluZwIWcnN0IHBlcnNvbiBwZXJzcGVjdGl2ZQIGc2huZXRzAwR0aW5nAQZvb3Rqb2ICBnggZ2lybAEHcmVja2xlcwEE" + "dXJyeQIGdGFuYXJpAANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQdpYW50ZXNzAQZsYXNzZXMCBG92ZXMBBW9i" + "bGluAgRra3VuAQRyb3VwAQN1cm8BBHlhcnUACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZ2ggaGVl" + "bHMBBG9ybnMDAnNlBQUgZ2lybAIGdHBhbnRzAQt1Z2UgYnJlYXN0cwUFcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGlt" + "cHJlZ25hdGlvbgEFbmNlc3QCB2ZsYXRpb24CDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxhY3Rh" + "dGlvbgIKcmdlIHRhdHRvbwIDdGV4AQRlYXNoAgVvdGFyZAEHaW5nZXJpZQEGb2xpY29uAAxtYWdpY2FsIGdpcmwCAmlkAgRrZXVw" + "Aglza2VkIGZhY2UDCXR1cmJhdGlvbgEDaWxmAwRraW5nAghuZCBicmVhawUHY29udHJvbAELb25zdGVyIGdpcmwCBHRoZXIBBXVz" + "Y2xlAAluYWthZGFzaGkBB2V0b3JhcmUBCmlwcGxlIGZ1Y2sHCHBpZXJjaW5nBwtzdGltdWxhdGlvbgECdW4CA3JzZQAKb3BwYWkg" + "bG9saQECcmMADXBhaW50ZWQgbmFpbHMDBHp1cmkCB250eWhvc2UCBXN0aWVzARBlbmlzIGVubGFyZ2VtZW50AQdpZXJjaW5nAgd4" + "aWUgY3V0AQdvbnl0YWlsAQdyZWduYW50Agpvc3RpdHV0aW9uAARyYXBlAQVpbWpvYgEEb2JvdAEEeW9uYQAEc2NhdAINaG9vbCBz" + "d2ltc3VpdAYLYm95IHVuaWZvcm0GDGdpcmwgdW5pZm9ybQEHZXggdG95cwEGaGVtYWxlAgVpYmFyaQEFaXN0ZXIBBGxhdmUCBmVl" + "cGluZwEMbWFsbCBicmVhc3RzBgVwZW5pcwIDZWxsAQRudWZmAQxvbGUgZGlja2dpcmwFBmZlbWFsZQEHcGFua2luZwEIcXVpcnRp" + "bmcBCHRvY2tpbmdzAxBtYWNoIGRlZm9ybWF0aW9uAgZyYXAtb24BB3dlYXRpbmcCBmltc3VpdAAEdGFpbAIHbGwgZ2lybAIGbmxp" + "bmVzAQZlYWNoZXICB250YWNsZXMBD2hpZ2ggaGlnaCBib290cwEFb21ib3kCBXJ0dXJlAQ1yYW5zZm9ybWF0aW9uAQh3aW50YWls" + "cwAOdW51c3VhbCBwdXBpbHMBEHJldGhyYSBpbnNlcnRpb24CB2luYXRpb24ADXZhZ2luYWwgYmlydGgBDWVyeSBsb25nIGhhaXIB" + "A29yZQEFdHViZXIABXdpbmdzAgN0Y2gBCG9sZiBnaXJsAAV4LXJheQAEeXVyaQRtYWxlyAAAAAAGYWhlZ2FvAQZtcHV0ZWUBA25h" + "bAQMIGludGVyY291cnNlAQRwcm9uAQtzcGh5eGlhdGlvbgAEYmFsZAECYm0BA2RzbQEKZWF1dHkgbWFyawIIc3RpYWxpdHkBCmln" + "IGFyZW9sYWUFAnNzBAViYWxscwUGcmVhc3RzBARsaXBzBAduaXBwbGVzBAVwZW5pcwIEa2luaQIGc2V4dWFsAQhsYWNrbWFpbAIH" + "aW5kZm9sZAIDb29kBARtZXJzAwR3am9iBwUgZmFjZQEQb2R5IG1vZGlmaWNhdGlvbgUHd3JpdGluZwQEc3VpdAIFbmRhZ2UBD3Jl" + "YXN0IGV4cGFuc2lvbgcHZmVlZGluZwIDaWRlAQZ1a2tha2UCC3NpbmVzcyBzdWl0AAZjYXRib3kBDGhhc3RpdHkgYmVsdAIGZWF0" + "aW5nAgtpbmVzZSBkcmVzcwIHcmlzdG1hcwEFb2xsYXICBG5kb20CCHJydXB0aW9uAghzcGxheWluZwEMcm9zc2RyZXNzaW5nAwp0" + "Y2ggdGF0dG9vAQl1bWZsYXRpb24CCW5uaWxpbmd1cwAMZGFyayBuaXBwbGVzBQRza2luAQllZXB0aHJvYXQCA21vbgEPaWNrZ2ly" + "bCBvbiBtYWxlAgJsZgECb2cDBCBib3kCEHVibGUgcGVuZXRyYXRpb24BBHJ1Z3MDAm5rAANlbGYBDHhoaWJpdGlvbmlzbQIOcG9z" + "ZWQgY2xvdGhpbmcBEHllLWNvdmVyaW5nIGJhbmcDBG1hc2sDBXBhdGNoAAtmYWNlc2l0dGluZwMIaWFsIGhhaXIBC2VtaW5pemF0" + "aW9uAQZpbG1pbmcCFnJzdCBwZXJzb24gcGVyc3BlY3RpdmUCBnNobmV0cwMEdGluZwEJb2N1cyBhbmFsAgpvdCBsaWNraW5nBANq" + "b2ICBXggYm95AQdyZWNrbGVzAQR1cnJ5AANnYWcCBHBpbmcCCXJ0ZXIgYmVsdAEMZW5kZXIgY2hhbmdlAQZsYXNzZXMCBG92ZXMB" + "BW9ibGluAgRra3VuAQRyb3VwAQN1cm8ACWhhaXIgYnVucwQBeQUIIGFybXBpdHMCAmxvAgVuZGpvYgIDcmVtAQlpZGRlbiBzZXgC" + "CGdoIGhlZWxzAQRvcm5zAwJzZQIGdHBhbnRzAQl1Z2UgcGVuaXMCDG1hbiBvbiBmdXJyeQMIaWxpYXRpb24ADGltcHJlZ25hdGlv" + "bgEFbmNlc3QCB2ZsYXRpb24CBHNla2kCDnZlcnRlZCBuaXBwbGVzAAprZW1vbm9taW1pAQVpbW9ubwIFc3NpbmcACWxhY3RhdGlv" + "bgIOcmdlIGluc2VydGlvbnMGBnRhdHRvbwIDdGV4AQRlYXNoAgZnIGxvY2sCBW90YXJkAQdpbmdlcmllAgh6YXJkIGd1eQEKb25n" + "IHRvbmd1ZQAMbWFnaWNhbCBnaXJsAgJpZAIEa2V1cAIIbGVzIG9ubHkCCXNrZWQgZmFjZQMJdHVyYmF0aW9uAQNpa28CBWxraW5n" + "AghuZCBicmVhawUHY29udHJvbAEGb25zdGVyAQV1c2NsZQAJbmFrYWRhc2hpAQdldG9yYXJlAQppcHBsZSBmdWNrBwhwaWVyY2lu" + "ZwcLc3RpbXVsYXRpb24BAnVuAgNyc2UAB29sZCBtYW4BAnJjAA1wYWludGVkIG5haWxzAwR6dXJpAgdudHlob3NlAgVzdGllcwEQ" + "ZW5pcyBlbmxhcmdlbWVudAIFdHBsYXkBB2llcmNpbmcCB3hpZSBjdXQBB29ueXRhaWwBB3JlZ25hbnQCCm9zdGl0dXRpb24ABHJh" + "cGUBBWltam9iAQRvYm90AQR5b25hAARzY2F0Ag1ob29sIHN3aW1zdWl0Bgtib3kgdW5pZm9ybQYMZ2lybCB1bmlmb3JtAQdleCB0" + "b3lzAQZoaWJhcmkCBm90YWNvbgEEbGF2ZQIGZWVwaW5nAQptYWxsIHBlbmlzAgNlbGwBBG51ZmYBCG9sZSBtYWxlAQdwYW5raW5n" + "AQh0b2NraW5ncwMQbWFjaCBkZWZvcm1hdGlvbgIGcmFwLW9uAQd3ZWF0aW5nAgZpbXN1aXQABHRhaWwCBmxsIG1hbgIGbmxpbmVz" + "AQZlYWNoZXICB250YWNsZXMBD2hpZ2ggaGlnaCBib290cwEEaWFyYQEGb21naXJsAgVydHVyZQENcmFuc2Zvcm1hdGlvbgEId2lu" + "dGFpbHMADnVudXN1YWwgcHVwaWxzARByZXRocmEgaW5zZXJ0aW9uAgdpbmF0aW9uAA12YWdpbmFsIGJpcnRoAQ1lcnkgbG9uZyBo" + "YWlyAQhpcmdpbml0eQEDb3JlAgd5ZXVyaXNtAQV0dWJlcgAFd2luZ3MCA3RjaAEHb2xmIGJveQAFeC1yYXkABHlhb2kFbWl4ZWQX" + "AAAAABBhbmltYWwgb24gYW5pbWFsAAlib2R5IHN3YXAADWZmbSB0aHJlZXNvbWUBB3JvdHRhZ2UACWdhbmcgcmFwZQEEcm91cAAG" + "aW5jZXN0AgRzZWtpAA1rb2RvbW8gZG91c2hpAApsb3cgaW5jZXN0AA1tbWYgdGhyZWVzb21lAgt0IHRocmVlc29tZQEMdGYgdGhy" + "ZWVzb21lARF1bHRpbW91dGggYmxvd2pvYgUKcGxlIGFzc2pvYgkHZm9vdGpvYgkHaGFuZGpvYgkIcGFpcmluZ3MABm51ZGlzbQAI" + "b3lha29kb24ACXNoaW1haWRvbgANdHRtIHRocmVlc29tZQEEd2lucwVvdGhlcj4AAAAAAjNkAgkgaW1hZ2VzZXQDBW5vbi1oAAxh" + "aSBnZW5lcmF0ZWQDBW5vbi1oAQ9scmVhZHkgdXBsb2FkZWQBB25hZ2x5cGgCBmltYXRlZAIHdGhvbG9neQEGcnRib29rAAdjYXB0" + "aW9uAQRvbWljAwhwaWxhdGlvbgAKZGFraW1ha3VyYQEGZWZhY2VkAA5leHRyYW5lb3VzIGFkcwAGZmlndXJlARBvcmJpZGRlbiBj" + "b250ZW50AQ51bGwgY2Vuc29yc2hpcAYEb2xvcgAJZ291ZG91c2hpAAhoYXJkY29yZQEFb3cgdG8ACmluY29tcGxldGUAC2tvZG9t" + "byBvbmx5AA1taXNzaW5nIGNvdmVyARBvc2FpYyBjZW5zb3JzaGlwARB1bHRpLXdvcmsgc2VyaWVzBQ5wYW5lbCBzZXF1ZW5jZQAO" + "bm8gcGVuZXRyYXRpb24CD24taCBnYW1lIG1hbnVhbAYIaW1hZ2VzZXQEBG51ZGUCA3ZlbAEKdWRpdHkgb25seQAVb2JqZWN0IGlu" + "c2VydGlvbiBvbmx5AQt1dCBvZiBvcmRlcgAKcGFwZXJjaGlsZAEIaXhlbCBhcnQACHJlYWxwb3JuAgRkcmF3AgZwbGFjZWQBDG91" + "Z2ggZ3JhbW1hcgYLdHJhbnNsYXRpb24ABnNhbXBsZQEHY2FubWFyawIJcmVlbnNob3RzAQtrZXRjaCBsaW5lcwEJb3VzaHV1aGVu" + "AQt0ZXJlb3Njb3BpYwIHb3J5IGFyYwAJdGFua291Ym9uAQhoZW1lbGVzcwEIaW1lIHN0b3AACnVuY2Vuc29yZWQAC3ZhcmlhbnQg" + "c2V0AAt3YXRlcm1hcmtlZAEGZWJ0b29uAghzdGVybiBjZwgIaW1hZ2VzZXQIBW5vbi1oAAd5dWtrdXJpCGxvY2F0aW9uCAAAAAAM" + "YmF0aGluZyByb29tAQRlYWNoAAljbGFzc3Jvb20ACWluZmlybWFyeQAFb25zZW4ABXNhdW5hAQVlbnRvdQEMd2ltbWluZyBwb29s" + "BnBhcm9kecgAAAAADmFkdmVudHVyZSB0aW1lAQdtcGhpYmlhAQ5uaW1hbCBjcm9zc2luZwEIcmtuaWdodHMJCSBlbmRmaWVsZAEL" + "dGVsaWVyIHJ5emEBGHZhdGFyIHRoZSBsYXN0IGFpcmJlbmRlcgIGZW5nZXJzAQh6dXIgbGFuZQAOYmFrZW1vbm9nYXRhcmkCCG5n" + "IGRyZWFtAgR0bWFuAgd5b25ldHRhAQVlbiAxMAEIbGFjayBjYXQCBGVhY2gCCnVlIGFyY2hpdmUBDm9jY2hpIHRoZSByb2NrAgRy" + "dXRvABFjYXJkY2FwdG9yIHNha3VyYQELaGFpbnNhdyBtYW4BCW9kZSBnZWFzcwEIeWJlcnB1bmsACGRhbmRhZGFuAwhnYW5yb25w" + "YQIKcmtzdGFsa2VycwMSbGluZyBpbiB0aGUgZnJhbnh4Agl0ZSBhIGxpdmUBDGVhZCBvciBhbGl2ZQIHbHRhcnVuZQINdGVjdGl2" + "ZSBjb25hbgEGaWdpbW9uAQpyYWdvbiBiYWxsCwYgc3VwZXIMAXoHBXF1ZXN0ATZ1bmdlb24gbmkgZGVhaSBvIG1vdG9tZXJ1IG5v" + "IHdhIG1hY2hpZ2F0dGVpcnUgZGFyb3Uga2EACmVsZGVuIHJpbmcBDnF1ZXN0cmlhIGdpcmxzAApmYWlyeSB0YWlsAgVsbG91dAIO" + "dGUgZ3JhbmQgb3JkZXIFGWthbGVpZCBsaW5lciBwcmlzbWEgaWxseWEFCnN0YXkgbmlnaHQBDGluYWwgZmFudGFzeQ0EIHZpaQ4D" + "eGl2AglyZSBlbWJsZW0LBiBmYXRlcwwMdGhyZWUgaG91c2VzAhR2ZSBuaWdodHMgYXQgZnJlZGR5cwEFcm96ZW4BEnVsbG1ldGFs" + "IGFsY2hlbWlzdAAOZ2Vuc2hpbiBpbXBhY3QBDmlybHMgZnJvbnRsaW5lBgp1bmQgcGFuemVyAQxvYmxpbiBzbGF5ZXICGGNodXVt" + "b24gd2EgdXNhZ2kgZGVzdSBrYQIWZGRlc3Mgb2YgdmljdG9yeSBuaWtrZQISdG91YnVuIG5vIGhhbmF5b21lAQ9yYW5ibHVlIGZh" + "bnRhc3kDCnZpdHkgZmFsbHMBCnVpbHR5IGdlYXICBG5kYW0GBSBzZWVkAARoYWxvAgpycnkgcG90dGVyAgp6YmluIGhvdGVsAQhl" + "bGx0YWtlcgQIdXZhIGJvc3MBDWlnaHNjaG9vbCBkeGQLC29mIHRoZSBkZWFkAgNsZGEBB29sb2xpdmUCC25rYWkgZ2FrdWVuBwlz" + "dGFyIHJhaWwBFnlwZXJkaW1lbnNpb24gbmVwdHVuaWEAF2lqaXJhbmFpZGUgbmFnYXRvcm8tc2FuAQ9uZmluaXRlIHN0cmF0b3MC" + "BnV5YXNoYQAOanVqdXRzdSBrYWlzZW4CDHN0aWNlIGxlYWd1ZQAEay1vbgEZYWd1eWEtc2FtYSB3YSBrb2t1cmFzZXRhaQIRbm9q" + "byBva2FyaXNoaW1hc3UDDnRhaSBjb2xsZWN0aW9uAQ1lbW9ubyBmcmllbmRzAQtpbGwgbGEga2lsbAIKbSBwb3NzaWJsZQMNZXRz" + "dSBubyB5YWliYQIObmcgb2YgZmlnaHRlcnMBH29iYXlhc2hpLXNhbi1jaGkgbm8gbWFpZCBkcmFnb24CBmlrYXRzdQIZbWktc2Fu" + "IHdhIGtvbXl1c2hvdSBkZXN1LgIibm8gc3ViYXJhc2hpaSBzZWthaSBuaSBzeXVrdWZ1a3UgbwALbGFzdCBvcmlnaW4BEGVhZ3Vl" + "IG9mIGxlZ2VuZHMBCG92ZSBsaXZlCSEgbmlqaWdhc2FraSBoaWdoIHNjaG9vbCBpZG9sIGNsdWIKCHN1bnNoaW5lAQ15Y29yaXMg" + "cmVjb2lsABttYWhvdSBzaG91am8gbHlyaWNhbCBuYW5vaGECCXNzIGVmZmVjdAEGZXRyb2lkAQZvbnN0ZXIHByBodW50ZXIBDXVz" + "aG9rdSB0ZW5zZWkBD3kgaGVybyBhY2FkZW1pYQMfbGl0dGxlIHBvbnkgZnJpZW5kc2hpcCBpcyBtYWdpYwAGbmFydXRvARZlb24g" + "Z2VuZXNpcyBldmFuZ2VsaW9uAQxpZXIgYXV0b21hdGECB2ppc2FuamkACW9uZSBwaWVjZQUIdW5jaCBtYW4BK3JlIG5vIGltb3V0" + "byBnYSBrb25uYSBuaSBrYXdhaWkgd2FrZSBnYSBuYWkCBmlnaW5hbAEJc2hpIG5vIGtvAQd2ZXJsb3JkBAV3YXRjaAAicGFudHkg" + "YW5kIHN0b2NraW5nIHdpdGggZ2FydGVyYmVsdAEGZXJzb25hBwIgMwgBNAgBNQEGb2tlbW9uAQpyZXR0eSBjdXJlAg5pbmNlc3Mg" + "Y29ubmVjdAEYdWVsbGEgbWFnaSBtYWRva2EgbWFnaWNhAAxxdWVlbnMgYmxhZGUACHJhbm1hIDEyASRlIHplcm8ga2FyYSBoYWpp" + "bWVydSBpc2VrYWkgc2Vpa2F0c3UCC3NpZGVudCBldmlsAgV3cml0ZQEDd2J5AAtzYWlsb3IgbW9vbgEJY29vYnktZG9vARdlbmtp" + "IHplc3Nob3Ugc3ltcGhvZ2VhcgMKcmFuIGthZ3VyYQEGaGFudGFlAhBpbmdla2kgbm8ga3lvamluAg9va3VnZWtpIG5vIHNvbWEB" + "EW9uaWMgdGhlIGhlZGdlaG9nAxtvIGJpc3F1ZSBkb2xsIHdhIGtvaSBvIHN1cnUCCXVsY2FsaWJ1cgMOc291IG5vIGZyaWVyZW4B" + "CXBpZGVyLW1hbgIGbGF0b29uAgp5IHggZmFtaWx5AQtzc3MuZ3JpZG1hbgEHdGFyIGZveAUWdnMuIHRoZSBmb3JjZXMgb2YgZXZp" + "bAUEd2FycwINZXZlbiB1bml2ZXJzZQIMcmVldCBmaWdodGVyAwtpa2Ugd2l0Y2hlcwETdXBlciBtYXJpbyBicm90aGVycwUDbWFu" + "AQ93b3JkIGFydCBvbmxpbmUADnRhaW1hbmluIGFzYWdpCQh5dWtpa2F6ZQIZdGUgbm8geXV1c2hhIG5vIG5hcmlhZ2FyaQEKZWVu" + "IHRpdGFucwQYYWdlIG11dGFudCBuaW5qYSB0dXJ0bGVzAgRra2VuAhhuZ2VuIHRvcHBhIGd1cnJlbiBsYWdhbm4DG3NlaSBzaGl0" + "YXJhIHNsaW1lIGRhdHRhIGtlbgEQaGUgZWxkZXIgc2Nyb2xscwQRZmFpcmx5IG9kZHBhcmVudHMECmlkb2xtYXN0ZXIFCm5jcmVk" + "aWJsZXMED2xlZ2VuZCBvZiBrb3JyYQ4FemVsZGEFCW91ZCBob3VzZQQdbWVsYW5jaG9seSBvZiBoYXJ1aGkgc3V6dW1peWEECW93" + "bCBob3VzZQQIc2ltcHNvbnMEB3dpdGNoZXIBCW8gbG92ZS1ydQILYXJ1IHByb2plY3QCNWtpZG9raSBib3NvdHRvIHJ1c3NpYS1n" + "byBkZSBkZXJlcnUgdG9uYXJpIG5vIGFseWEtc2FuAgltYiByYWlkZXICDHVob3UgcHJvamVjdAEIc3VraWhpbWUACHVsdHJhbWFu" + "ARZtYSBtdXN1bWUgcHJldHR5IGRlcmJ5AQhuZGVydGFsZQEVemFraS1jaGFuIHdhIGFzb2JpdGFpAAh2b2NhbG9pZAAJd2FyaGFt" + "bWVyAQtvbmRlciB3b21hbgIPcmxkIG9mIHdhcmNyYWZ0AQ51dGhlcmluZyB3YXZlcwAFeC1tZW4BFWVub2JsYWRlIGNocm9uaWNs" + "ZXMgMgAweWFoYXJpIG9yZSBubyBzZWlzaHVuIGxvdmUgY29tZSB3YSBtYWNoaWdhdHRlaXJ1AS5vdWtvc28gaml0c3VyeW9rdSBz" + "aGlqb3Ugc2h1Z2kgbm8ga3lvdXNoaXRzdSBlAQd1LWdpLW9oABF6ZW5sZXNzIHpvbmUgemVybwEHb290b3BpYQljaGFyYWN0ZXLI" + "AAAAAAIyYgAIYWRhIHdvbmcBEmVyaXRoIGdhaW5zYm9yb3VnaAIEdGhlcgEDaHJpAQdrbyBhbWF1AQVsYmVkbwIOaWNlIG1hcmdh" + "dHJvaWQBB215IHJvc2UBCW5kcm9pZCAxOAIDZ2VsAQhwcGxlamFjawEDcXVhAQlybGVjY2hpbm8CD3RvcmlhIHBlbmRyYWdvbgEG" + "c3RvbGZvAhF1a2EgbGFuZ2xleSBzb3J5dQMLbmEgaWNoaW5vc2UGBXl1dWtpAQR0YWdvAQ15YSBzaGFtZWltYXJ1AwtrYSBrYW1p" + "c2F0bwAMYmFyYmFyYSBwZWdnAgR0bWFuAgd5b25ldHRhAQRlbGxlAQpvYSBoYW5jb2NrAQhyZW1lcnRvbgELdWxtYSBicmllZnMA" + "C2NhbW15IHdoaXRlAQZoaSBjaGkDDnNhdG8gbmlzaGlraWdpAgV1bi1saQEEcm93bgEGeW50aGlhAARkLnZhARFhcmsgbWFnaWNp" + "YW4gZ2lybAQEbmVzcwADZWxmAgdsZW4gam9lAQVtaWxpYQELcnphIHNjYXJsZXQBDHVsYSBsYXdyZW5jZQAEZmVybgEGaXJlZmx5" + "AQ5sYW5kcmUgc2NhcmxldAIIdXR0ZXJzaHkBB29jYWxvcnMBBnJpZXJlbgAFZ2FueXUCB3JkZXZvaXICB3dyIGd1cmEBBHVkYW8B" + "CXdlbiBzdGFjeQUIdGVubnlzb24ADGhhcmxleSBxdWlubgEEaWxkYQILbmEgc29yYXNha2kECHRhIGh5dWdhAgp0b3JpIGdvdG91" + "ARBvc2hpbWFjaGkgc3Vpc2VpAgx1c2hvdSBtYXJpbmUBBXUgdGFvABdpbGx5YXN2aWVsIHZvbiBlaW56YmVybgELbm8geWFtYW5h" + "a2EBDXp1a3UgbWlkb3JpeWEACGphbmUgZG9lAQtlYW5uZSBhbHRlcgcEZGFyYwEPaWdva3Ugbm8gZnVidWtpAgxsbCB2YWxlbnRp" + "bmUCAm54AQl1ZHkgaG9wcHMCBnJpIGhhbgAFa2Fma2ECAmdhAgxyaW4ga2FrdWRhdGUCBHN1bWkBBWVxaW5nAQtpbSBwb3NzaWJs" + "ZQILc2FraSByeXV1Z2UBEW9rb21pIHNhbmdvbm9taXlhAApsYXJhIGNyb2Z0AQNpbmsBBG9vbmEBDnVjeSBoZWFydGZpbGlhAgRt" + "aW5lAAttYWJlbCBwaW5lcwIKaSBzaGlyYW51aQIMa2kgbmlzaGlraW5vBAJtYQIHcmNoIDd0aAMLaW4ga2l0YWdhd2EEC3NhIGtp" + "cmlzYW1lAgF5AQZlZ3VtaW4CA3JjeQMEbWFpZAEKaWthIG1pc29ubwMKb3RvIG1pc2FrYQMJdSBoYXRzdW5lBQZuYWthbm8CEGxl" + "cyB0YWlscyBwcm93ZXICEG5hbW90byBubyByYWlrb3UCA3N0eQINdHN1cmkga2Fucm9qaQENb21vIHlhb3lvcm96dQILbmEgbWVn" + "aXN0dXMCD3JyaWdhbiBhZW5zbGFuZAAGbmFoaWRhAgJtaQIMcnV0byB1enVtYWtpAQlpY2sgd2lsZGUDB28gcm9iaW4FBnlhemF3" + "YQQJbGUgZGVtYXJhAgNsb3UCCW5vIG5ha2FubwAOb2NoYWtvIHVyYXJha2EBDHJpaGltZSBpbm91ZQATcGF0Y2hvdWxpIGtub3ds" + "ZWRnZQEJaW5raWUgcGllAQRvd2VyBQUgZ2lybAEQcmluY2VzcyBjZWxlc3RpYQkEbHVuYQkFcGVhY2gJBXplbGRhAgZvZHVjZXIB" + "A3lyYQANcmFpZGVuIHNob2d1bgMJbmJvdyBkYXNoAg9uZ2lrdSBtYXRzdW1vdG8CBHJpdHkCA3ZlbgEKZWkgYXlhbmFtaQMKbXUg" + "aGFrdXJlaQIBbQMMaWxpYSBzY2FybGV0AgVuYW1vbgICemUBC2lhcyBncmVtb3J5AghuIHRvc2FrYQIMbyB0c3VrYXRzdWtpAQRv" + "YmluAgJzYQILdWdlIHRoZSBiYXQBDXVtaSB1c2FnaXlhbWEABXNhYmVyAgxpbG9yIGp1cGl0ZXIHBG1hcnMIBmVyY3VyeQgDb29u" + "BwV2ZW51cwILa3VyYSBoYXJ1bm8ECXlhIGl6YXlvaQIIbXVzIGFyYW4CC25hZSBrb2NoaXlhAQdjYXRoYWNoARRlbnJpdHN1IG5v" + "IHRhdHN1bWFraQMDc2VpAQVoZW5oZQIGaWVsZGVyAwZtYWthemUDCW5qaSBpa2FyaQQKb2J1IGtvY2hvdQMPcm9rbyBzdW5hb29r" + "YW1pAQppbHZlciB3b2xmARFvbmljIHRoZSBoZWRnZWhvZwEGcGFya2xlAghpZGVyLW1hbgEHdGFyZmlyZQINZXZlbiB1bml2ZXJz" + "ZQEOdWd1aGEga2lyaWdheWECB3BlcmdpcmwFA21hbgAGdGFpaG91AQZlaXRva3UBDGlmYSBsb2NraGFydAEJb2tpIGFzdW1hAQVy" + "YWNlcgEGc3VuYWRlAQ93aWxpZ2h0IHNwYXJrbGUAB3ZhbXBpcmUBDGVsbWEgZGlua2xleQEEaWRlbAAEd2hpcAEJaWRvd21ha2Vy" + "AgN0Y2gBC29uZGVyIHdvbWFuAAh5YWUgbWlrbwIEbWF0bwEEZWxhbgEJb3IgZm9yZ2VyAw11aWNoaSBzaGlob2luAgt1bXUga29u" + "cGFrdQEMdWthcmkgeWFrdW1vAgJyaQIKdWthIGhheWFzZQAGem9tYmllBmFydGlzdMgAAAAAAzAtZwEEYmFrZQEEazBqMAAfMSBk" + "b3QgbWlnaSBuaSB6dXJhc2hpdGUga3VkYXNhaQIIZXF1YWxzIDIBBC1nb3UBBzAtc2hpb24CCzB5ZW4gbG9ja2VyAgU4IGdvdQID" + "ZWtpAgJtbwIDbmluAQMxMDMBATMCAS4BAjQ0AQY4c2FpLTQBAnVwAAEyAQkgZXF1YWxzIDgBAi1nAQEwAQIyMgEBMwEBNAECNTQB" + "Azg2YwEDYmxzAQ9jIGVxdWFscyBnYWxvcmUBA2dvdQEGbCBjb2xhAQNuby4BAXQACDMwMDAga3J3AQMxMDQBAzIyZwEEMzI5NwEC" + "NDYBBzUgbWFjaGkBCTYwbWIgeWFubwEBOAICa2IBAWUBBGh1cm8BAXUBAngzAAk0IGNvdWxvbWIBATEBAjQ1AARhZnJvBARidWxs" + "AQZoZW1hcnUBB2l1ZSBva2EBBGthZ2kDBXRzdWtpAQJscAEFbmRhdmECBWtvbWFuAQZzYW5hZ2kBBHlhbmUAAmJiAQJlYQEEbGlu" + "ZAIKdWUgc3RyaWtlcgEFb25uaWUCBHNzaGkBB3V0Y2hhLXUABWNsYW1wAgplIG1hc2FoaXJvAQhyYXp5IGRhZAIFaW1zb24CAm9j" + "AQ51dGVzZXh5cm9idXR0cwIDdmllAAZkYWdhc2kCB2lnYWlqaW4CAnRlAQRpa2swAANlbGYBC3JlY3Qgc2F3YXJ1AA1mYW4gbm8g" + "aGl0b3JpAQhlbGxhdHJpeAEJcmVkIHBlcnJ5AQl1ZXRha2lzaGkCBm1paGlrbwIGbmRvc2hpAw5zZXh5ZHJhZ29uYmFsbAIDcnJ5" + "AAlnYXJhYmF0b3oBBmluaGFoYQEFb2JsaW4CCHRvaCBqdWFuAQNyYW4BBXdlZ3dlAARoYWxvAgJyYQEFaW1lbm8DCnVyYSBraXNl" + "a2kCBHNhc2kCBHRvbWkBBW9ub2thAgZyb3N1a2UAAmllAQZuYXp1bWECBGNhc2UDCm9nbml0eW1vdXMBBnNoaWtlaQEMdGFiYSBo" + "aXJvc2hpAANqYWICCHkgbmF5bG9yAAZrYWRhdGgCA25vbgIMcm1hIHRhdHN1cm91AghzZSBkYWlraQMDdW1pAQVpcmFyYQIMc2Fy" + "YWdpIGd1bm1hAQZvbi1raXQCA3JyYQEHdW5hYm90bwMFb2ljaGkCCXJvaW51IGp1dQQJc3UgZ2F0YXJpAAZsYW1iZGEBC2VzbGll" + "IGJyb3duAQVpbGl0aAIDbmRhAQdvbGljZXB0AQR1bmNoAANtYWkCAm5hAwlrYWkga2Fpa2ECA3JpbwIEdGVtaQIBeQMBYQEJZGEg" + "c3Rhcm91AQJlaQIEbWU1MAIIb3d3aXRobWUBCGljaGlraW5nAgJrbwIFbW9uZWwCAnl1Agl6dXJ5dSBrZWkBBm9ndWRhbgIEbWlq" + "aQEEdXRzdQANbmFrYWppbWEgeXVrYQIGcnVob2RvAQllcm9tYXNoaW4BDmd0dmlzdWFsc3R1ZGlvAQJ1bgAFb2Jvcm8BDGh0b21v" + "IHRha3VqaQEEb3VzbwADcGFuAQdpZyBraW5nAQlvcml1cmV0YW4ABnJhYmJpdAIJdGF0YXRhdDc0AgN2ZW4BDG9tdWxvIG1hbmNp" + "bgEFdXpoYWkADXNhaGFyYSB3YXRhcnUCBWlnYWRvAgJraQMDdXJhAgtuYnVuIGt5b2RlbgEJaGlndXJlIHVpAwZtYWthemUDBG5k" + "b2wDAm9uAw13YXN1IG5vIG9raW5hAgp1dGVuIGRvdWppAQhpYyBwaHVjawEDb3JhAQZwYXJyb3cADHRha2FzdWdpIGtvdQQDdHN1" + "Aw1lZGEgaGlyb21pdHN1AgZtYWdvcm8BCGVyYXN1IG1jAQdoZSBraXRlAglpY2N3aXRoYXEBCG9tIHNtaXRoAQxzdWtpbm8ganlv" + "Z2kBEHdpc3RlZHNjYXJsZXR0NjABBnlwZS45MAAFdmlja3kCBWt0cmlhAAl4aWVycmEwOTkADHlhaGlybyBwb2NoaQICaXICBm1h" + "bW90bwQCdG8BCnVpZ2EgbmFvaGECC2tpbm8gbWluYXRvAgt6dWtpIG4gZGFzaAAGem91cmlrCWNvc3BsYXllcrQAAAAAFGEgYmFv" + "IHllc2hpIHR1IG5pYW5nAQZiYW42MDUBC2kgbGVpIGppYW5nAghuIG5ndXllbgEMa2FuZSBhcmFyYWdpAgplbWkxMDF4b3hvAQds" + "aWNla3lvAwluYSBiZWNrZXIBB25pbm55YW4BCW9pIG1vbW9rbwEIcXVhIGFyZWEBEHJhc2hpIGhlYXJ0Z3JhbW0CCHR5IGh1YW5n" + "AQV0c3VraQEJeHVuIGthb3JpAQR6YW1pAAxiYWlsaSBzaGlybHkCBm5iYW5rbwMDZ25pAg1vZXIgbXlzdGVyaWFsAwl6b3Vtb3pp" + "YWEBBmxhY3FrbAEEeW9ydQAKY2FvbWVpeXV5aQIHcnJ5IGtleQIKdGljb3JucGxheQMGdGFzaGFhAQxoZWVzZSBlZ2cwdjADCHJy" + "eSBuZWtvAgZ1bm1vbW8BC2llbiBjb3NwbGF5ABlkYSBkYSBqdWFuIGp1YW4geGlhbyBqdWFuAQllbW9uIG1pa2EAC2VseSBjb3Nw" + "bGF5AQRuYWtvAQlyenVvIG5pc2EBBnRzdSBrbwEGdmVuaW5rAA1mYW5ncWlhbyB5ZXBvAQ9lbmcgamlhbmcgamlhbmcBB3Jhbnhj" + "b3MAE2c0NCB3YSBraXp1dHN1a2FuYWkBEXJlZW4gY2hhY2hhIGppYW5nAQh1YXhpY2hhbgITb3FpIG1peGlhbnhpYW4gbWlhbwAF" + "aGFjaGkCCG5hIGJ1bm55AwVlIGFtZQESZWxseSB2b24gdmFsZW50aW5lAQppZG9yaSByb3NlAQhvc2hpbGlseQEKdWEgcWkgaGFu" + "YQMJbGluZyBoYW5hAAtqZWFuIHdhbndhbgEQaWFvcm91amkgd2Fsa3VyZQIDdXFpBAV1amVhbgMDeWFuAQp1bmtlbnN0ZWluABFr" + "YWd1cmF6YWthIG1hZnV5dQIJbGlua2EgZm94AgtuZWtvLWthbWlhbwIIdGllY2FrZXkCCHlhIGh1YW5nBQZuaWxzb24BCGlraSBy" + "b3NlAgdtbWllIG1pAgpyaWtvIGNlbGlhAgR0YXJvAQZva3VodWkECHJhIGNoaXlvAQZ1dWtvIHcAEWxhcmlzc2Egcm9jaGVmb3J0" + "AQdlbmZyaWVkAQppbnppIGppYW5nAQZtdXNpY2wBCW9zdHdpbmQxMAIPdmVseXNwYWNla2l0dGVuAQ11ZXIgZGEgbW93YW5nAg1v" + "IHhpYW9saSBtaWFvAgRzdDc3AAVtYWNoaQIGa2FjaGFuAghyaWEgZGVzdQIJc2FrbyB5dW1lAwloaXJvIHl1a2kBCGVubWVudGFu" + "AglyY3VyeWxhbXACCnNzaWUgaHVhbmcBDmlhbmJpbmcgeGlhbmVyAglrb2ppYW5nd3cECW1pIGhva2luYQINbmF6dWtpIGhpa2Fy" + "dQINeWFtb3RvIHNha3VyYQMDb2tpAgl6aGltYW9xaXUBBm9tb2NhdAAGbmEtc2FuAgRnaXNhAgRpdGFvAgVuZ29uZwILdGggc29r" + "b2xvdmEBCmVrb2tveW9zaGkCBG5la28BCWlhbm5pYW4gZAIEeWV5ZQEIb3JhIGZhd24BBHlha28AC29raXRhIHJpbmthAQRtaW1p" + "AQluaSBoaXRvbWkDD2tzaXlhIHNvZmluaWt1bQEJdG9oYXJhIGFuAAhwZW5rYXJ1aQEEaWdtYQIFcGluYWkBDm90YXRvIGdvZHpp" + "bGxhAQl1cmlucHVwcHkADHFpc2lrdWFpIHdpaQIIdWhlIGtlamkACHJha3VyYWt1AgJuMwEFZWZlZW4CAm5nAQxpbmdvIG1pdHN1" + "a2kCBm8tY2hhbgMCa28CBXNzb2Z0AQlvbmdyb25nemkBCnlua2VyYmVsbGUAC3NhZGFrbyBtb21vAgJrdQQGcmEgbm9hAgZuZHUt" + "NjkCCm90b21lIGxvdmUCBHlha28BDWVubHVvIGNhaXR1YW4BCWhhcmtwYXJ0eQINaWthIHhpYW9sdSBsdQMJbWl6dSBuYWdpCAR5" + "dW5vBAZvdHN1a2kDCnJhZ2EgeWFua28DC3p1a3UgaG9uYW1pAg11YW5nIG11IGZ1IHN1AQhpYW8gZGluZwEDb2xhAAh0YW5ndGFu" + "ZwINbyBsaWFuZyBhemhhaQEHaW55IGFzYQIKdGkgY29zcGxheQEEb2thcgIKbW95byBqaWFuZwEHc3Vib21pbgMHa2kgZGVzdQMJ" + "bm55YW5jaGFuAQ55b3VkdWtpIG1hcnlvdQAHdW1la28gagEGcG1pbmFhAQlydW1pYnVubnkBA3l1eQANdmFsZXJ5IGhpbWVyYQEJ" + "ZWN0b3JmaXNoAQdpbm5lZ2FsAgxydHVhbCBnZWlzaGEAB3hhbnNvb24BCWlhIHhpYSB6aQIGZGFpZGFpAgZuZyBsYW4BCnVlIHFp" + "LXNhbWEADnlhbWF6YWtpIHJlaW5hAwVpc3VuZwIEbmd5aQIHb3lhb3F3cQEIaW5nIGxpbGkBCXVraSBhc3RyYQIFcmljaGEEBWtv" + "ZHhkAgZ1Zm9yaWEAC3podWltaW5neW91BWdyb3VwyAAAAAAQLi4uIG1vdSBpaSBkZXN1LgEBNwEDbWl6AAcwLXBhcnRzAQMwMDAB" + "CTEyMzQ1Njc4OQEBMgEGMy0zMjk3AQE0AgRjdXJhAgl0aCBoZWF2ZW4CAXUBBTcyNWNvAQY4NDZuZXQCBGJhc2UBAjk2AAExAQ4w" + "LWppa2FuIHN1aW1pbgMKbWFuIGJhcmlraQIGLjEwbWh6AggwMDAwMDAwMAQCYXADBGFjcmUDB3llbm1vZmECCzIgZ291c2hpdHN1" + "AgQ2Z291AwFtAgRtaWxlAg9wYXNlYyBubyBrYW5hdGECBndhZGF4eAIJeWVuIGpvbmRvAQIxMAMHLWdyb292ZQMBdQIIMSB0b3Vi" + "YW4CAjIyAwFrAQcyLWppZ2VuAgNjdXQCCGthZmZlaW5zAQEzAgJjbQEMNDBrbSBzbGFzaCBoAgQ4YnBtAgZsb2xpdGEBBzUyaGVy" + "dHoBBTYgc2FpAgcwMDAgYWxsAgVrZW5tZQEKNzU2IHN0dWRpbwICODcCAmluAgF3AQ44MG1pbGxpIGNhbm5vbgMBcgIBMwIHNSBz" + "b3VrbwIKNyBzZWlidXRzdQIGbWFzdGVyAQc5bGxkZGtrAQNiaXQBBGdheWEBA29yOAAHMiBjYXJhdAEIMCBwbHVzIDECETAwa2Nh" + "bCBzaGFrZSBjbHViAgEzAgs5IGdvdXNoaXRzdQIGbGlxdWlkAgJudAICcjACBnR3ZW50eQEFMy40ZG8CCDExNzlyb2NrAQY0IHBh" + "Z2UCBjEgaW5jLgEKNTBwb25vcm9qaQEBNwICM2sBAzk2MQICOTABAWIBBWN2LnNzAQpkIGNyZWF0aXZlAgUtbm90ZQEBaAEIamlt" + "dXN1YmkBAW0BAm5kAwUgbGlmZQEHcC1jb2xvcgEGc3Ryb2tlAQl0YWlscXVlZW4BAnZzAQV6aWdlbgAMMyBjb2xvcnMgY2F0CgVv" + "cm9uYQIFb24gMTABCC0yIGdhZ2VuAgdtZWdhLm5lAQguNXRvdXNpbgEhMCBrb3VoYW4ga2FyYSBoYWppbWVydSBlcm8gZG91amlu" + "AgMwY20CCzEgZ291c2hpdHN1AgttaW4tNTAwMHllbgEIMTA0dHlvbWUBBTIwYnBtAgMxZ28BAjMzAQw2MCBkZWdyZWVzIGMCAWsB" + "ATgCBC41IGMCBXNoaWtpAQQ5ZG1wAgV4cmVhbQEGZCBsaXZlAgF0AQNlZ2cBA2pvdQEEbGJveAAINC41c3BhY2UBCTAwMTAgMS1n" + "bwICNDACBmRlbmllcgEKMzRub3Rmb3VuZAEINjQ5IGNsdWIBAjcxAgJzcAEJYy1mYW50YXN5AQNkaXABAWgCBGFuZHMBDGsgc2Vp" + "c2FrdXNobwEJb3I1IHdvcmtzAQZzZWFzb24CC3QgaW5qZWN0aW9uAAQ1IDA2AgdzbGFzaCA0AAdhaGVtYXJ1AQ5rYXRzdWtpIHNv" + "dWtlbgESbGljZSBubyB0YWthcmFiYWtvAAJiYgEIbGFjayBkb2cFBm53aGl0ZQMCemUCBW9zc29tAAhjYXR0bGV5YQEIaHJpc3Rt" + "YXMBBWlwaGVyAQVsZXN0YQEGcmltc29uAgNvd24BBnljbG9uZQIFbnRoaWEADWRpZ2l0YWwgbG92ZXIBBm1tLmNvbQADZWxmAApm" + "YXRhbHB1bHNlAQZpcmVmbHkABWdob3N0AQZsYXNzZXMABWhhcmVtAwRuZXNzAQhlbnRhaWtleQEFaWJpa2kADGxhcGlzIGxhenVs" + "aQEFaWxpdGgBDG9saXRhY2hhbm5lbAAEbWFuYQIBeQECZWkCDHRyb2JheSBjb21peAEEaXN0eQEGb25vZXllAApuYXJ1aG8tZG91" + "AgR5dXRhAQ9vcmFuZWtvLW5vLXRhbWEBAnVuAgR0YWt1AAVvYm9ybwEHeWFrb2RvbgAIcGFsY29taXgCB250eWhvc2UBBW9pc29u" + "AAZyYWJiaXQBBmViZWNjYQAHc2FpZ2FkbwEHaGFnYmFzZQIGaW1hcGFuAQppbGVudCBoaWxsAQRsYXZlAQV0ZWxsYQIDb3JtAQZ1" + "enVyYW4EAnlhAAR0YWlsAQVvbWJveQAFdmVub20ACHlhbWFtb3RvCGxhbmd1YWdlVwAAAAAJYWZyaWthYW5zAQdsYmFuaWFuAQVy" + "YWJpYwMEbWFpYwIGbWVuaWFuAAdiZW5nYWxpAQZvc25pYW4BCHVsZ2FyaWFuAgVybWVzZQAHY2F0YWxhbgEGZWJ1YW5vAQZoaW5l" + "c2UBA3JlZQMDb2xlAgZvYXRpYW4BBHplY2gABmRhbmlzaAEEdXRjaAAHZW5nbGlzaAEIc3BlcmFudG8CBnRvbmlhbgAHZmlubmlz" + "aAEFcmVuY2gACGdlb3JnaWFuAgRybWFuAQRyZWVrAQd1amFyYXRpAAZoZWJyZXcBBGluZGkBBG1vbmcBCHVuZ2FyaWFuAAlpY2Vs" + "YW5kaWMBCW5kb25lc2lhbgEEcmlzaAEGdGFsaWFuAAhqYXBhbmVzZQIGdmFuZXNlAAdrYW5uYWRhAgR6YWtoAQRobWVyAQVvcmVh" + "bgEGdXJkaXNoAAZsYWRpbm8CAW8CA3RpbgMEdmlhbgAHbWFyYXRoaQEIb25nb2xpYW4AB25kZWJlbGUBBWVwYWxpAQhvcndlZ2lh" + "bgAFb3JvbW8ACnBhcGlhbWVudG8CBHNodG8BBmVyc2lhbgEFb2xpc2gCCHJ0dWd1ZXNlAQZ1bmphYmkAB3Jld3JpdGUBB29tYW5p" + "YW4BBnVzc2lhbgAFc2FuZ28DBXNrcml0AQZlcmJpYW4BBGhvbmEBBWxvdmFrBAVlbmlhbgEFb21hbGkBBnBhbmlzaAEGd2FoaWxp" + "AgVlZGlzaAAHdGFnYWxvZwIDbWlsAQVlbHVndQIKeHQgY2xlYW5lZAQObGVzcyBuYXJyYXRpdmUBA2hhaQEGaWJldGFuAgZncmlu" + "eWEBCXJhbnNsYXRlZAEGdXJraXNoAAl1a3JhaW5pYW4BA3JkdQAKdmlldG5hbWVzZQAFd2Vsc2gAB3lpZGRpc2gABHp1bHUHcmVj" + "bGFzcwsAAAAACGFydGlzdGNnAQhzaWFucG9ybgAHY29zcGxheQAJZG91amluc2hpAAZnYW1lY2cACGltYWdlc2V0AAVtYW5nYQED" + "aXNjAAVub24taAAHcHJpdmF0ZQAHd2VzdGVybg==";
-  var CORE_COUNTS_BASE64 = "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" + "/52qdruz/8M=";
-
-  // src/tags/codec-header.ts
-  function hasCodecHeader(bytes, magic, version, headerBytes) {
-    if (bytes.length < headerBytes) {
-      return false;
-    }
-    for (let index = 0;index < magic.length; index++) {
-      if (bytes[index] !== magic[index]) {
-        return false;
-      }
-    }
-    return bytes[magic.length] === version;
-  }
-
-  // src/tags/index-codec.ts
-  var MAGIC = [69, 72, 84, 73];
-  var FORMAT_VERSION = 1;
-  var HEADER_BYTES = 7;
-  var MAX_NAMESPACES = 128;
-  var MAX_KEYS_PER_NAMESPACE = 200000;
-  var MAX_KEY_BYTES = 4096;
-  function readVarint(bytes, offset) {
-    let value = 0;
-    let shift = 0;
-    let position = offset;
-    while (position < bytes.length && shift <= 21) {
-      const byte = bytes[position];
-      position++;
-      if (byte === undefined) {
-        return null;
-      }
-      value |= (byte & 127) << shift;
-      if ((byte & 128) === 0) {
-        return { value, next: position };
-      }
-      shift += 7;
-    }
-    return null;
-  }
-  function decodeTagVocabulary(bytes) {
-    if (!hasCodecHeader(bytes, MAGIC, FORMAT_VERSION, HEADER_BYTES)) {
-      return null;
-    }
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const namespaceCount = view.getUint16(5, true);
-    if (namespaceCount === 0 || namespaceCount > MAX_NAMESPACES) {
-      return null;
-    }
-    let offset = HEADER_BYTES;
-    const decoder = new TextDecoder("utf-8", { fatal: true });
-    const groups = new Map;
-    try {
-      for (let groupIndex = 0;groupIndex < namespaceCount; groupIndex++) {
-        if (offset >= bytes.length) {
-          return null;
-        }
-        const idLength = bytes[offset];
-        offset++;
-        if (idLength === undefined || idLength === 0 || offset + idLength + 4 > bytes.length) {
-          return null;
-        }
-        const namespace = decoder.decode(bytes.subarray(offset, offset + idLength));
-        offset += idLength;
-        const keyCount = view.getUint32(offset, true);
-        offset += 4;
-        if (keyCount > MAX_KEYS_PER_NAMESPACE) {
-          return null;
-        }
-        const keys = [];
-        let previous = "";
-        for (let keyIndex = 0;keyIndex < keyCount; keyIndex++) {
-          if (offset >= bytes.length) {
-            return null;
-          }
-          const prefix = bytes[offset];
-          offset++;
-          const length = readVarint(bytes, offset);
-          if (prefix === undefined || length === null) {
-            return null;
-          }
-          offset = length.next;
-          if (prefix > previous.length || length.value > MAX_KEY_BYTES || offset + length.value > bytes.length) {
-            return null;
-          }
-          const suffix = decoder.decode(bytes.subarray(offset, offset + length.value));
-          offset += length.value;
-          const key = previous.slice(0, prefix) + suffix;
-          if (key === "") {
-            return null;
-          }
-          keys.push(key);
-          previous = key;
-        }
-        groups.set(namespace, keys);
-      }
-    } catch {
-      return null;
-    }
-    return offset === bytes.length ? groups : null;
-  }
-
-  // src/tags/tag-counts-codec.ts
-  var MAGIC2 = [66, 69, 84, 67];
-  var VERSION5 = 1;
-  var HEADER_BYTES2 = 11;
-  var ENTRY_BYTES = 6;
-  var QUANT_MAX = 255;
-  function tagKeyIdFromFolded(folded) {
-    let high = 2166136261;
-    let low = 2654435769;
-    for (let index = 0;index < folded.length; index++) {
-      const code = folded.charCodeAt(index);
-      high = Math.imul(high ^ code, 16777619);
-      low = Math.imul(low ^ code, 16777619);
-    }
-    return (high >>> 0) * 256 + (low >>> 0 & 255);
-  }
-  function dequantiseCount(quantized, max) {
-    if (quantized <= 0 || max <= 0) {
-      return 0;
-    }
-    return Math.round(Math.expm1(quantized / QUANT_MAX * Math.log1p(max)));
-  }
-  function decodeTagCountsFromBytes(bytes) {
-    if (!hasCodecHeader(bytes, MAGIC2, VERSION5, HEADER_BYTES2)) {
-      return null;
-    }
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const max = view.getUint32(5, true);
-    const entryCount = view.getUint16(9, true);
-    if (max <= 0 || bytes.length !== HEADER_BYTES2 + entryCount * ENTRY_BYTES) {
-      return null;
-    }
-    const counts = new Map;
-    for (let index = 0;index < entryCount; index++) {
-      const offset = HEADER_BYTES2 + index * ENTRY_BYTES;
-      const id = (bytes[offset] ?? 0) + (bytes[offset + 1] ?? 0) * 256 + (bytes[offset + 2] ?? 0) * 65536 + (bytes[offset + 3] ?? 0) * 16777216 + (bytes[offset + 4] ?? 0) * 4294967296;
-      const quantized = bytes[offset + 5] ?? 0;
-      counts.set(id, dequantiseCount(quantized, max));
-    }
-    return { counts, max };
-  }
-  function decodeTagCounts(base64) {
-    const bytes = bytesFromBase64(base64);
-    return bytes ? decodeTagCountsFromBytes(bytes) : null;
-  }
-
-  // src/tags/core.ts
-  var data;
-  function coreTagData() {
-    if (data !== undefined) {
-      return data;
-    }
-    const bytes = bytesFromBase64(CORE_VOCABULARY_BASE64);
-    const groups = bytes === null ? null : decodeTagVocabulary(bytes);
-    if (groups === null) {
-      data = null;
-      return null;
-    }
-    const countBytes = bytesFromBase64(CORE_COUNTS_BASE64);
-    const counts = countBytes === null ? null : decodeTagCountsFromBytes(countBytes);
-    data = { groups, counts };
-    return data;
-  }
-
-  // src/tags/mirror.ts
-  var ASSET_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-  var ASSET_RETRY_MS = 60 * 60 * 1000;
-  var DATA_REPO = "identity-morphism/better-eh";
-  function assetUrls(name) {
-    return [
-      `https://raw.githubusercontent.com/${DATA_REPO}/master/assets/${name}`,
-      `https://cdn.jsdelivr.net/gh/${DATA_REPO}@master/assets/${name}`
-    ];
-  }
-  var MAX_ASSET_BYTES = 2 * 1024 * 1024;
-  async function readCapped(response, limit) {
-    if (Number(response.headers.get("content-length") ?? "0") > limit) {
-      return null;
-    }
-    if (response.body === null) {
-      return new Uint8Array(await response.arrayBuffer());
-    }
-    const reader = response.body.getReader();
-    const chunks = [];
-    let total = 0;
-    let read = await reader.read();
-    while (!read.done) {
-      total += read.value.byteLength;
-      if (total > limit) {
-        await reader.cancel();
-        return null;
-      }
-      chunks.push(read.value);
-      read = await reader.read();
-    }
-    const bytes = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return bytes;
-  }
-  async function fetchAsset(urls, decode, { label, timeoutMs }) {
-    for (const url of urls) {
-      const controller = timeoutMs === undefined ? null : new AbortController;
-      const timer = controller === null ? undefined : setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(url, {
-          cache: "no-cache",
-          credentials: "omit",
-          referrerPolicy: "no-referrer",
-          headers: { accept: "application/octet-stream" },
-          ...controller === null ? {} : { signal: controller.signal }
-        });
-        if (!response.ok) {
-          warn(`${label} returned ${response.status}`, url);
-          continue;
-        }
-        const bytes = await readCapped(response, MAX_ASSET_BYTES);
-        if (bytes === null) {
-          warn(`${label} is larger than ${MAX_ASSET_BYTES} bytes`, url);
-          continue;
-        }
-        const value = decode(bytes);
-        if (value === null) {
-          warn(`${label} returned invalid data`, url);
-          continue;
-        }
-        return { value, bytes };
-      } catch (error) {
-        warn(`${label} failed`, url, error);
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    throw new Error(`Could not download ${label.toLowerCase()}`);
-  }
-
-  // src/tags/snapshot.ts
-  function createSnapshot(options) {
-    const { label, ttlMs, retryMs, load: download, readCache, writeCache, onError } = options;
-    let current = null;
-    let cacheRead = false;
-    let inFlight = null;
-    let generation = 0;
-    let lastAttempt = 0;
-    const listeners = createEmitter();
-    function cached() {
-      if (!cacheRead) {
-        current = readCache();
-        cacheRead = current !== null;
-      }
-      return current;
-    }
-    function notify(value) {
-      listeners.emit(value);
-    }
-    function start(background) {
-      const token = ++generation;
-      lastAttempt = Date.now();
-      let request;
-      try {
-        request = download();
-      } catch (error) {
-        request = Promise.reject(error instanceof Error ? error : new Error(String(error)));
-      }
-      const pending = request.then((value) => {
-        if (token !== generation) {
-          return cached()?.value ?? value;
-        }
-        const updated = Date.now();
-        current = { value, updated };
-        cacheRead = true;
-        writeCache(value, updated);
-        notify(value);
-        return value;
-      }).catch((error) => {
-        if (onError === "cached") {
-          if (token === generation) {
-            warn(`${label} refresh failed`, error);
-          }
-          return cached()?.value ?? null;
-        }
-        throw error;
-      }).finally(() => {
-        if (token === generation) {
-          inFlight = null;
-        }
-      });
-      inFlight = pending;
-      if (background) {
-        pending.catch((error) => {
-          warn(`Background ${label} refresh failed`, error);
-        });
-      }
-      return pending;
-    }
-    function loadFromCache(force = false) {
-      const cachedValue = cached();
-      const now = Date.now();
-      if (force) {
-        return start(false);
-      }
-      if (cachedValue) {
-        if (now - cachedValue.updated <= ttlMs) {
-          return Promise.resolve(cachedValue.value);
-        }
-        if (inFlight || now - lastAttempt <= retryMs) {
-          return Promise.resolve(cachedValue.value);
-        }
-        start(true);
-        return Promise.resolve(cachedValue.value);
-      }
-      if (inFlight) {
-        return inFlight;
-      }
-      return start(false);
-    }
-    return {
-      get() {
-        return cached()?.value ?? null;
-      },
-      updated() {
-        return cached()?.updated ?? 0;
-      },
-      load: loadFromCache,
-      onChange(listener) {
-        return listeners.subscribe(listener);
-      },
-      publish(value) {
-        const known = cached();
-        current = { value, updated: known?.updated ?? Date.now() };
-        cacheRead = true;
-        notify(value);
-      },
-      reset() {
-        generation++;
-        current = null;
-        cacheRead = false;
-        inFlight = null;
-        lastAttempt = 0;
-      }
-    };
-  }
-
-  // src/tags/counts.ts
-  var CACHE_KEY = "eh:tag-counts:v3";
-  var CACHE_VERSION = 3;
-  var REMOTE_URLS = assetUrls("tag-counts.bin");
-  function isStoredCounts(value) {
-    return isRecord(value) && typeof value.updated === "number" && typeof value.payload === "string";
-  }
-  var countsStore = createStore({
-    key: CACHE_KEY,
-    version: CACHE_VERSION,
-    empty: () => ({ updated: 0, payload: "" }),
-    guard: isStoredCounts
-  }, gmStorage());
-  function readCountsCache() {
-    const stored = countsStore.read();
-    if (stored.payload === "") {
-      return null;
-    }
-    const counts = decodeTagCounts(stored.payload);
-    return counts ? { value: { counts, payload: stored.payload }, updated: stored.updated } : null;
-  }
-  async function fetchCounts() {
-    const { value, bytes } = await fetchAsset(REMOTE_URLS, decodeTagCountsFromBytes, {
-      label: "Tag count mirror",
-      timeoutMs: 12000
-    });
-    log(`Tag counts refreshed: ${value.counts.size} tags`);
-    return { counts: value, payload: base64FromBytes(bytes) };
-  }
-  var countsSnapshot = createSnapshot({
-    label: "tag counts",
-    ttlMs: ASSET_TTL_MS,
-    retryMs: ASSET_RETRY_MS,
-    load: fetchCounts,
-    readCache: readCountsCache,
-    writeCache: (cached, updated) => {
-      countsStore.write({ updated, payload: cached.payload });
-    },
-    onError: "cached"
-  });
-  function getTagCounts() {
-    return countsSnapshot.get()?.counts ?? null;
-  }
-  function onTagCountsChange(listener) {
-    return countsSnapshot.onChange((cached) => {
-      listener(cached.counts);
-    });
-  }
-  function loadTagCounts(force = false) {
-    return countsSnapshot.load(force).then((cached) => cached?.counts ?? null);
-  }
-
-  // src/tags/db.ts
-  var CACHE_KEY2 = "eh:tag-index:v2";
-  var USAGE_KEY = "eh:tag-usage:v1";
-  var TAG_COMPLETIONS_KEY = "eh:tag-completions:v1";
-  var CACHE_VERSION2 = 2;
-  var USAGE_LIMIT = 200;
-  var COMPLETION_LIMIT = 200;
-  var DAY_MS2 = 24 * 60 * 60 * 1000;
-  var COMPLETION_TTL_MS = 90 * DAY_MS2;
-  var COMPLETION_HALF_LIFE_MS = 30 * DAY_MS2;
-  var DOWNLOAD_TIMEOUT_MS = 12000;
-  var INDEX_URLS = assetUrls("tag-index.bin");
-  function isStoredIndex(value) {
-    return isRecord(value) && typeof value.updated === "number" && isRecord(value.payload);
-  }
-  var indexStore = createStore({
-    key: CACHE_KEY2,
-    version: CACHE_VERSION2,
-    empty: () => ({ updated: 0, payload: {} }),
-    guard: isStoredIndex
-  }, gmStorage());
-  var usageStore = createStore({ key: USAGE_KEY, version: 1, empty: () => ({}), guard: isRecord }, gmStorage());
-  var completionStore = createStore({ key: TAG_COMPLETIONS_KEY, version: 1, empty: () => ({}), guard: isRecord }, gmStorage());
-  function tagId(ns, key) {
-    return `${ns}\x00${key}`;
-  }
-  function attachCounts(entries, counts) {
-    if (!counts || counts.max <= 0) {
-      return 0;
-    }
-    const { counts: byId, max } = counts;
-    for (const entry of entries) {
-      entry.count = byId.get(tagKeyIdFromFolded(entry.folded)) ?? 0;
-    }
-    return max;
-  }
-  function keysAreSorted(entries) {
-    for (let index = 1;index < entries.length; index++) {
-      const previous = entries[index - 1];
-      const current = entries[index];
-      if (previous !== undefined && current !== undefined && previous.key > current.key) {
-        return false;
-      }
-    }
-    return true;
-  }
-  function buildIndex(groups, updated, counts) {
-    const entries = [];
-    const byNamespace = new Map;
-    for (const namespace of TAG_NAMESPACES) {
-      const keys = groups.get(namespace.id);
-      if (!keys || keys.length === 0) {
-        continue;
-      }
-      const scoped = [];
-      for (const key of keys) {
-        const folded = fold(key);
-        const entry = { ns: namespace, key, folded, count: 0 };
-        entries.push(entry);
-        scoped.push(entry);
-      }
-      if (!keysAreSorted(scoped)) {
-        scoped.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-      }
-      byNamespace.set(namespace.id, scoped);
-    }
-    const maxCount = attachCounts(entries, counts);
-    let lookup = null;
-    return {
-      entries,
-      updated,
-      byNamespace,
-      maxCount,
-      get lookup() {
-        if (lookup === null) {
-          lookup = new Map;
-          for (const entry of entries) {
-            lookup.set(tagId(entry.ns.id, entry.key), entry);
-          }
-        }
-        return lookup;
-      }
-    };
-  }
-  function buildTagIndexFromGroups(groups, updated = Date.now(), counts) {
-    const index = buildIndex(groups, updated, counts);
-    if (index.entries.length === 0) {
-      throw new Error("Tag database is empty");
-    }
-    return index;
-  }
-  function encodeIndex(index) {
-    const payload = {};
-    for (const [id, entries] of index.byNamespace) {
-      payload[id] = entries.map((entry) => entry.key);
-    }
-    return payload;
-  }
-  function decodeIndex(payload, updated, counts) {
-    const groups = new Map;
-    for (const [id, keys] of Object.entries(payload)) {
-      if (Array.isArray(keys)) {
-        const cleaned = [];
-        for (const key of keys) {
-          if (typeof key !== "string") {
-            continue;
-          }
-          const value = cleanTagKey(key);
-          if (value !== "") {
-            cleaned.push(value);
-          }
-        }
-        groups.set(id, cleaned);
-      }
-    }
-    const index = buildIndex(groups, updated, counts);
-    return index.entries.length === 0 ? null : index;
-  }
-  function withTagCounts(current, counts) {
-    if (!counts || counts.max <= 0) {
-      return current;
-    }
-    const maxCount = attachCounts(current.entries, counts);
-    return {
-      entries: current.entries,
-      updated: current.updated,
-      byNamespace: current.byNamespace,
-      maxCount,
-      get lookup() {
-        return current.lookup;
-      }
-    };
-  }
-  function readIndexCache() {
-    const stored = indexStore.read();
-    const counts = getTagCounts();
-    const index = decodeIndex(stored.payload, stored.updated, counts ?? undefined);
-    return index ? { value: { index, counts }, updated: stored.updated } : null;
-  }
-  var core;
-  var coreCounts = null;
-  function coreIndex() {
-    if (core === undefined) {
-      const generated = coreTagData();
-      const counts = getTagCounts() ?? generated?.counts ?? null;
-      core = generated === null ? null : buildTagIndexFromGroups(generated.groups, 0, counts ?? undefined);
-      coreCounts = counts;
-    }
-    return core;
-  }
-  async function fetchVocabulary() {
-    const { value } = await fetchAsset(INDEX_URLS, decodeTagVocabulary, {
-      label: "Tag index mirror",
-      timeoutMs: DOWNLOAD_TIMEOUT_MS
-    });
-    return value;
-  }
-  async function fetchIndex() {
-    try {
-      const vocabulary = await fetchVocabulary();
-      const counts = getTagCounts();
-      const index = buildTagIndexFromGroups(vocabulary, Date.now(), counts ?? undefined);
-      log(`Tag index downloaded: ${index.entries.length} tags`);
-      return { index, counts };
-    } catch (error) {
-      warn("Tag vocabulary download failed", error);
-      throw error;
-    }
-  }
-  var indexSnapshot = createSnapshot({
-    label: "tag index",
-    ttlMs: ASSET_TTL_MS,
-    retryMs: ASSET_RETRY_MS,
-    load: fetchIndex,
-    readCache: readIndexCache,
-    writeCache: (bound, updated) => {
-      indexStore.write({ updated, payload: encodeIndex(bound.index) });
-    },
-    onError: "throw"
-  });
-  var coreChanges = createEmitter();
-  function onTagIndexChange(listener) {
-    const offSnapshot = indexSnapshot.onChange(listener);
-    const offCore = coreChanges.subscribe(listener);
-    return () => {
-      offSnapshot();
-      offCore();
-    };
-  }
-  function applyTagCounts(counts) {
-    const current = indexSnapshot.get();
-    if (current !== null && current.counts !== counts) {
-      const next = withTagCounts(current.index, counts);
-      if (next !== current.index) {
-        indexSnapshot.publish({ index: next, counts });
-      }
-    }
-    if (core !== undefined && core !== null && coreCounts !== counts) {
-      const next = withTagCounts(core, counts);
-      if (next !== core) {
-        core = next;
-        coreCounts = counts;
-        if (current === null) {
-          coreChanges.emit();
-        }
-      }
-    }
-  }
-  onTagCountsChange(applyTagCounts);
-  function getTagIndex() {
-    return indexSnapshot.get()?.index ?? coreIndex();
-  }
-  async function loadTagIndex(force = false) {
-    loadTagCounts().catch((error) => {
-      warn("Tag popularity refresh failed", error);
-    });
-    if (!force) {
-      const cached = indexSnapshot.get();
-      if (cached) {
-        const loaded = await indexSnapshot.load(false);
-        return loaded?.index ?? cached.index;
-      }
-      const fallback = coreIndex();
-      if (fallback) {
-        indexSnapshot.load(false).catch((error) => {
-          warn("Tag index background download failed", error);
-        });
-        return fallback;
-      }
-    }
-    const loaded = await indexSnapshot.load(force);
-    if (!loaded) {
-      throw new Error("Could not load the tag index");
-    }
-    return loaded.index;
-  }
-  function readTimedCounts(stored, ttl, now = Date.now()) {
-    const counts = new Map;
-    for (const [id, value] of Object.entries(stored)) {
-      if (typeof value !== "object" || value === null) {
-        continue;
-      }
-      const count = "count" in value ? value.count : null;
-      const lastUsed = "lastUsed" in value ? value.lastUsed : null;
-      if (typeof count !== "number" || typeof lastUsed !== "number") {
-        continue;
-      }
-      if (ttl !== undefined && now - lastUsed >= ttl) {
-        continue;
-      }
-      counts.set(id, { count, lastUsed });
-    }
-    return counts;
-  }
-  function writePruned(counts, limit, write) {
-    if (counts.size > limit) {
-      const oldest = [...counts.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed).slice(0, counts.size - limit);
-      for (const [idToDrop] of oldest) {
-        counts.delete(idToDrop);
-      }
-    }
-    write(Object.fromEntries(counts));
-  }
-  var usage = null;
-  function readUsage() {
-    if (usage) {
-      return usage;
-    }
-    usage = readTimedCounts(usageStore.read());
-    return usage;
-  }
-  function tagUsage() {
-    return readUsage();
-  }
-  function recordTagUse(ns, key) {
-    const current = readUsage();
-    const id = tagId(ns, key);
-    const previous = current.get(id);
-    current.set(id, {
-      count: (previous?.count ?? 0) + 1,
-      lastUsed: Date.now()
-    });
-    writePruned(current, USAGE_LIMIT, (value) => usageStore.write(value));
-  }
-  function normalizePrefix(prefix) {
-    return fold(prefix).trim();
-  }
-  function completionId(input) {
-    return [input.prefixNs, normalizePrefix(input.prefix), input.ns, input.key].join("\x00");
-  }
-  function tagCompletions(now = Date.now()) {
-    return readTimedCounts(completionStore.read(), COMPLETION_TTL_MS, now);
-  }
-  function recordTagCompletion(input, now = Date.now()) {
-    if (normalizePrefix(input.prefix) === "") {
-      return;
-    }
-    const completions = readTimedCounts(completionStore.read(), COMPLETION_TTL_MS, now);
-    const id = completionId(input);
-    const previous = completions.get(id);
-    completions.set(id, { count: (previous?.count ?? 0) + 1, lastUsed: now });
-    writePruned(completions, COMPLETION_LIMIT, (value) => completionStore.write(value));
   }
 
   // src/tags/suggest.ts
@@ -7473,11 +7531,6 @@ ${defaultKeySummary()}`)) {
   }
   function galleryBackLink(href, className) {
     return el("a", { class: className, href, text: "Back to gallery" });
-  }
-
-  // src/ui/error-text.ts
-  function errorText(error, fallback = "Something went wrong.") {
-    return error instanceof Error ? error.message : fallback;
   }
 
   // src/ui/pending-action.ts
@@ -20847,6 +20900,14 @@ body.fit-h.reader-continuous #reader {
       const initial = view.parse(doc, initialRoute);
       view.seed?.(initialRoute, initial);
       ensureShell();
+      let storageWarned = false;
+      onStorageFailure(() => {
+        if (storageWarned) {
+          return;
+        }
+        storageWarned = true;
+        showToast("Browser storage rejected a save; changes may be lost.");
+      });
       env.history.replaceState({ eh: true, scrollY: 0 }, "", env.location.href);
       try {
         present(initialRoute, view, initial, 0, false);

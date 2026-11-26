@@ -1,6 +1,9 @@
 import { DEFAULT_KEYMAP, KEY_ACTIONS } from "./keymap-schema";
 import { getSettings, updateSetting } from "./settings";
 import type { BooleanKey } from "./settings-schema";
+import { clearTagCountsCache, loadTagCounts } from "./tags/counts";
+import { clearTagIndexCache, loadTagIndex } from "./tags/db";
+import { errorText } from "./ui/error-text";
 import { showToast } from "./ui/toast";
 
 interface ToggleCommand {
@@ -49,6 +52,19 @@ interface GreasemonkeyMenu {
   GM_registerMenuCommand?: (caption: string, command: () => void) => void;
 }
 
+/** Force both remote tag datasets to redownload, reporting the result once. */
+async function refreshTagData(): Promise<void> {
+  clearTagIndexCache();
+  clearTagCountsCache();
+  try {
+    await loadTagCounts(true);
+    await loadTagIndex(true);
+    showToast("Tag data refreshed");
+  } catch (error) {
+    showToast(errorText(error, "Could not refresh tag data."));
+  }
+}
+
 /**
  * Add the quick toggles to the manager's script menu.
  *
@@ -75,5 +91,15 @@ export function registerMenuCommands(): void {
       updateSetting("keymap", DEFAULT_KEYMAP);
       showToast("Keymap reset to defaults");
     }
+  });
+
+  register("Refresh tag data now", () => {
+    void refreshTagData();
+  });
+
+  register("Clear cached tag data", () => {
+    clearTagIndexCache();
+    clearTagCountsCache();
+    showToast("Cached tag data cleared");
   });
 }
