@@ -11,9 +11,14 @@ export const VIEWER_PATH = /^\/s\/[^/]+\/\d+-\d+\/?$/;
 /** An uploader listing: `/uploader/<name>`. */
 export const UPLOADER_PATH = /^\/uploader\/[^/]+\/?$/;
 
+/** The pathname without one trailing slash; `/` itself stays `/`. */
+export function withoutTrailingSlash(pathname: string): string {
+  return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
 /** Whether `pathname` names `path`, ignoring one trailing slash. */
 export function isPath(pathname: string, path: string): boolean {
-  return pathname === path || pathname === `${path}/`;
+  return withoutTrailingSlash(pathname) === path;
 }
 
 /** Listing paths and the single category each one shows; `/` is the unfiltered index. */
@@ -27,7 +32,7 @@ export const ALL_CATEGORY_BITS = CATEGORIES.reduce((bits, category) => bits | ca
 
 /** The single category bit a listing path shows, or null when the path is not a category listing. */
 export function categoryPathBit(pathname: string): number | null {
-  return LIST_PATHS[pathname] ?? null;
+  return LIST_PATHS[withoutTrailingSlash(pathname)] ?? null;
 }
 
 /** Listing routes whose table is the front-page table under a different heading. */

@@ -94,4 +94,27 @@ describe("parseRoute", () => {
     expect(parseRoute(`${ORIGIN}/?eh_native=1`).kind).toBe("native");
     expect(parseRoute("https://example.com/g/123456/abcdef1234/").kind).toBe("native");
   });
+
+  test("ignores one trailing slash on every owned path", () => {
+    expect(parseRoute(`${ORIGIN}/favorites.php/`).kind).toBe("favorites");
+    expect(parseRoute(`${ORIGIN}/home.php/`).kind).toBe("home");
+    expect(parseRoute(`${ORIGIN}/torrents.php/`).kind).toBe("torrents");
+    expect(parseRoute(`${ORIGIN}/toplist.php/`).kind).toBe("toplist");
+    expect(parseRoute(`${ORIGIN}/uconfig.php/`).kind).toBe("settings");
+    expect(parseRoute(`${ORIGIN}/mytags/`).kind).toBe("myTags");
+    expect(parseRoute(`${ORIGIN}/news.php/`).kind).toBe("news");
+    expect(parseRoute(`${ORIGIN}/gallerytorrents.php/`).kind).toBe("galleryTorrents");
+    expect(parseRoute(`${ORIGIN}/archiver.php/`).kind).toBe("archive");
+
+    const category = parseRoute(`${ORIGIN}/doujinshi/`);
+    expect(category.kind).toBe("list");
+    if (category.kind === "list") {
+      expect(category.query.cats).not.toBe(0);
+    }
+    const popular = parseRoute(`${ORIGIN}/popular/`);
+    expect(popular.kind).toBe("list");
+    if (popular.kind === "list") {
+      expect(popular.scope).toBe("popular");
+    }
+  });
 });

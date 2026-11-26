@@ -2423,8 +2423,11 @@ ${defaultKeySummary()}`)) {
   // src/routes/identity.ts
   var VIEWER_PATH = /^\/s\/[^/]+\/\d+-\d+\/?$/;
   var UPLOADER_PATH = /^\/uploader\/[^/]+\/?$/;
+  function withoutTrailingSlash(pathname) {
+    return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  }
   function isPath(pathname, path) {
-    return pathname === path || pathname === `${path}/`;
+    return withoutTrailingSlash(pathname) === path;
   }
   var LIST_PATHS = {
     "/": 0,
@@ -2432,7 +2435,7 @@ ${defaultKeySummary()}`)) {
   };
   var ALL_CATEGORY_BITS = CATEGORIES.reduce((bits, category) => bits | category.bit, 0);
   function categoryPathBit(pathname) {
-    return LIST_PATHS[pathname] ?? null;
+    return LIST_PATHS[withoutTrailingSlash(pathname)] ?? null;
   }
   var SCOPE_PATHS = {
     [POPULAR_PATH]: "popular",
@@ -15704,7 +15707,7 @@ ${text}
             }
             return { kind: "list", url: url.href, query, scope: "search" };
           }
-          const scope = SCOPE_PATHS[url.pathname];
+          const scope = SCOPE_PATHS[withoutTrailingSlash(url.pathname)];
           if (scope !== undefined) {
             return { kind: "list", url: url.href, query: parseSearchQuery(url), scope };
           }
@@ -15729,7 +15732,7 @@ ${text}
         prepare: prepareListRoute
       },
       torrents: {
-        match: (url) => url.pathname === SITE_PATHS.torrents ? { kind: "torrents", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.torrents) ? { kind: "torrents", url: url.href } : null,
         ...documentView(deps, {
           tag: "torrents",
           parse: parseTorrents2,
@@ -15739,7 +15742,7 @@ ${text}
         })
       },
       galleryTorrents: {
-        match: (url) => url.pathname === SITE_PATHS.galleryTorrents ? { kind: "galleryTorrents", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.galleryTorrents) ? { kind: "galleryTorrents", url: url.href } : null,
         ...documentView(deps, {
           tag: "gallery-torrents",
           parse: parseGalleryTorrents,
@@ -15749,7 +15752,7 @@ ${text}
         })
       },
       archive: {
-        match: (url) => url.pathname === SITE_PATHS.archive ? { kind: "archive", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.archive) ? { kind: "archive", url: url.href } : null,
         ...documentView(deps, {
           tag: "archive",
           parse: parseArchivePage,
@@ -15760,7 +15763,7 @@ ${text}
         })
       },
       home: {
-        match: (url) => url.pathname === SITE_PATHS.home ? { kind: "home", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.home) ? { kind: "home", url: url.href } : null,
         ...documentView(deps, {
           tag: "home",
           parse: parseHome,
@@ -15780,7 +15783,7 @@ ${text}
         })
       },
       favorites: {
-        match: (url) => url.pathname === SITE_PATHS.favorites ? { kind: "favorites", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.favorites) ? { kind: "favorites", url: url.href } : null,
         ...documentView(deps, {
           tag: "favorites",
           parse: parseFavorites,
@@ -15790,7 +15793,7 @@ ${text}
         })
       },
       toplist: {
-        match: (url) => url.pathname === SITE_PATHS.toplist ? { kind: "toplist", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.toplist) ? { kind: "toplist", url: url.href } : null,
         ...documentView(deps, {
           tag: "toplist",
           parse: parseToplist,
@@ -15800,7 +15803,7 @@ ${text}
         })
       },
       news: {
-        match: (url) => url.pathname === SITE_PATHS.news ? { kind: "news", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.news) ? { kind: "news", url: url.href } : null,
         ...documentView(deps, {
           tag: "news",
           parse: parseNews,
@@ -15810,7 +15813,7 @@ ${text}
         })
       },
       settings: {
-        match: (url) => url.pathname === SITE_PATHS.uconfig ? { kind: "settings", url: url.href } : null,
+        match: (url) => isPath(url.pathname, SITE_PATHS.uconfig) ? { kind: "settings", url: url.href } : null,
         ...documentView(deps, {
           tag: "settings",
           parse: parseUconfig,

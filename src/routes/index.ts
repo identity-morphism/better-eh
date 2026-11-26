@@ -61,6 +61,7 @@ import {
   SCOPE_PATHS,
   UPLOADER_PATH,
   VIEWER_PATH,
+  withoutTrailingSlash,
 } from "./identity";
 import type {
   ListRouteData,
@@ -375,7 +376,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
           return { kind: "list", url: url.href, query, scope: "search" };
         }
 
-        const scope = SCOPE_PATHS[url.pathname];
+        const scope = SCOPE_PATHS[withoutTrailingSlash(url.pathname)];
         if (scope !== undefined) {
           return { kind: "list", url: url.href, query: parseSearchQuery(url), scope };
         }
@@ -403,7 +404,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     torrents: {
       match: (url) =>
-        url.pathname === SITE_PATHS.torrents ? { kind: "torrents", url: url.href } : null,
+        isPath(url.pathname, SITE_PATHS.torrents) ? { kind: "torrents", url: url.href } : null,
       ...documentView<"torrents">(deps, {
         tag: "torrents",
         parse: parseTorrents,
@@ -414,7 +415,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     galleryTorrents: {
       match: (url) =>
-        url.pathname === SITE_PATHS.galleryTorrents
+        isPath(url.pathname, SITE_PATHS.galleryTorrents)
           ? { kind: "galleryTorrents", url: url.href }
           : null,
       ...documentView<"galleryTorrents">(deps, {
@@ -428,7 +429,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     archive: {
       match: (url) =>
-        url.pathname === SITE_PATHS.archive ? { kind: "archive", url: url.href } : null,
+        isPath(url.pathname, SITE_PATHS.archive) ? { kind: "archive", url: url.href } : null,
       ...documentView<"archive">(deps, {
         tag: "archive",
         parse: parseArchivePage,
@@ -440,7 +441,8 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       }),
     },
     home: {
-      match: (url) => (url.pathname === SITE_PATHS.home ? { kind: "home", url: url.href } : null),
+      match: (url) =>
+        isPath(url.pathname, SITE_PATHS.home) ? { kind: "home", url: url.href } : null,
       ...documentView<"home">(deps, {
         tag: "home",
         parse: parseHome,
@@ -462,7 +464,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     favorites: {
       match: (url) =>
-        url.pathname === SITE_PATHS.favorites ? { kind: "favorites", url: url.href } : null,
+        isPath(url.pathname, SITE_PATHS.favorites) ? { kind: "favorites", url: url.href } : null,
       ...documentView<"favorites">(deps, {
         tag: "favorites",
         parse: parseFavorites,
@@ -473,7 +475,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     toplist: {
       match: (url) =>
-        url.pathname === SITE_PATHS.toplist ? { kind: "toplist", url: url.href } : null,
+        isPath(url.pathname, SITE_PATHS.toplist) ? { kind: "toplist", url: url.href } : null,
       ...documentView<"toplist">(deps, {
         tag: "toplist",
         parse: parseToplist,
@@ -484,7 +486,8 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
       }),
     },
     news: {
-      match: (url) => (url.pathname === SITE_PATHS.news ? { kind: "news", url: url.href } : null),
+      match: (url) =>
+        isPath(url.pathname, SITE_PATHS.news) ? { kind: "news", url: url.href } : null,
       ...documentView<"news">(deps, {
         tag: "news",
         parse: parseNews,
@@ -495,7 +498,7 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
     },
     settings: {
       match: (url) =>
-        url.pathname === SITE_PATHS.uconfig ? { kind: "settings", url: url.href } : null,
+        isPath(url.pathname, SITE_PATHS.uconfig) ? { kind: "settings", url: url.href } : null,
       ...documentView<"settings">(deps, {
         tag: "settings",
         // The settings page reads no URL.
