@@ -45,16 +45,32 @@ function defaultKeySummary(): string {
   ).join(", ");
 }
 
+interface GreasemonkeyMenu {
+  GM_registerMenuCommand?: (caption: string, command: () => void) => void;
+}
+
+/**
+ * Add the quick toggles to the manager's script menu.
+ *
+ * The menu is optional in practice: a manager can grant the storage APIs but not the menu one.
+ * Registering nothing keeps the app running instead of throwing after the shell has replaced the
+ * site's page.
+ */
 export function registerMenuCommands(): void {
+  const register = (globalThis as unknown as GreasemonkeyMenu).GM_registerMenuCommand;
+  if (register === undefined) {
+    return;
+  }
+
   for (const { key, command, toast } of TOGGLE_COMMANDS) {
-    GM_registerMenuCommand(command, () => {
+    register(command, () => {
       const next = !getSettings()[key];
       updateSetting(key, next);
       showToast(toast(next));
     });
   }
 
-  GM_registerMenuCommand("Reset keymap to defaults", () => {
+  register("Reset keymap to defaults", () => {
     if (confirm(`Reset all keys to defaults?\n\n${defaultKeySummary()}`)) {
       updateSetting("keymap", DEFAULT_KEYMAP);
       showToast("Keymap reset to defaults");

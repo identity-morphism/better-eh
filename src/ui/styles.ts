@@ -21,18 +21,42 @@ let injected = false;
  * being parsed later, order ties — which is why its rules are ID-rooted or scoped to a viewer body
  * class.
  */
+interface GreasemonkeyStyle {
+  GM_addStyle?: (css: string) => unknown;
+}
+
+/** Mark the manager's returned node when it gave us an element to mark. */
+function markInjected(node: unknown): void {
+  if (typeof node === "object" && node !== null && "setAttribute" in node) {
+    (node as Element).setAttribute(APP_STYLE_ATTRIBUTE, "");
+  }
+}
+
+/** Append the fallback sheet; `head` is null while the parser is still building it. */
+function appendStyle(head: Element | null, style: HTMLStyleElement): void {
+  (head ?? document.documentElement).append(style);
+}
+
 export function injectStyles(): void {
   if (injected) {
     return;
   }
   injected = true;
+  const css = APP_STYLE_SENTINEL + viewerStyles + appStyles;
   // Tampermonkey and Violentmonkey return the inserted element; other managers return nothing
   // despite the type, so the sentinel in the text lets the shell identify the sheet either way.
-  const style = GM_addStyle(APP_STYLE_SENTINEL + viewerStyles + appStyles) as unknown as
-    Element | undefined;
-  if (style !== undefined) {
-    style.setAttribute(APP_STYLE_ATTRIBUTE, "");
+  const addStyle = (globalThis as unknown as GreasemonkeyStyle).GM_addStyle;
+  if (addStyle !== undefined) {
+    markInjected(addStyle(css));
+    return;
   }
+
+  // A manager can grant storage without the style API. Append the sheet ourselves and mark it, so
+  // the shell's site-stylesheet sweep leaves it in place.
+  const style = document.createElement("style");
+  style.setAttribute(APP_STYLE_ATTRIBUTE, "");
+  style.textContent = css;
+  appendStyle(document.head, style);
 }
 
 /** True for the sheet `injectStyles` added, so a native-stylesheet sweep leaves it in place. */

@@ -701,14 +701,18 @@
     return KEY_ACTIONS.map(({ action, label }) => `${label}: ${DEFAULT_KEYMAP[action].join("/")}`).join(", ");
   }
   function registerMenuCommands() {
+    const register = globalThis.GM_registerMenuCommand;
+    if (register === undefined) {
+      return;
+    }
     for (const { key, command, toast } of TOGGLE_COMMANDS) {
-      GM_registerMenuCommand(command, () => {
+      register(command, () => {
         const next = !getSettings()[key];
         updateSetting(key, next);
         showToast(toast(next));
       });
     }
-    GM_registerMenuCommand("Reset keymap to defaults", () => {
+    register("Reset keymap to defaults", () => {
       if (confirm(`Reset all keys to defaults?
 
 ${defaultKeySummary()}`)) {
@@ -20317,15 +20321,29 @@ body.fit-h.reader-continuous #reader {
   var APP_STYLE_ATTRIBUTE = "data-better-eh";
   var APP_STYLE_SENTINEL = "/* better-eh-style */";
   var injected = false;
+  function markInjected(node) {
+    if (typeof node === "object" && node !== null && "setAttribute" in node) {
+      node.setAttribute(APP_STYLE_ATTRIBUTE, "");
+    }
+  }
+  function appendStyle(head, style) {
+    (head ?? document.documentElement).append(style);
+  }
   function injectStyles() {
     if (injected) {
       return;
     }
     injected = true;
-    const style = GM_addStyle(APP_STYLE_SENTINEL + style_default + app_default);
-    if (style !== undefined) {
-      style.setAttribute(APP_STYLE_ATTRIBUTE, "");
+    const css = APP_STYLE_SENTINEL + style_default + app_default;
+    const addStyle = globalThis.GM_addStyle;
+    if (addStyle !== undefined) {
+      markInjected(addStyle(css));
+      return;
     }
+    const style = document.createElement("style");
+    style.setAttribute(APP_STYLE_ATTRIBUTE, "");
+    style.textContent = css;
+    appendStyle(document.head, style);
   }
   function isAppStyle(node) {
     return node.getAttribute(APP_STYLE_ATTRIBUTE) !== null || node.textContent.includes(APP_STYLE_SENTINEL);
