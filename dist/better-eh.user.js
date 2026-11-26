@@ -553,12 +553,43 @@
 
   // src/log.ts
   var LOG_TAG = "[Better EH]";
+  var MAX_EVENTS = 100;
+  var MAX_MESSAGE = 800;
+  var events = [];
+  function describe(value) {
+    if (value instanceof Error) {
+      return value.stack ?? `${value.name}: ${value.message}`;
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    try {
+      return String(JSON.stringify(value));
+    } catch {
+      return String(value);
+    }
+  }
+  function record(level, args) {
+    const message = args.map(describe).join(" ").slice(0, MAX_MESSAGE);
+    events.push({ at: new Date().toISOString(), level, message });
+    if (events.length > MAX_EVENTS) {
+      events.splice(0, events.length - MAX_EVENTS);
+    }
+  }
+  function recentEvents() {
+    return events;
+  }
+  function recordError(error, source = "error") {
+    record("error", [source, error]);
+  }
   function log(...args) {
+    record("log", args);
     if (getSettings().debug) {
       console.log(LOG_TAG, ...args);
     }
   }
   function warn(...args) {
+    record("warn", args);
     if (getSettings().debug) {
       console.warn(LOG_TAG, ...args);
     }
@@ -12099,6 +12130,38 @@ ${defaultKeySummary()}`)) {
     return el("div", { class: "settings-row" }, control, body);
   }
 
+  // src/diagnostics.ts
+  function scriptVersion() {
+    const info = globalThis.GM_info;
+    return info?.script?.version ?? "unknown";
+  }
+  function diagnosticReport() {
+    const settings = getSettings();
+    const scalars = Object.fromEntries(SCALAR_KEYS.map((key) => [key, settings[key]]));
+    const href = typeof location === "undefined" ? "unknown" : location.href;
+    const userAgent = typeof navigator === "undefined" ? "unknown" : navigator.userAgent;
+    const lines = [
+      `Better EH ${scriptVersion()}`,
+      `URL: ${href}`,
+      `User agent: ${userAgent}`,
+      `Keymap actions: ${Object.keys(settings.keymap).length}`,
+      "Settings:",
+      JSON.stringify(scalars, null, 2),
+      "",
+      "Recent events:"
+    ];
+    const events = recentEvents();
+    if (events.length === 0) {
+      lines.push("(none)");
+    } else {
+      for (const event of events) {
+        lines.push(`[${event.at}] ${event.level}: ${event.message}`);
+      }
+    }
+    return lines.join(`
+`);
+  }
+
   // src/ui/settings-panel.ts
   var KEY_LABELS = {
     " ": "Space",
@@ -12147,6 +12210,28 @@ ${defaultKeySummary()}`)) {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  }
+  async function writeToClipboard(text) {
+    if (typeof navigator !== "undefined" && "clipboard" in navigator) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {}
+    }
+    if (typeof document.execCommand !== "function") {
+      return false;
+    }
+    const area = el("textarea", { class: VISUALLY_HIDDEN, readonly: "" });
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      area.remove();
+    }
   }
   function serializeSettings(settings) {
     return JSON.stringify({ app: "better-eh", version: 1, values: settings }, null, 2);
@@ -12476,8 +12561,25 @@ ${defaultKeySummary()}`)) {
       setStatus(statusNode, "Imported settings; review the values and press Apply.");
       change();
     }
+    async function copyDiagnostics() {
+      const report = diagnosticReport();
+      const copied = await (deps.writeClipboard ?? writeToClipboard)(report);
+      if (copied) {
+        setStatus(statusNode, "Diagnostics copied to the clipboard.");
+        return;
+      }
+      (deps.exportFile ?? downloadFile)("better-eh-diagnostics.txt", report);
+      setStatus(statusNode, "Clipboard unavailable; downloaded the diagnostics instead.");
+    }
     const exportButton = buttonEl({ class: "btn btn-ghost settings-export", text: "Export JSON" });
     exportButton.addEventListener("click", exportSettings);
+    const diagnosticsButton = buttonEl({
+      class: "btn btn-ghost settings-diagnostics",
+      text: "Copy diagnostics"
+    });
+    diagnosticsButton.addEventListener("click", () => {
+      copyDiagnostics();
+    });
     const importButton = buttonEl({ class: "btn btn-ghost settings-import", text: "Import JSON" });
     const fileInput = el("input", {
       class: VISUALLY_HIDDEN,
@@ -12521,7 +12623,7 @@ ${defaultKeySummary()}`)) {
     }), el("p", {
       class: "settings-hint",
       text: "Userscript preferences stored in this browser. Changes apply after you press Apply."
-    }), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Reading and interface" }), renderBooleanFields()), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Reader layout" }), renderSelectFields()), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Sizing and network" }), renderNumberFields()), keymapSection, el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Backup" }), el("div", { class: "settings-panel-actions" }, exportButton, importButton, fileInput), statusNode));
+    }), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Reading and interface" }), renderBooleanFields()), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Reader layout" }), renderSelectFields()), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Sizing and network" }), renderNumberFields()), keymapSection, el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Backup" }), el("div", { class: "settings-panel-actions" }, exportButton, importButton, diagnosticsButton, fileInput), statusNode));
     loadDraft(synced);
     const engine = createSettingsDraft({ bindings, onChange: deps.onChange });
     return {
@@ -21142,7 +21244,17 @@ body.fit-h.reader-continuous #reader {
     views: { routeView }
   };
   var shell = createAppShell(environment);
+  var listenersInstalled = false;
   function boot() {
+    if (!listenersInstalled) {
+      listenersInstalled = true;
+      window.addEventListener("error", (event) => {
+        recordError(event.error ?? event.message, "window.error");
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        recordError(event.reason, "unhandledrejection");
+      });
+    }
     shell.boot();
   }
 

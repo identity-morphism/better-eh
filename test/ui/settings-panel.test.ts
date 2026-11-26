@@ -264,6 +264,37 @@ describe("renderUserscriptSettings", () => {
     expect(status()).toContain("Exported");
   });
 
+  test("copies a diagnostics report", async () => {
+    let copied = "";
+    render({
+      writeClipboard: (text) => {
+        copied = text;
+        return Promise.resolve(true);
+      },
+    });
+    root.querySelector<HTMLButtonElement>(".settings-diagnostics")?.click();
+    await flushMicrotasks(4);
+
+    expect(copied).toContain("Better EH");
+    expect(copied).toContain("Recent events");
+    expect(status()).toContain("Diagnostics copied");
+  });
+
+  test("downloads diagnostics when the clipboard is unavailable", async () => {
+    let downloaded = "";
+    render({
+      writeClipboard: () => Promise.resolve(false),
+      exportFile: (_filename, contents) => {
+        downloaded = contents;
+      },
+    });
+    root.querySelector<HTMLButtonElement>(".settings-diagnostics")?.click();
+    await flushMicrotasks(4);
+
+    expect(downloaded).toContain("Recent events");
+    expect(status()).toContain("downloaded");
+  });
+
   test("import fills the controls and waits for apply", async () => {
     const panel = render();
     importFile(

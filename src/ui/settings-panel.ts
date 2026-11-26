@@ -1,3 +1,4 @@
+import { diagnosticReport } from "../diagnostics";
 import {
   copyKeymap,
   DEFAULT_KEYMAP,
@@ -52,6 +53,8 @@ interface SettingsPanelDeps {
   onChange?: () => void;
   /** Replace file writing in tests. */
   exportFile?: (filename: string, contents: string) => void;
+  /** Replace the clipboard write in tests; `false` exercises the download fallback. */
+  writeClipboard?: (text: string) => Promise<boolean>;
 }
 
 interface UserscriptSettingsPanel {
@@ -106,6 +109,32 @@ function downloadFile(filename: string, contents: string): void {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+/** Async clipboard API first, then the selection fallback for managers without it. */
+async function writeToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && "clipboard" in navigator) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the selection path.
+    }
+  }
+  if (typeof document.execCommand !== "function") {
+    return false;
+  }
+  const area = el("textarea", { class: VISUALLY_HIDDEN, readonly: "" });
+  area.value = text;
+  document.body.append(area);
+  area.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+  }
 }
 
 /** Serialize values in the shape {@link parseSettingsJson} accepts. */
@@ -541,8 +570,27 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
     change();
   }
 
+  async function copyDiagnostics(): Promise<void> {
+    const report = diagnosticReport();
+    const copied = await (deps.writeClipboard ?? writeToClipboard)(report);
+    if (copied) {
+      setStatus(statusNode, "Diagnostics copied to the clipboard.");
+      return;
+    }
+    (deps.exportFile ?? downloadFile)("better-eh-diagnostics.txt", report);
+    setStatus(statusNode, "Clipboard unavailable; downloaded the diagnostics instead.");
+  }
+
   const exportButton = buttonEl({ class: "btn btn-ghost settings-export", text: "Export JSON" });
   exportButton.addEventListener("click", exportSettings);
+
+  const diagnosticsButton = buttonEl({
+    class: "btn btn-ghost settings-diagnostics",
+    text: "Copy diagnostics",
+  });
+  diagnosticsButton.addEventListener("click", () => {
+    void copyDiagnostics();
+  });
 
   const importButton = buttonEl({ class: "btn btn-ghost settings-import", text: "Import JSON" });
   const fileInput = el("input", {
@@ -629,7 +677,14 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
       "div",
       { class: "settings-panel-group" },
       el("h3", { class: "settings-subhead", text: "Backup" }),
-      el("div", { class: "settings-panel-actions" }, exportButton, importButton, fileInput),
+      el(
+        "div",
+        { class: "settings-panel-actions" },
+        exportButton,
+        importButton,
+        diagnosticsButton,
+        fileInput,
+      ),
       statusNode,
     ),
   );
