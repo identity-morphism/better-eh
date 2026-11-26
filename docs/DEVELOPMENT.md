@@ -4,9 +4,9 @@
 
 - [Bun](https://bun.sh/) — used for bundling, type checking, linting, formatting, and serving.
   The exact canary build is pinned twice in `package.json` (`packageManager` and the `bun`
-  devDependency), so `bun install` fetches it into `node_modules/.bin/bun`, where the scripts and
-  the `prek` hooks pick it up. CI bootstraps with the released 1.4.4 and then runs the pinned
-  binary; stable Bun has no `bun lint`, so only the pinned canary runs that check. `bun run lint`
+  devDependency), and every script that runs JavaScript goes through `./node_modules/.bin/bun`;
+  CI bootstraps with the released 1.4.4 only to install that binary. `prek` runs the same pinned
+  commands. Stable Bun has no `bun lint`, so only the pinned canary runs that check. `bun run lint`
   goes through `scripts/lint.ts`, which reports the mismatch instead of letting `bun lint` resolve
   back to the `lint` script and exit 0 without linting.
 - Tailwind CSS v4 is compiled by `build.ts`; no separate step is required.
