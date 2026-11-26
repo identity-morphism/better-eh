@@ -130,6 +130,12 @@ storage/debugging notes, and [Architecture](docs/ARCHITECTURE.md) for the module
   replaces that core, and is cached for a week. Popularity ranking fetches a roughly 14 KB binary
   asset separately and caches it for a week. If the full download fails, the core stays in place
   and less-common tags stay missing until a later attempt succeeds.
+- The reader has no page-jump strip. A viewer document carries only the current page's links, so a
+  jump would need the gallery page's full page list or an extra fetch; the gallery thumbnails
+  remain the jump surface.
+- The theme is dark by design. Every component token is compiled from one palette, so a
+  light/system theme needs a second token set and its own forced-colors and contrast audit rather
+  than a toggle.
 - Site HTML changes can break parsers; keep the native escape path available.
 
 ## Contributing
