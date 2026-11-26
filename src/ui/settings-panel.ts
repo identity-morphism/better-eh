@@ -366,7 +366,7 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
     const button = buttonEl({
       class: "settings-key-capture",
       text: "Add key",
-      "aria-label": `Add a key for ${label}`,
+      "aria-label": `Add key for ${label}`,
     });
     button.addEventListener("click", () => {
       if (capturing === action) {
@@ -423,7 +423,7 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
           buttonEl({
             class: "settings-key-remove",
             text: "×",
-            "aria-label": `Remove ${keyLabel(key)} from ${label}`,
+            "aria-label": `× Remove ${keyLabel(key)} from ${label}`,
             onclick: () => removeKey(action, key),
           }),
         ),
@@ -431,6 +431,7 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
       const button = captureButton(action, label);
       if (capturing === action) {
         button.textContent = "Press a key…";
+        button.setAttribute("aria-label", `Press a key for ${label}`);
         button.classList.add("capturing");
       }
       return el(

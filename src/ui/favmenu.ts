@@ -321,7 +321,8 @@ export function favoriteButton(state: FavoriteState, signal?: AbortSignal): HTML
         : favorited === false
           ? "Add to favorites"
           : "Favorite folders";
-    button.setAttribute("aria-label", action);
+    // The visible folder name is part of the name; the action alone would hide it from speech.
+    button.setAttribute("aria-label", `${label}, ${action.toLowerCase()}`);
     button.title = action;
   };
   sync();

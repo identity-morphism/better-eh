@@ -588,7 +588,8 @@ input[type="radio"] {
   padding: 1px 4px;
   border: 1px solid;
   letter-spacing: 0.04em;
-  color: var(--ns-color, var(--color-muted));
+  /* The namespace hue stays in the border and tint; small text keeps the high-contrast foreground. */
+  color: var(--color-fg);
   border-color: color-mix(in srgb, var(--ns-color, var(--color-muted)) 45%, transparent);
   background: color-mix(in srgb, var(--ns-color, var(--color-muted)) 12%, transparent);
 }

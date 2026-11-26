@@ -51,12 +51,12 @@
 }
 
 .torrent-sort {
-  @apply text-muted no-underline;
+  @apply text-fg no-underline;
 }
 
 .torrent-sort:hover,
 .torrent-sort.is-active {
-  @apply text-accent;
+  @apply text-accent-text;
 }
 
 /* A `top` inset is measured from the nearest scroll container. The wrapper has to be one (the

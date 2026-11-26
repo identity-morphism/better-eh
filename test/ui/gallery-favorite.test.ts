@@ -33,7 +33,7 @@ describe("gallery favorite button", () => {
 
     const button = host.querySelector(".fav-btn");
     expect(button?.querySelector(".fav-label")?.textContent).toBe("Read later");
-    expect(button?.getAttribute("aria-label")).toBe("Edit favorite");
+    expect(button?.getAttribute("aria-label")).toBe("Read later, edit favorite");
 
     renderGalleryAt(host, { ...data, favorite: { folder: "", slot: 2 } });
     expect(host.querySelector(".fav-label")?.textContent).toBe("Favorited");
@@ -45,7 +45,9 @@ describe("gallery favorite button", () => {
     renderGalleryAt(host, data);
 
     expect(host.querySelector(".fav-label")?.textContent).toBe("Favorite");
-    expect(host.querySelector(".fav-btn")?.getAttribute("aria-label")).toBe("Favorite folders");
+    expect(host.querySelector(".fav-btn")?.getAttribute("aria-label")).toBe(
+      "Favorite, favorite folders",
+    );
   });
 
   test("favoriting from the header updates its label and count without a reload", async () => {
@@ -65,7 +67,9 @@ describe("gallery favorite button", () => {
     await until(() => host.querySelector(".fav-label")?.textContent === "Read later");
 
     expect(host.querySelector(".fav-label")?.textContent).toBe("Read later");
-    expect(host.querySelector(".fav-btn")?.getAttribute("aria-label")).toBe("Edit favorite");
+    expect(host.querySelector(".fav-btn")?.getAttribute("aria-label")).toBe(
+      "Read later, edit favorite",
+    );
     expect(meta()).toContain("43 favorites");
   });
 });

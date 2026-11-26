@@ -276,7 +276,9 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       node.classList.add("is-namespace");
       node.append(
         el("span", { class: `tag-option-badge ${nsClass(suggestion.ns.id)}`, text: "ns" }),
+        " ",
         el("span", { class: "tag-option-key", text: suggestion.ns.label }),
+        " ",
         el("span", {
           class: "tag-option-meta",
           text: suggestion.tail === "" ? "namespace" : "complete namespace",
@@ -284,7 +286,9 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       );
       node.setAttribute(
         "aria-label",
-        `${signLabel}Complete namespace ${suggestion.ns.id}${suggestion.tail === "" ? "" : ` with ${suggestion.tail}`}`,
+        `${signLabel}ns ${suggestion.ns.label} ${
+          suggestion.tail === "" ? "namespace" : `complete namespace with ${suggestion.tail}`
+        }`,
       );
     } else {
       const { entry } = suggestion;
@@ -300,6 +304,7 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
       }
       node.append(
         el("span", { class: `tag-option-badge ${nsClass(entry.ns.id)}`, text: entry.ns.label }),
+        " ",
       );
 
       const key = el("span", { class: "tag-option-key" });
@@ -308,16 +313,16 @@ export function attachTagCombobox(options: TagComboboxOptions): TagCombobox {
 
       if (suggestion.applied) {
         node.classList.add("is-applied");
-        node.append(el("span", { class: "tag-option-meta", text: "applied" }));
+        node.append(" ", el("span", { class: "tag-option-meta", text: "applied" }));
         node.setAttribute(
           "aria-label",
-          `${entry.ns.label} ${entry.key}, already applied. Activate to remove.`,
+          `${entry.ns.label} ${entry.key} applied, already applied. Activate to remove.`,
         );
       } else if (suggestion.recent) {
-        node.append(el("span", { class: "tag-option-meta", text: "recent" }));
+        node.append(" ", el("span", { class: "tag-option-meta", text: "recent" }));
         node.setAttribute(
           "aria-label",
-          `${signLabel}${entry.ns.label} ${entry.key}, recently used`,
+          `${signLabel}${entry.ns.label} ${entry.key} recent, recently used`,
         );
       } else {
         node.setAttribute("aria-label", `${signLabel}${entry.ns.label} ${entry.key}`);

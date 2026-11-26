@@ -214,7 +214,9 @@ describe("renderList", () => {
     const posted = host.querySelector<HTMLElement>(".card-meta .card-posted");
     expect(posted?.classList.contains("is-favorite")).toBe(true);
     expect(posted?.getAttribute("title")).toBe("In favorites: Read later");
-    expect(host.querySelector(".fav-btn")?.getAttribute("aria-label")).toBe("Edit favorite");
+    expect(host.querySelector(".fav-btn")?.getAttribute("aria-label")).toBe(
+      "Read later, edit favorite",
+    );
   });
 
   test("seek navigates from the current page without a numbered strip", () => {

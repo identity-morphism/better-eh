@@ -109,6 +109,18 @@ describe("tag combobox", () => {
     expect(input.getAttribute("aria-controls")).toBe(list?.id ?? "");
   });
 
+  test("keeps each option's visible text inside its accessible name", () => {
+    const { open } = harness("big b");
+    open();
+
+    for (const option of options()) {
+      const visible = (option.textContent ?? "").trim();
+      const label = option.getAttribute("aria-label") ?? "";
+      expect(visible.length).toBeGreaterThan(0);
+      expect(label).toContain(visible);
+    }
+  });
+
   test("reports recents and namespaces while the query is empty", () => {
     const usage = new Map<string, TagUsage>([
       [tagId("female", "sole female"), { count: 3, lastUsed: Date.now() }],

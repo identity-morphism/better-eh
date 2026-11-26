@@ -114,7 +114,7 @@ describe("resultCard", () => {
     const article = resultCard({ ...ITEM, favorite: null }, new AbortController().signal);
 
     const button = article.querySelector<HTMLElement>(".fav-btn");
-    expect(button?.getAttribute("aria-label")).toBe("Favorite folders");
+    expect(button?.getAttribute("aria-label")).toBe("Favorite, favorite folders");
     expect(button?.getAttribute("aria-expanded")).toBe("false");
     expect(button?.classList.contains("is-favorite")).toBe(false);
     expect(button?.querySelector(".fav-label")?.textContent).toBe("Favorite");

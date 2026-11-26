@@ -6395,11 +6395,11 @@ ${defaultKeySummary()}`)) {
       const signLabel = sign === "-" ? "Exclude " : sign === "~" ? "Optional " : "";
       if (suggestion.kind === "namespace") {
         node.classList.add("is-namespace");
-        node.append(el("span", { class: `tag-option-badge ${nsClass(suggestion.ns.id)}`, text: "ns" }), el("span", { class: "tag-option-key", text: suggestion.ns.label }), el("span", {
+        node.append(el("span", { class: `tag-option-badge ${nsClass(suggestion.ns.id)}`, text: "ns" }), " ", el("span", { class: "tag-option-key", text: suggestion.ns.label }), " ", el("span", {
           class: "tag-option-meta",
           text: suggestion.tail === "" ? "namespace" : "complete namespace"
         }));
-        node.setAttribute("aria-label", `${signLabel}Complete namespace ${suggestion.ns.id}${suggestion.tail === "" ? "" : ` with ${suggestion.tail}`}`);
+        node.setAttribute("aria-label", `${signLabel}ns ${suggestion.ns.label} ${suggestion.tail === "" ? "namespace" : `complete namespace with ${suggestion.tail}`}`);
       } else {
         const { entry } = suggestion;
         if (sign !== "") {
@@ -6410,17 +6410,17 @@ ${defaultKeySummary()}`)) {
             text: sign === "-" ? "−" : "~"
           }));
         }
-        node.append(el("span", { class: `tag-option-badge ${nsClass(entry.ns.id)}`, text: entry.ns.label }));
+        node.append(el("span", { class: `tag-option-badge ${nsClass(entry.ns.id)}`, text: entry.ns.label }), " ");
         const key = el("span", { class: "tag-option-key" });
         key.append(...highlight(entry.key, suggestion.matchStart, suggestion.matchLength));
         node.append(key);
         if (suggestion.applied) {
           node.classList.add("is-applied");
-          node.append(el("span", { class: "tag-option-meta", text: "applied" }));
-          node.setAttribute("aria-label", `${entry.ns.label} ${entry.key}, already applied. Activate to remove.`);
+          node.append(" ", el("span", { class: "tag-option-meta", text: "applied" }));
+          node.setAttribute("aria-label", `${entry.ns.label} ${entry.key} applied, already applied. Activate to remove.`);
         } else if (suggestion.recent) {
-          node.append(el("span", { class: "tag-option-meta", text: "recent" }));
-          node.setAttribute("aria-label", `${signLabel}${entry.ns.label} ${entry.key}, recently used`);
+          node.append(" ", el("span", { class: "tag-option-meta", text: "recent" }));
+          node.setAttribute("aria-label", `${signLabel}${entry.ns.label} ${entry.key} recent, recently used`);
         } else {
           node.setAttribute("aria-label", `${signLabel}${entry.ns.label} ${entry.key}`);
         }
@@ -8314,7 +8314,7 @@ ${defaultKeySummary()}`)) {
       button.replaceChildren(icon("star", favorited === true), el("span", { class: "fav-label", text: label }));
       button.classList.toggle("is-favorite", favorited === true);
       const action = favorited === true ? "Edit favorite" : favorited === false ? "Add to favorites" : "Favorite folders";
-      button.setAttribute("aria-label", action);
+      button.setAttribute("aria-label", `${label}, ${action.toLowerCase()}`);
       button.title = action;
     };
     sync();
@@ -12239,7 +12239,7 @@ ${defaultKeySummary()}`)) {
       const button = buttonEl({
         class: "settings-key-capture",
         text: "Add key",
-        "aria-label": `Add a key for ${label}`
+        "aria-label": `Add key for ${label}`
       });
       button.addEventListener("click", () => {
         if (capturing === action) {
@@ -12285,12 +12285,13 @@ ${defaultKeySummary()}`)) {
         const keys = keymapDraft[action].map((key) => el("span", { class: "settings-key" }, el("span", { class: "settings-key-name", text: keyLabel(key) }), buttonEl({
           class: "settings-key-remove",
           text: "×",
-          "aria-label": `Remove ${keyLabel(key)} from ${label}`,
+          "aria-label": `× Remove ${keyLabel(key)} from ${label}`,
           onclick: () => removeKey(action, key)
         })));
         const button = captureButton(action, label);
         if (capturing === action) {
           button.textContent = "Press a key…";
+          button.setAttribute("aria-label", `Press a key for ${label}`);
           button.classList.add("capturing");
         }
         return el("div", { class: "settings-key-row" }, el("span", { class: "settings-key-label", text: label }), el("span", { class: "settings-keys", "aria-label": `${label} keys` }, ...keys), button);
@@ -16501,7 +16502,7 @@ ${defaultKeySummary()}`)) {
     padding: 1px 4px;
     border: 1px solid;
     letter-spacing: 0.04em;
-    color: var(--ns-color, var(--color-muted));
+    color: var(--color-fg);
     border-color: var(--ns-color, #c0c4cc);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in srgb, var(--ns-color, var(--color-muted)) 45%, transparent);
@@ -18505,11 +18506,11 @@ ${defaultKeySummary()}`)) {
     font-weight: 600;
   }
   .torrent-sort {
-    color: var(--color-muted);
+    color: var(--color-fg);
     text-decoration-line: none;
   }
   .torrent-sort:hover, .torrent-sort.is-active {
-    color: var(--color-accent);
+    color: var(--color-accent-text);
   }
   @media (min-width: 1000px) {
     .torrent-table-wrap {
