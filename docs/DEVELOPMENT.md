@@ -111,13 +111,16 @@ A dependency pull request cannot rebuild it, so land that bump with a commit tha
 `bun run build`, or CI's dist check fails on the pull request. Dependabot is told to leave the `bun`
 pin alone: stable Bun resolves `bun lint` back to the `lint` script and exits 0 without linting.
 
-CI also installs Chromium for Playwright and runs the browser smoke gate against the built bundle
-and local fixtures. It boots the list, gallery, reader, gallery torrents and My Tags views, checks
-the shell, search routing and tag combobox that unit tests cannot boot end to end, follows a
-posted-date range through its rewrite to the site's date cursor, and asserts that a document which
-fails parser sanity reloads through the automatic `?eh_native=1` fallback onto the site's own page.
-It then runs axe over `#eh-root` with the WCAG A/AA rules, so a new control that fails name,
-contrast or landmark checks fails CI.
+CI installs Chromium and Firefox for Playwright and runs the browser smoke gate against the built
+bundle and local fixtures. Chromium boots every owned view (list, gallery, reader, favorites,
+toplist, torrents, home, settings, gallery torrents, archive and My Tags), checks the shell, search
+routing and tag combobox that unit tests cannot boot end to end, opens the filter, favorite and tag
+menus, follows a signed-in favorite through a history round trip, follows a posted-date range
+through its rewrite to the site's date cursor, and asserts that a document which fails parser
+sanity reloads through the automatic `?eh_native=1` fallback. It also runs a Pixel viewport and
+forced-colors/reduced-motion emulation; Firefox repeats the core page shapes via
+`SMOKE_BROWSERS=chromium,firefox`. Axe runs over the shell and every open panel with the WCAG A/AA
+rules, so a new control that fails name, contrast or landmark checks fails CI.
 
 Sleazy Fork is the public listing: <https://sleazyfork.org/en/scripts/606064-better-eh>. The
 listing syncs from this repository's `dist/better-eh.user.js` asset, so publishing needs no upload

@@ -35,6 +35,7 @@ bun run check         # format, lint, type check
 bun run test          # fixture suite, one isolated global per file, about two seconds
 bun run test:coverage # the same suite plus the src/ line-coverage floor
 bun run test:browser  # built userscript in Chromium, then axe; needs playwright chromium
+                      # SMOKE_BROWSERS=chromium,firefox also runs the Firefox core pass
 ```
 
 `bun run test:browser` and `bun run check:header` read `dist/`, so build first (`bun run build`).

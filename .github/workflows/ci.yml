@@ -46,8 +46,10 @@ jobs:
         # `bun run release` bumps, builds, commits and tags in one atomic push. A hand-committed
         # version bump leaves master advertising a release that does not exist.
         run: bun run check:release-tag
-      - run: bunx playwright install --with-deps chromium
+      - run: bunx playwright install --with-deps chromium firefox
       - run: bun run test:browser
+        env:
+          SMOKE_BROWSERS: chromium,firefox
       - uses: actions/upload-artifact@v7
         with:
           name: better-eh.user.js
