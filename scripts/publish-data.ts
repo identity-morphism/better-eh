@@ -8,49 +8,37 @@
  * counts for nothing, and a push or pull request made with `GITHUB_TOKEN` starts no run at all. The
  * refresh therefore rides `TAG_DATA_TOKEN`, a fine-grained token with contents and pull requests
  * write, which pushes the commit to a scratch branch, opens the pull request that makes `ci.yml`
- * run normally, waits for the required check and merges.
+ * run on a `pull_request` event, watches that run, and squash-merges the commit it validated.
  */
 
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
+const CI_WORKFLOW = "ci.yml";
 const TARGET_BRANCH = "master";
+const POLL_MS = 10000;
+const POLL_ATTEMPTS = 60;
+const MERGE_ATTEMPTS = 6;
 const PUBLISHED: Readonly<Record<string, true>> = {
   "assets/tag-counts.bin": true,
   "assets/tag-index.bin": true,
   "src/tags/core-vocabulary.ts": true,
   "dist/better-eh.user.js": true,
 };
-const FAILED_CONCLUSION: Readonly<Record<string, true>> = {
-  FAILURE: true,
-  CANCELLED: true,
-  TIMED_OUT: true,
-  ACTION_REQUIRED: true,
-  STARTUP_FAILURE: true,
-};
-const FAILED_STATE: Readonly<Record<string, true>> = { FAILURE: true, ERROR: true };
-// `unstable` is mergeable: every required check passed and something optional is red.
-const MERGEABLE_STATUS: Readonly<Record<string, true>> = { CLEAN: true, UNSTABLE: true };
 
 interface Options {
   branch: string;
   message: string;
 }
 
-interface Checks {
-  mergeStateStatus: string;
-  statusCheckRollup: readonly RollupEntry[];
-}
-
-interface RollupEntry {
-  name?: string;
-  context?: string;
-  conclusion?: string;
-  state?: string;
-}
-
 interface PullRequest {
   number: number;
+}
+
+interface Run {
+  databaseId: number;
+  status: string;
+  conclusion: string;
 }
 
 function redact(message: string): string {
@@ -101,7 +89,7 @@ function read(args: readonly string[], env: Record<string, string> = {}): string
   return result.stdout.toString();
 }
 
-function run(args: readonly string[], env: Record<string, string> = {}): void {
+function attempt(args: readonly string[], env: Record<string, string> = {}): number {
   const result = Bun.spawnSync({
     cmd: [...args],
     cwd: ROOT,
@@ -110,8 +98,13 @@ function run(args: readonly string[], env: Record<string, string> = {}): void {
     stdin: "inherit",
     env: { ...process.env, ...env },
   });
-  if (result.exitCode !== 0) {
-    fail(`${args.join(" ")} failed with exit code ${result.exitCode}`);
+  return result.exitCode;
+}
+
+function run(args: readonly string[], env: Record<string, string> = {}): void {
+  const exitCode = attempt(args, env);
+  if (exitCode !== 0) {
+    fail(`${args.join(" ")} failed with exit code ${exitCode}`);
   }
 }
 
@@ -158,29 +151,76 @@ function openPullRequest(message: string, branch: string, auth: Record<string, s
   return number;
 }
 
-async function waitForCheck(number: number, auth: Record<string, string>): Promise<void> {
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    const state = JSON.parse(
-      read(
-        ["gh", "pr", "view", String(number), "--json", "mergeStateStatus,statusCheckRollup"],
-        auth,
-      ),
-    ) as Checks;
-    const failed = state.statusCheckRollup.filter((check) => {
-      const conclusion = check.conclusion ?? "";
-      const status = check.state ?? "";
-      return FAILED_CONCLUSION[conclusion] === true || FAILED_STATE[status] === true;
-    });
-    if (failed.length > 0) {
-      const names = failed.map((check) => check.name ?? check.context ?? "check");
-      fail(`pull request #${number} has failing checks: ${names.join(", ")}`);
+async function waitForCiRun(sha: string, auth: Record<string, string>): Promise<void> {
+  for (let poll = 0; poll < POLL_ATTEMPTS; poll += 1) {
+    const listing = read(
+      [
+        "gh",
+        "run",
+        "list",
+        "--workflow",
+        CI_WORKFLOW,
+        "--commit",
+        sha,
+        "--event",
+        "pull_request",
+        "--limit",
+        "1",
+        "--json",
+        "databaseId,status,conclusion",
+      ],
+      auth,
+    );
+    const [latest] = (listing.trim() === "" ? [] : JSON.parse(listing)) as Run[];
+    if (latest === undefined) {
+      await Bun.sleep(POLL_MS);
+      continue;
     }
-    if (MERGEABLE_STATUS[state.mergeStateStatus] === true) {
+    if (latest.status !== "completed") {
+      await Bun.sleep(POLL_MS);
+      continue;
+    }
+    if (latest.conclusion !== "success") {
+      fail(
+        `${CI_WORKFLOW} run ${latest.databaseId} on ${sha.slice(0, 7)} finished ${latest.conclusion}`,
+      );
+    }
+    console.log(
+      `publish-data: ${CI_WORKFLOW} run ${latest.databaseId} is green on ${sha.slice(0, 7)}`,
+    );
+    return;
+  }
+  fail(`no ${CI_WORKFLOW} pull_request run finished for ${sha.slice(0, 7)} within ten minutes`);
+}
+
+async function mergePullRequest(
+  number: number,
+  sha: string,
+  auth: Record<string, string>,
+): Promise<void> {
+  for (let poll = 1; poll <= MERGE_ATTEMPTS; poll += 1) {
+    const merged = attempt(
+      [
+        "gh",
+        "pr",
+        "merge",
+        String(number),
+        "--squash",
+        "--delete-branch",
+        "--match-head-commit",
+        sha,
+      ],
+      auth,
+    );
+    if (merged === 0) {
       return;
     }
-    await Bun.sleep(10000);
+    console.log(
+      `publish-data: pull request #${number} is not mergeable yet (${poll} of ${MERGE_ATTEMPTS})`,
+    );
+    await Bun.sleep(POLL_MS);
   }
-  fail(`pull request #${number} carried no green check within fifteen minutes`);
+  fail(`pull request #${number} stayed unmergeable`);
 }
 
 async function main(): Promise<void> {
@@ -215,20 +255,8 @@ async function main(): Promise<void> {
 
   run(["git", "push", "--force", remote, `HEAD:${branch}`]);
   const number = openPullRequest(message, branch, auth);
-  await waitForCheck(number, auth);
-  run(
-    [
-      "gh",
-      "pr",
-      "merge",
-      String(number),
-      "--squash",
-      "--delete-branch",
-      "--match-head-commit",
-      sha,
-    ],
-    auth,
-  );
+  await waitForCiRun(sha, auth);
+  await mergePullRequest(number, sha, auth);
   console.log(`publish-data: squashed pull request #${number} into ${TARGET_BRANCH}`);
 }
 
