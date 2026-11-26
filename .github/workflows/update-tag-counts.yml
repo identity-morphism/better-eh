@@ -13,9 +13,7 @@ on:
       - .github/workflows/update-tag-counts.yml
 
 permissions:
-  contents: write
-  # `gh workflow run ci.yml` dispatches the check that branch protection then requires.
-  actions: write
+  contents: read
 
 concurrency:
   group: update-tag-counts
@@ -52,7 +50,7 @@ jobs:
         run: bun run test
       - if: steps.snapshot.outputs.changed == 'true'
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          TAG_DATA_TOKEN: ${{ secrets.TAG_DATA_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

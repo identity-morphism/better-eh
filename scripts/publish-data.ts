@@ -1,19 +1,19 @@
 /**
- * Publishes a scheduled tag-data refresh to master.
+ * Publishes a scheduled tag-data refresh through a pull request.
  *
  * The refresh rewrites `assets/*.bin`, regenerates the embedded core vocabulary and, for the
- * popularity snapshot, the bundle that inlines it. Master only accepts a push that already carries
- * the `check` status, and a commit created on a runner carries none, so a direct push is refused
- * with `GH006: Required status check "check" is expected`. The commit therefore goes to a scratch
- * branch first, `ci.yml` is dispatched against that branch — `workflow_dispatch` is the one event
- * the token recursion guard lets through — and only a green run pushes the same commit, now
- * carrying its `check`, to master.
+ * popularity snapshot, the bundle that inlines it. Master requires the `check` status, and only a
+ * run triggered by `push`, `pull_request`, `pull_request_review`, `pull_request_target`,
+ * `deployment` or `deployment_status` reports a check that satisfies it: a `workflow_dispatch` run
+ * counts for nothing, and a push or pull request made with `GITHUB_TOKEN` starts no run at all. The
+ * refresh therefore rides `TAG_DATA_TOKEN`, a fine-grained token with contents and pull requests
+ * write, which pushes the commit to a scratch branch, opens the pull request that makes `ci.yml`
+ * run normally, waits for the required check and merges.
  */
 
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
-const CI_WORKFLOW = "ci.yml";
 const TARGET_BRANCH = "master";
 const PUBLISHED: Readonly<Record<string, true>> = {
   "assets/tag-counts.bin": true,
@@ -21,19 +21,40 @@ const PUBLISHED: Readonly<Record<string, true>> = {
   "src/tags/core-vocabulary.ts": true,
   "dist/better-eh.user.js": true,
 };
+const FAILED_CONCLUSION: Readonly<Record<string, true>> = {
+  FAILURE: true,
+  CANCELLED: true,
+  TIMED_OUT: true,
+  ACTION_REQUIRED: true,
+  STARTUP_FAILURE: true,
+};
+const FAILED_STATE: Readonly<Record<string, true>> = { FAILURE: true, ERROR: true };
+// `unstable` is mergeable: every required check passed and something optional is red.
+const MERGEABLE_STATUS: Readonly<Record<string, true>> = { CLEAN: true, UNSTABLE: true };
 
 interface Options {
   branch: string;
   message: string;
 }
 
-interface Run {
-  databaseId: number;
-  headSha: string;
+interface Checks {
+  mergeStateStatus: string;
+  statusCheckRollup: readonly RollupEntry[];
+}
+
+interface RollupEntry {
+  name?: string;
+  context?: string;
+  conclusion?: string;
+  state?: string;
+}
+
+interface PullRequest {
+  number: number;
 }
 
 function redact(message: string): string {
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? "";
+  const token = process.env.TAG_DATA_TOKEN ?? "";
   // Real tokens are 40 characters; shorter values are local probes and would shred ordinary words.
   return token.length < 16 ? message : message.replaceAll(token, "***");
 }
@@ -102,45 +123,71 @@ function changedPaths(): string[] {
     .filter((path) => path !== "");
 }
 
-async function waitForCiRun(
-  sha: string,
-  branch: string,
-  auth: Record<string, string>,
-): Promise<number> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const listing = read(
-      [
-        "gh",
-        "run",
-        "list",
-        "--workflow",
-        CI_WORKFLOW,
-        "--branch",
-        branch,
-        "--event",
-        "workflow_dispatch",
-        "--limit",
-        "20",
-        "--json",
-        "databaseId,headSha",
-      ],
-      auth,
-    );
-    const runs = (listing.trim() === "" ? [] : JSON.parse(listing)) as Run[];
-    const match = runs.find((entry) => entry.headSha === sha);
-    if (match) {
-      return match.databaseId;
-    }
-    await Bun.sleep(5000);
+function openPullRequest(message: string, branch: string, auth: Record<string, string>): number {
+  const listing = read(
+    ["gh", "pr", "list", "--head", branch, "--state", "open", "--limit", "1", "--json", "number"],
+    auth,
+  );
+  const open = (listing.trim() === "" ? [] : JSON.parse(listing)) as PullRequest[];
+  const existing = open[0];
+  if (existing !== undefined) {
+    console.log(`publish-data: reusing pull request #${existing.number}`);
+    return existing.number;
   }
-  fail(`no ${CI_WORKFLOW} run for ${sha.slice(0, 7)} appeared within five minutes`);
+  const url = read(
+    [
+      "gh",
+      "pr",
+      "create",
+      "--base",
+      TARGET_BRANCH,
+      "--head",
+      branch,
+      "--title",
+      message,
+      "--body",
+      "Scheduled tag data refresh. The bundle is rebuilt because it inlines the core counts.",
+    ],
+    auth,
+  ).trim();
+  const number = Number(url.split("/").pop());
+  if (!Number.isInteger(number) || number <= 0) {
+    fail(`could not read a pull request number from ${url}`);
+  }
+  console.log(`publish-data: opened pull request #${number}`);
+  return number;
+}
+
+async function waitForCheck(number: number, auth: Record<string, string>): Promise<void> {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    const state = JSON.parse(
+      read(
+        ["gh", "pr", "view", String(number), "--json", "mergeStateStatus,statusCheckRollup"],
+        auth,
+      ),
+    ) as Checks;
+    const failed = state.statusCheckRollup.filter((check) => {
+      const conclusion = check.conclusion ?? "";
+      const status = check.state ?? "";
+      return FAILED_CONCLUSION[conclusion] === true || FAILED_STATE[status] === true;
+    });
+    if (failed.length > 0) {
+      const names = failed.map((check) => check.name ?? check.context ?? "check");
+      fail(`pull request #${number} has failing checks: ${names.join(", ")}`);
+    }
+    if (MERGEABLE_STATUS[state.mergeStateStatus] === true) {
+      return;
+    }
+    await Bun.sleep(10000);
+  }
+  fail(`pull request #${number} carried no green check within fifteen minutes`);
 }
 
 async function main(): Promise<void> {
   const { branch, message } = parseArgs(process.argv.slice(2));
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const token = process.env.TAG_DATA_TOKEN;
   if (token === undefined || token === "") {
-    fail("GITHUB_TOKEN is required to dispatch ci.yml");
+    fail("TAG_DATA_TOKEN is required: GITHUB_TOKEN pushes and pull requests start no check run");
   }
   const repository = process.env.GITHUB_REPOSITORY;
   if (repository === undefined || repository === "") {
@@ -167,13 +214,22 @@ async function main(): Promise<void> {
   console.log(`publish-data: ${sha.slice(0, 7)} carries ${paths.join(", ")}`);
 
   run(["git", "push", "--force", remote, `HEAD:${branch}`]);
-  run(["gh", "workflow", "run", CI_WORKFLOW, "--ref", branch], auth);
-  const runId = await waitForCiRun(sha, branch, auth);
-  console.log(`publish-data: ${CI_WORKFLOW} run ${runId} gates ${sha.slice(0, 7)}`);
-  run(["gh", "run", "watch", String(runId), "--exit-status"], auth);
-
-  run(["git", "push", remote, `${sha}:${TARGET_BRANCH}`]);
-  console.log(`publish-data: ${sha.slice(0, 7)} is on ${TARGET_BRANCH} with its check`);
+  const number = openPullRequest(message, branch, auth);
+  await waitForCheck(number, auth);
+  run(
+    [
+      "gh",
+      "pr",
+      "merge",
+      String(number),
+      "--squash",
+      "--delete-branch",
+      "--match-head-commit",
+      sha,
+    ],
+    auth,
+  );
+  console.log(`publish-data: squashed pull request #${number} into ${TARGET_BRANCH}`);
 }
 
 await main();

@@ -5,10 +5,6 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  # The tag-data refresh dispatches this workflow against its scratch branch, because a commit that
-  # carries no `check` run is refused by branch protection and `workflow_dispatch` is the only
-  # event the token recursion guard lets through. Manual runs use the same entry point.
-  workflow_dispatch:
 
 permissions:
   contents: read
