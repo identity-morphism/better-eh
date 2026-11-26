@@ -72,7 +72,10 @@ specificity; the fixture and smoke pages carry no site CSS, so no gate observes 
 **Release size budget**: the built bundle must stay at or under 700 KiB raw and 170 KiB gzipped,
 the size a userscript manager downloads. `bun run check:size` enforces both and prints the measured
 sizes against each limit; CI runs it after `bun run build`, so a bundle that outgrows either
-ceiling fails the pull request. `bun run check:header` checks the same built file's metadata: both
+ceiling fails the pull request. It also prints the compiled app CSS, the viewer sheet and the
+embedded vocabulary as a share of the raw bundle, so a feature that grows one of them is visible in
+review, and the generated core is the only embedded dataset; larger data ships as a repository
+asset. `bun run check:header` checks the same built file's metadata: both
 matches, the four grants, `@noframes`, `@run-at document-start`, the update URLs, and `@version`
 against `package.json`. The core vocabulary (`src/tags/core-vocabulary.ts`) is the only
 generated source in `src/`; `bun run check:generated` verifies it against the checked-in assets,
