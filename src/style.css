@@ -100,7 +100,8 @@ body.fit-w #main-img,
 }
 
 /* A hit area big enough for touch, drawn with the same icon set as the rest of the app. */
-#hud-gallery {
+#hud-gallery,
+#hud-slideshow {
   display: grid;
   place-items: center;
   width: 40px;
@@ -113,12 +114,20 @@ body.fit-w #main-img,
   backdrop-filter: blur(4px);
   pointer-events: none;
 }
-#hud-gallery svg {
+#hud-slideshow {
+  padding: 0;
+  margin-left: 8px;
+  cursor: pointer;
+}
+#hud-gallery svg,
+#hud-slideshow svg {
   width: 22px;
   height: 22px;
 }
 #hud-gallery:hover,
-#hud-gallery:focus-visible {
+#hud-gallery:focus-visible,
+#hud-slideshow:hover,
+#hud-slideshow:focus-visible {
   background: var(--scrim-control-hover);
   border-color: var(--scrim-line-hover);
 }
@@ -221,8 +230,10 @@ body.hud-pinned #page-nav {
   visibility: visible;
 }
 body:not(.no-cursor) #hud-gallery,
+body:not(.no-cursor) #hud-slideshow,
 body:not(.no-cursor) #page-nav button,
 body.hud-pinned #hud-gallery,
+body.hud-pinned #hud-slideshow,
 body.hud-pinned #page-nav button {
   pointer-events: auto;
 }
@@ -236,6 +247,7 @@ body.hud-pinned #page-nav button {
     visibility: visible;
   }
   #hud-gallery,
+  #hud-slideshow,
   #page-nav button {
     pointer-events: auto;
   }

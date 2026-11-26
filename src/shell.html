@@ -6,6 +6,12 @@
   <div id="continuous" hidden></div>
   <div id="hud">
     <a id="hud-gallery" href="" title="Back to gallery" aria-label="Back to gallery"></a>
+    <button
+      id="hud-slideshow"
+      type="button"
+      aria-label="Start slideshow"
+      title="Start slideshow"
+    ></button>
     <div class="hud-spacer"></div>
     <h1 id="hud-title"></h1>
   </div>
@@ -52,12 +58,14 @@
         ><kbd class="kbd">0</kbd>
       </dt>
       <dd>Zoom in / out / reset</dd>
+      <dt><kbd class="kbd">R</kbd><kbd class="kbd">Home</kbd><kbd class="kbd">End</kbd></dt>
+      <dd>Reload / first / last page</dd>
       <dt><kbd class="kbd">Q</kbd><kbd class="kbd">Esc</kbd></dt>
       <dd>Back to the gallery</dd>
       <dt><kbd class="kbd">?</kbd></dt>
       <dd>Show or hide this panel</dd>
       <dt>Settings</dt>
-      <dd>Reader layout (single, spread, continuous), page direction, and keys</dd>
+      <dd>Reader layout (single, spread, continuous), page direction, keys, and slideshow</dd>
     </dl>
   </div>
   <div id="hud-toast" role="status" aria-live="polite" aria-atomic="true"></div>

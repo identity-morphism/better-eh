@@ -178,6 +178,15 @@
       label: "Scroll step",
       hint: "Pixels moved by the natural-width scroll keys."
     },
+    slideshowSeconds: {
+      control: "number",
+      key: "slideshowSeconds",
+      default: 0,
+      min: 0,
+      max: 60,
+      label: "Slideshow interval",
+      hint: "Seconds per page; 0 turns it off. The play button in the reader HUD starts and stops it."
+    },
     prefetchCount: {
       control: "number",
       key: "prefetchCount",
@@ -1694,6 +1703,8 @@
     chevronRight: "M9 6l6 6-6 6",
     first: "M18 6l-6 6 6 6M11 6l-6 6 6 6",
     last: "M6 6l6 6-6 6M13 6l6 6-6 6",
+    play: "M8 5l11 7-11 7V5z",
+    pause: "M7 5h4v14H7zM13 5h4v14h-4z",
     download: "M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M5 19h14",
     history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2"
   };
@@ -14574,6 +14585,12 @@ ${defaultKeySummary()}`)) {
   <div id="continuous" hidden></div>
   <div id="hud">
     <a id="hud-gallery" href="" title="Back to gallery" aria-label="Back to gallery"></a>
+    <button
+      id="hud-slideshow"
+      type="button"
+      aria-label="Start slideshow"
+      title="Start slideshow"
+    ></button>
     <div class="hud-spacer"></div>
     <h1 id="hud-title"></h1>
   </div>
@@ -14620,12 +14637,14 @@ ${defaultKeySummary()}`)) {
         ><kbd class="kbd">0</kbd>
       </dt>
       <dd>Zoom in / out / reset</dd>
+      <dt><kbd class="kbd">R</kbd><kbd class="kbd">Home</kbd><kbd class="kbd">End</kbd></dt>
+      <dd>Reload / first / last page</dd>
       <dt><kbd class="kbd">Q</kbd><kbd class="kbd">Esc</kbd></dt>
       <dd>Back to the gallery</dd>
       <dt><kbd class="kbd">?</kbd></dt>
       <dd>Show or hide this panel</dd>
       <dt>Settings</dt>
-      <dd>Reader layout (single, spread, continuous), page direction, and keys</dd>
+      <dd>Reader layout (single, spread, continuous), page direction, keys, and slideshow</dd>
     </dl>
   </div>
   <div id="hud-toast" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -14685,6 +14704,7 @@ ${defaultKeySummary()}`)) {
       elCounter: requireShell("hud-counter"),
       elFileInfo: requireShell("file-info"),
       elGallery: requireShell("hud-gallery"),
+      elSlideshow: requireShell("hud-slideshow"),
       elFirst: requireShell("hud-first"),
       elPrev: requireShell("hud-prev"),
       elNext: requireShell("hud-next"),
@@ -14699,6 +14719,7 @@ ${defaultKeySummary()}`)) {
       elErrorNative: requireShell("img-error-native")
     };
     ui.elGallery.append(icon("back"));
+    ui.elSlideshow.append(icon("play", true));
     ui.elFirst.append(icon("first"));
     ui.elPrev.append(icon("chevronLeft"));
     ui.elNext.append(icon("chevronRight"));
@@ -14835,11 +14856,93 @@ ${defaultKeySummary()}`)) {
       })();
     };
     const go = (direction) => {
+      restartSlideshow();
       navigation.go(direction);
     };
     const goEnd = (direction) => {
+      restartSlideshow();
       navigation.goEnd(direction);
     };
+    let slideshowActive = false;
+    let slideshowTimer = null;
+    function paintSlideshow() {
+      const label = slideshowActive ? "Pause slideshow" : "Start slideshow";
+      ui.elSlideshow.replaceChildren(icon(slideshowActive ? "pause" : "play", true));
+      ui.elSlideshow.setAttribute("aria-label", label);
+      ui.elSlideshow.setAttribute("aria-pressed", String(slideshowActive));
+      ui.elSlideshow.title = label;
+    }
+    function scheduleSlideshow() {
+      if (slideshowTimer !== null) {
+        window.clearInterval(slideshowTimer);
+        slideshowTimer = null;
+      }
+      if (!slideshowActive) {
+        return;
+      }
+      const seconds = getSettings().slideshowSeconds;
+      if (seconds <= 0) {
+        stopSlideshow("Slideshow stopped");
+        return;
+      }
+      slideshowTimer = window.setInterval(() => {
+        if (document.hidden) {
+          return;
+        }
+        const current = navigation.currentPage();
+        if (current.nextHref === null) {
+          stopSlideshow("Last page");
+          return;
+        }
+        go("next");
+      }, seconds * 1000);
+    }
+    function restartSlideshow() {
+      if (slideshowActive) {
+        scheduleSlideshow();
+      }
+    }
+    function stopSlideshow(message) {
+      slideshowActive = false;
+      if (slideshowTimer !== null) {
+        window.clearInterval(slideshowTimer);
+        slideshowTimer = null;
+      }
+      paintSlideshow();
+      if (message !== undefined) {
+        showToast(message);
+      }
+    }
+    ui.elSlideshow.addEventListener("click", () => {
+      if (slideshowActive) {
+        stopSlideshow();
+        return;
+      }
+      if (getSettings().slideshowSeconds <= 0) {
+        showToast("Set a slideshow interval in Settings");
+        return;
+      }
+      const current = navigation.currentPage();
+      if (current.nextHref === null) {
+        showToast("Last page");
+        return;
+      }
+      slideshowActive = true;
+      paintSlideshow();
+      scheduleSlideshow();
+    }, { signal: ctx.signal });
+    const stopOnSettings = onSettingsChange(() => {
+      if (!slideshowActive) {
+        return;
+      }
+      if (getSettings().slideshowSeconds <= 0) {
+        stopSlideshow("Slideshow stopped");
+      } else {
+        restartSlideshow();
+      }
+    });
+    ctx.signal.addEventListener("abort", stopOnSettings, { once: true });
+    ctx.signal.addEventListener("abort", () => stopSlideshow(), { once: true });
     function render(data) {
       ui.elTitle.replaceChildren(titleNodes(data.galleryTitle));
       ui.elCounter.textContent = data.counterText;
@@ -14851,6 +14954,9 @@ ${defaultKeySummary()}`)) {
       ui.elForum.href = data.forumHref ?? "";
       ui.elSearch.hidden = data.searchHref === null;
       ui.elSearch.href = data.searchHref ?? "";
+      if (data.nextHref === null && slideshowActive) {
+        stopSlideshow("Last page");
+      }
       ui.elImg.alt = `${data.galleryTitle.primary} — page ${data.counterText}`;
       hideError();
       navigation.show(data);
@@ -19987,7 +20093,8 @@ body.fit-w #main-img,
 }
 
 /* A hit area big enough for touch, drawn with the same icon set as the rest of the app. */
-#hud-gallery {
+#hud-gallery,
+#hud-slideshow {
   display: grid;
   place-items: center;
   width: 40px;
@@ -20000,12 +20107,20 @@ body.fit-w #main-img,
   backdrop-filter: blur(4px);
   pointer-events: none;
 }
-#hud-gallery svg {
+#hud-slideshow {
+  padding: 0;
+  margin-left: 8px;
+  cursor: pointer;
+}
+#hud-gallery svg,
+#hud-slideshow svg {
   width: 22px;
   height: 22px;
 }
 #hud-gallery:hover,
-#hud-gallery:focus-visible {
+#hud-gallery:focus-visible,
+#hud-slideshow:hover,
+#hud-slideshow:focus-visible {
   background: var(--scrim-control-hover);
   border-color: var(--scrim-line-hover);
 }
@@ -20108,8 +20223,10 @@ body.hud-pinned #page-nav {
   visibility: visible;
 }
 body:not(.no-cursor) #hud-gallery,
+body:not(.no-cursor) #hud-slideshow,
 body:not(.no-cursor) #page-nav button,
 body.hud-pinned #hud-gallery,
+body.hud-pinned #hud-slideshow,
 body.hud-pinned #page-nav button {
   pointer-events: auto;
 }
@@ -20123,6 +20240,7 @@ body.hud-pinned #page-nav button {
     visibility: visible;
   }
   #hud-gallery,
+  #hud-slideshow,
   #page-nav button {
     pointer-events: auto;
   }

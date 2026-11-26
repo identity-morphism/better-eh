@@ -14,6 +14,7 @@ export interface ScalarSettings {
   fitHeight: boolean;
   debug: boolean;
   scrollStep: number;
+  slideshowSeconds: number;
   prefetchCount: number;
   maxNlRetry: number;
   imgCacheLimit: number;
@@ -103,6 +104,15 @@ export const SETTINGS_SCHEMA: { readonly [K in ScalarKey]: SchemaEntry<K> } = {
     max: 5000,
     label: "Scroll step",
     hint: "Pixels moved by the natural-width scroll keys.",
+  },
+  slideshowSeconds: {
+    control: "number",
+    key: "slideshowSeconds",
+    default: 0,
+    min: 0,
+    max: 60,
+    label: "Slideshow interval",
+    hint: "Seconds per page; 0 turns it off. The play button in the reader HUD starts and stops it.",
   },
   prefetchCount: {
     control: "number",

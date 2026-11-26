@@ -303,6 +303,46 @@ describe("mountViewer", () => {
     expect(active.navigations).toEqual([]);
   });
 
+  test("the HUD slideshow starts, advances and pauses", () => {
+    const data = page();
+    active = harness();
+    mountViewer(host, data, active.ctx);
+    const button = requireNode<HTMLButtonElement>(host, "#hud-slideshow");
+
+    click(button);
+    expect(state.toasts).toContain("Set a slideshow interval in Settings");
+    expect(button.getAttribute("aria-label")).toBe("Start slideshow");
+
+    updateSetting("slideshowSeconds", 5);
+    const callbacks: Array<() => void> = [];
+    const originalSet = window.setInterval.bind(window);
+    const originalClear = window.clearInterval.bind(window);
+    Object.assign(window, {
+      setInterval: (handler: TimerHandler) => {
+        if (typeof handler === "function") {
+          callbacks.push(handler as () => void);
+        }
+        return callbacks.length;
+      },
+      clearInterval: () => undefined,
+    });
+    try {
+      click(button);
+      expect(button.getAttribute("aria-label")).toBe("Pause slideshow");
+      expect(callbacks).toHaveLength(1);
+
+      callbacks[0]?.();
+      expect(active.navigations.at(-1)?.url).toBe(NEXT);
+
+      click(button);
+      expect(button.getAttribute("aria-label")).toBe("Start slideshow");
+    } finally {
+      updateSetting("slideshowSeconds", 0);
+      active.controller.abort();
+      Object.assign(window, { setInterval: originalSet, clearInterval: originalClear });
+    }
+  });
+
   test("keyboard shortcuts drive help, fit, navigation and image reload", () => {
     const data = page();
     active = harness();
@@ -333,8 +373,8 @@ describe("mountViewer", () => {
     press("Home");
     press("End");
     expect(active.navigations.slice(-2)).toEqual([
-      { url: data.firstHref, options: { replace: true } },
-      { url: data.lastHref, options: { replace: true } },
+      { url: data.firstHref ?? "", options: { replace: true } },
+      { url: data.lastHref ?? "", options: { replace: true } },
     ]);
 
     press("?");

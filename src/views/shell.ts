@@ -7,6 +7,7 @@ export const SHELL_IDS = [
   "continuous",
   "hud",
   "hud-gallery",
+  "hud-slideshow",
   "hud-title",
   "page-nav",
   "hud-first",
@@ -38,6 +39,7 @@ interface ShellElements {
   continuous: HTMLElement;
   hud: HTMLElement;
   "hud-gallery": HTMLAnchorElement;
+  "hud-slideshow": HTMLButtonElement;
   "hud-title": HTMLElement;
   "page-nav": HTMLElement;
   "hud-first": HTMLButtonElement;

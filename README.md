@@ -42,7 +42,7 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
   instead of the site's legacy page.
 - **Reader**: fit-height/zoom/pan or natural-width scrolling, single/spread/continuous layouts,
   right-to-left direction, prefetching, `nl` retry, original-file fallback on deep zoom, keyboard,
-  click zones, edge chevrons and swipes.
+  click zones, edge chevrons, swipes, and an optional timed slideshow.
 - **Account pages**: the My Home account overview; favorites folders with search, notes, ordering
   and bulk move/delete; the ranked toplist overview and category pages; the torrent index with
   search, status, only-mine and sortable columns; `/uconfig.php` plus a userscript settings panel,

@@ -46,6 +46,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     elCounter: requireShell("hud-counter"),
     elFileInfo: requireShell("file-info"),
     elGallery: requireShell("hud-gallery"),
+    elSlideshow: requireShell("hud-slideshow"),
     elFirst: requireShell("hud-first"),
     elPrev: requireShell("hud-prev"),
     elNext: requireShell("hud-next"),
@@ -61,6 +62,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
   };
   // The shell ships empty containers; the icons come from the shared set, not text glyphs.
   ui.elGallery.append(icon("back"));
+  ui.elSlideshow.append(icon("play", true));
   ui.elFirst.append(icon("first"));
   ui.elPrev.append(icon("chevronLeft"));
   ui.elNext.append(icon("chevronRight"));
@@ -235,12 +237,105 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
   };
 
   const go = (direction: "prev" | "next"): void => {
+    restartSlideshow();
     navigation.go(direction);
   };
 
   const goEnd = (direction: "first" | "last"): void => {
+    restartSlideshow();
     navigation.goEnd(direction);
   };
+
+  let slideshowActive = false;
+  let slideshowTimer: number | null = null;
+
+  function paintSlideshow(): void {
+    const label = slideshowActive ? "Pause slideshow" : "Start slideshow";
+    ui.elSlideshow.replaceChildren(icon(slideshowActive ? "pause" : "play", true));
+    ui.elSlideshow.setAttribute("aria-label", label);
+    ui.elSlideshow.setAttribute("aria-pressed", String(slideshowActive));
+    ui.elSlideshow.title = label;
+  }
+
+  function scheduleSlideshow(): void {
+    if (slideshowTimer !== null) {
+      window.clearInterval(slideshowTimer);
+      slideshowTimer = null;
+    }
+    if (!slideshowActive) {
+      return;
+    }
+    const seconds = getSettings().slideshowSeconds;
+    if (seconds <= 0) {
+      stopSlideshow("Slideshow stopped");
+      return;
+    }
+    slideshowTimer = window.setInterval(() => {
+      if (document.hidden) {
+        return;
+      }
+      const current = navigation.currentPage();
+      if (current.nextHref === null) {
+        stopSlideshow("Last page");
+        return;
+      }
+      go("next");
+    }, seconds * 1000);
+  }
+
+  function restartSlideshow(): void {
+    if (slideshowActive) {
+      scheduleSlideshow();
+    }
+  }
+
+  function stopSlideshow(message?: string): void {
+    slideshowActive = false;
+    if (slideshowTimer !== null) {
+      window.clearInterval(slideshowTimer);
+      slideshowTimer = null;
+    }
+    paintSlideshow();
+    if (message !== undefined) {
+      showToast(message);
+    }
+  }
+
+  ui.elSlideshow.addEventListener(
+    "click",
+    () => {
+      if (slideshowActive) {
+        stopSlideshow();
+        return;
+      }
+      if (getSettings().slideshowSeconds <= 0) {
+        showToast("Set a slideshow interval in Settings");
+        return;
+      }
+      const current = navigation.currentPage();
+      if (current.nextHref === null) {
+        showToast("Last page");
+        return;
+      }
+      slideshowActive = true;
+      paintSlideshow();
+      scheduleSlideshow();
+    },
+    { signal: ctx.signal },
+  );
+
+  const stopOnSettings = onSettingsChange(() => {
+    if (!slideshowActive) {
+      return;
+    }
+    if (getSettings().slideshowSeconds <= 0) {
+      stopSlideshow("Slideshow stopped");
+    } else {
+      restartSlideshow();
+    }
+  });
+  ctx.signal.addEventListener("abort", stopOnSettings, { once: true });
+  ctx.signal.addEventListener("abort", () => stopSlideshow(), { once: true });
 
   function render(data: PageData): void {
     ui.elTitle.replaceChildren(titleNodes(data.galleryTitle));
@@ -253,6 +348,9 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
     ui.elForum.href = data.forumHref ?? "";
     ui.elSearch.hidden = data.searchHref === null;
     ui.elSearch.href = data.searchHref ?? "";
+    if (data.nextHref === null && slideshowActive) {
+      stopSlideshow("Last page");
+    }
     ui.elImg.alt = `${data.galleryTitle.primary} — page ${data.counterText}`;
     hideError();
 

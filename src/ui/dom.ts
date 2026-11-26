@@ -107,6 +107,8 @@ const ICON_PATHS = {
   chevronRight: "M9 6l6 6-6 6",
   first: "M18 6l-6 6 6 6M11 6l-6 6 6 6",
   last: "M6 6l6 6-6 6M13 6l6 6-6 6",
+  play: "M8 5l11 7-11 7V5z",
+  pause: "M7 5h4v14H7zM13 5h4v14h-4z",
   download: "M12 3v11m0 0-4.5-4.5M12 14l4.5-4.5M5 19h14",
   history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2",
 } as const;
