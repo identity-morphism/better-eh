@@ -130,14 +130,21 @@ this script), and any minifier would break the unminified requirement.
 
 `Update tag popularity` (Mondays 05:17 UTC) and `Update tag vocabulary` (Mondays 05:47 UTC) rewrite
 `assets/*.bin`, regenerate `src/tags/core-vocabulary.ts` and exit when the upstream release has not
-moved. A real refresh also changes `dist/`, because the bundle inlines the core counts. Master
-accepts a push only when the commit already carries the `check` status, and a commit created on a
-runner carries none, so `scripts/publish-data.ts` publishes the commit in two steps: it pushes to
-`automation/tag-popularity` (or `automation/tag-vocabulary`), dispatches `ci.yml` against that
-branch — `workflow_dispatch` is the only event the token recursion guard lets through — waits for
-the run, and pushes the same commit to master only after it is green. The scratch branch keeps
-whatever the last attempt pushed; each run force-pushes over it. Rerun a failed refresh from the
-Actions tab, or `gh workflow run update-tag-counts.yml`.
+moved. A real refresh also changes `dist/`, because the bundle inlines the core counts.
+
+Master requires the `check` status, and only a run triggered by `push`, `pull_request` (or
+`pull_request_review`, `pull_request_target`, `deployment`, `deployment_status`) reports a check that
+satisfies it; a `workflow_dispatch` run does not count, and a push or pull request made with
+`GITHUB_TOKEN` starts no run at all. So `scripts/publish-data.ts` publishes through the
+`TAG_DATA_TOKEN` secret — a fine-grained token with **Contents** and **Pull requests** write on this
+repository. It commits the refreshed data and rebuilt bundle on the runner, force-pushes
+`automation/tag-popularity` (or `automation/tag-vocabulary`), opens the pull request with that token
+so `ci.yml` runs on the head commit, waits for `mergeStateStatus` to become `CLEAN`, and squash-merges
+with `--match-head-commit`. A rerun reuses the open pull request and overwrites the branch.
+
+Without the secret the step fails with `TAG_DATA_TOKEN is required`; without the token's
+`pull_request` event there is no eligible check and the merge stays `BLOCKED`. Rerun a failed refresh
+from the Actions tab, or `gh workflow run update-tag-counts.yml`.
 
 ## Settings & Debugging
 
