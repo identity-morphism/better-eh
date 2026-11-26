@@ -2,10 +2,10 @@
  * Live-site parser canary.
  *
  * Fixtures are frozen copies of pages the site served once. This script fetches a handful of public
- * pages the app owns — a listing, the popular tab, a gallery, one of its pages and the toplist —
- * and runs the same parsers and sanity assertions the app uses, so a markup change is reported
- * before a reader hits the native fallback. It is advisory: the scheduled workflow opens an issue
- * instead of failing a pull request.
+ * pages the app owns — a listing, the popular tab, a gallery, one of its pages, the toplist and the
+ * news page — and runs the same parsers and sanity assertions the app uses, so a markup change is
+ * reported before a reader hits the native fallback. It is advisory: the scheduled workflow opens
+ * an issue instead of failing a pull request.
  *
  * Only public e-hentai.org pages are read, sequentially and with a small delay. The script never
  * prints page bodies, gallery tokens or image URLs.
@@ -15,9 +15,11 @@ import { parseHTML } from "linkedom";
 
 import { parseGalleryPage } from "../src/parse/gallery";
 import { parseListPage } from "../src/parse/list";
+import { parseNews } from "../src/parse/news";
 import {
   assertGalleryPage,
   assertListPage,
+  assertNewsPage,
   assertToplistPage,
   assertViewerPage,
 } from "../src/parse/sanity";
@@ -113,8 +115,14 @@ await check("toplist", async () => {
   assertToplistPage(data);
 });
 
+await check("news", async () => {
+  const page = await fetchPage("/news.php");
+  const data = parseNews(page.doc, page.url);
+  assertNewsPage(data, page.doc);
+});
+
 if (failures.length > 0) {
   console.error(`live parsers: ${failures.length} check(s) failed`);
   process.exit(1);
 }
-console.log("live parsers: listing, popular, gallery, viewer and toplist all parsed");
+console.log("live parsers: listing, popular, gallery, viewer, toplist and news all parsed");
