@@ -110,8 +110,11 @@ the release script refuses to start until the version is tagged or reverted; nev
 `version` as part of a feature change.
 
 A dependency that generates the bundle changes it: a Tailwind bump rewrites the CSS inside `dist/`.
-A dependency pull request cannot rebuild it, so land that bump with a commit that runs
-`bun run build`, or CI's dist check fails on the pull request. Dependabot is told to leave the `bun`
+A dependency pull request cannot rebuild it. Dispatch **Rebuild dist** with the bot branch
+(`gh workflow run rebuild-dist.yml -f branch=dependabot/...`) and the workflow commits the rebuilt
+bundle back to that branch; otherwise land the bump with a commit that runs `bun run build`, or
+CI's dist check fails on the pull request. The workflow refuses `master` and `main`, because a
+release owns the version and the bundle on those branches. Dependabot is told to leave the `bun`
 pin alone: stable Bun resolves `bun lint` back to the `lint` script and exits 0 without linting.
 
 CI installs Chromium and Firefox for Playwright and runs the browser smoke gate against the built
