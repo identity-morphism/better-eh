@@ -5,6 +5,17 @@ import { safeUrl } from "./url";
 const CATEGORY_CLASS = /^ct[0-9a-z]+$/;
 
 /**
+ * Lines the site prints when a listing legitimately has no rows.
+ *
+ * A no-hits listing drops `.searchtext` altogether and prints this in a bare paragraph, so both the
+ * parser and the post-parse check read it from the paragraph's whole text.
+ */
+export const EMPTY_LIST = /no hits|no galleries|found 0|no results/i;
+
+/** Lines a torrent index prints when it has no rows. */
+export const EMPTY_TORRENTS = /no torrents|no results|showing 0\s*-\s*0/i;
+
+/**
  * Whether a checkbox or radio is checked.
  *
  * The test DOM (linkedom) has no live `checked` property, so the attribute is the fallback; in a

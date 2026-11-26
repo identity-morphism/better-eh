@@ -1,5 +1,5 @@
 import type { FavoriteMark, ListItem, ListPageData } from "../types";
-import { anchorHref, categoryFromNode, cleanText } from "./helpers";
+import { anchorHref, categoryFromNode, cleanText, EMPTY_LIST } from "./helpers";
 import { parseTitle } from "./title";
 import { galleryIdentity } from "./url";
 
@@ -250,7 +250,21 @@ function resultSummary(doc: Document): string | null {
     return match[0];
   }
   const notice = cleanText(doc.querySelector("p.ip strong")?.textContent);
-  return notice || raw || null;
+  if (notice) {
+    return notice;
+  }
+  if (raw) {
+    return raw;
+  }
+  // A no-hits listing drops `.searchtext` entirely and prints "No hits found" in a bare centered
+  // paragraph next to the search box, so without this the page would look like a parse mismatch.
+  for (const node of doc.querySelectorAll("p")) {
+    const text = cleanText(node.textContent);
+    if (EMPTY_LIST.test(text)) {
+      return text;
+    }
+  }
+  return null;
 }
 
 export function parseListPage(doc: Document, url: string): ListPageData {

@@ -3,6 +3,7 @@ import type { GalleryData, ListPageData, PageData } from "../types";
 import type { ArchivePage } from "./archive";
 import type { FavoritesPage } from "./favorites";
 import type { GalleryTorrentsPage } from "./gallery-torrents";
+import { EMPTY_LIST, EMPTY_TORRENTS } from "./helpers";
 import type { HomePage } from "./home";
 import type { MyTagsPage } from "./my-tags";
 import type { ToplistPage } from "./toplist";
@@ -16,10 +17,6 @@ import type { UconfigSection } from "./uconfig";
  * produces the data the view needs, so the app can open the site's own page instead of rendering an
  * empty shell. A legitimate empty result set is not a mismatch.
  */
-
-/** Lines the site prints when a listing legitimately has no rows. */
-const EMPTY_LIST = /no hits|no galleries|found 0|no results/i;
-const EMPTY_TORRENTS = /no torrents|no results|showing 0\s*-\s*0/i;
 
 /** A viewer page must resolve the current page's image. */
 export function assertViewerPage(data: PageData): void {

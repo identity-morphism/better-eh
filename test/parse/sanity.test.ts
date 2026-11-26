@@ -157,6 +157,21 @@ describe("sanity checks on empty result pages", () => {
     expect(torrents.rows).toHaveLength(0);
     assertTorrentsPage(torrents, torrentDoc);
   });
+
+  test("accepts the site's bare no-hits notice, which has no search summary", () => {
+    // The live no-hits page carries `#searchbox` but no `.searchtext`; the notice is a lone
+    // centered paragraph, so the parser must find it instead of leaving `resultText` null.
+    const doc = parseDocument(
+      "<html><body><div class='ido'><div id='toppane'><div id='searchbox'></div></div>" +
+        "<div style='position:relative; z-index:2'>" +
+        "<p style='text-align:center; font-style:italic; margin-bottom:10px'>No hits found</p>" +
+        "</div></div></body></html>",
+    );
+    const list = parseListPage(doc, LIST_URL);
+    expect(list.items).toHaveLength(0);
+    expect(list.resultText).toBe("No hits found");
+    assertListPage(list, doc);
+  });
 });
 
 describe("route adapters", () => {

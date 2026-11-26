@@ -1655,6 +1655,8 @@ ${defaultKeySummary()}`)) {
 
   // src/parse/helpers.ts
   var CATEGORY_CLASS = /^ct[0-9a-z]+$/;
+  var EMPTY_LIST = /no hits|no galleries|found 0|no results/i;
+  var EMPTY_TORRENTS = /no torrents|no results|showing 0\s*-\s*0/i;
   function isChecked(input) {
     if (!input) {
       return false;
@@ -2370,7 +2372,19 @@ ${defaultKeySummary()}`)) {
       return match[0];
     }
     const notice = cleanText(doc.querySelector("p.ip strong")?.textContent);
-    return notice || raw || null;
+    if (notice) {
+      return notice;
+    }
+    if (raw) {
+      return raw;
+    }
+    for (const node of doc.querySelectorAll("p")) {
+      const text = cleanText(node.textContent);
+      if (EMPTY_LIST.test(text)) {
+        return text;
+      }
+    }
+    return null;
   }
   function parseListPage(doc, url) {
     const items = [];
@@ -3258,8 +3272,6 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/parse/sanity.ts
-  var EMPTY_LIST = /no hits|no galleries|found 0|no results/i;
-  var EMPTY_TORRENTS = /no torrents|no results|showing 0\s*-\s*0/i;
   function assertViewerPage(data) {
     if (data.imgSrc.trim() === "") {
       throw new ParseMismatchError("viewer", "the page image is missing");
