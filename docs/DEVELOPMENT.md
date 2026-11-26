@@ -119,10 +119,14 @@ fails parser sanity reloads through the automatic `?eh_native=1` fallback onto t
 It then runs axe over `#eh-root` with the WCAG A/AA rules, so a new control that fails name,
 contrast or landmark checks fails CI.
 
-Sleazy Fork is the public listing: <https://sleazyfork.org/en/scripts/606064-better-eh>. A new
-version must be posted to that listing after the GitHub release; Sleazy Fork rewrites
-`@updateURL`/`@downloadURL` to its own update endpoint for installs. The posted bundle must stay
-unminified.
+Sleazy Fork is the public listing: <https://sleazyfork.org/en/scripts/606064-better-eh>. The
+listing syncs from this repository's `dist/better-eh.user.js` asset, so publishing needs no upload
+or edit on Sleazy Fork. It follows the committed bundle, but installed copies only update when
+`@version` changes, so the GitHub release remains the release step. Sync is not instantaneous, so
+the listing can lag the release until its next sync run. Sleazy Fork serves the bundle through its
+own update endpoint and rewrites `@updateURL`/`@downloadURL` for installs; the bundle must stay
+unminified because Sleazy Fork rejects minified scripts. `bun run verify:release` compares the
+listing's version too, but only warns: a release can run before the next sync lands.
 
 The build publishes Bun's bundle verbatim: no formatter or minifier runs over it, and the generated
 Tailwind CSS is emitted without `--minify` so the whole bundle stays readable. Bun already keeps
