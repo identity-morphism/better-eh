@@ -59,6 +59,7 @@ function trackFocus(doc: Document): void {
     focus?: () => void;
   };
   proto.focus = function focus(this: Element): void {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     active = this;
   };
 }
@@ -192,17 +193,21 @@ describe("openPopover", () => {
       role: "menu",
     });
     const items = [...popover.element.querySelectorAll("button")];
+    const [first, second, third] = items;
+    if (first === undefined || second === undefined || third === undefined) {
+      throw new Error("expected three focusable items");
+    }
 
     press(popover.element, "keydown", "ArrowDown");
-    expect(document.activeElement).toBe(items[0]);
+    expect(document.activeElement).toBe(first);
     press(popover.element, "keydown", "ArrowDown");
-    expect(document.activeElement).toBe(items[1]);
+    expect(document.activeElement).toBe(second);
     press(popover.element, "keydown", "ArrowUp");
-    expect(document.activeElement).toBe(items[0]);
+    expect(document.activeElement).toBe(first);
     press(popover.element, "keydown", "End");
-    expect(document.activeElement).toBe(items[2]);
+    expect(document.activeElement).toBe(third);
     press(popover.element, "keydown", "Home");
-    expect(document.activeElement).toBe(items[0]);
+    expect(document.activeElement).toBe(first);
 
     press(popover.element, "keydown", "Tab");
     expect(popover.isOpen()).toBe(false);
@@ -214,15 +219,18 @@ describe("openPopover", () => {
       anchor: anchorWith(document, true),
       autoFocus: true,
     });
-    const items = [...popover.element.querySelectorAll("button")];
-    expect(document.activeElement).toBe(items[0]);
+    const [first, last] = [...popover.element.querySelectorAll("button")];
+    if (first === undefined || last === undefined) {
+      throw new Error("expected two focusable items");
+    }
+    expect(document.activeElement).toBe(first);
 
-    items[1]?.focus();
+    last.focus();
     press(popover.element, "keydown", "Tab");
-    expect(document.activeElement).toBe(items[0]);
+    expect(document.activeElement).toBe(first);
 
     press(popover.element, "keydown", "Tab", { shiftKey: true });
-    expect(document.activeElement).toBe(items[1]);
+    expect(document.activeElement).toBe(last);
   });
 
   test("closes when focus leaves the panel", () => {

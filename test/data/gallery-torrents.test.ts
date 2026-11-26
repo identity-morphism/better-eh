@@ -22,7 +22,8 @@ afterAll(() => {
 function respond(html: string): Array<{ url: string; init: RequestInit | undefined }> {
   const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ url: String(input), init });
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    calls.push({ url, init });
     return Promise.resolve(
       new Response(html, { status: 200, headers: { "content-type": "text/html" } }),
     );
@@ -40,8 +41,12 @@ test("posts the torrent id and parses the details answer", async () => {
   expect(info.seeds).toBe(12);
   expect(calls[0]?.url).toBe(PAGE_URL);
   expect(calls[0]?.init?.method).toBe("POST");
-  expect(String(calls[0]?.init?.body)).toContain("gtid=12345");
-  expect(String(calls[0]?.init?.body)).toContain("torrent_info=Information");
+  const body = calls[0]?.init?.body;
+  if (!(body instanceof URLSearchParams)) {
+    throw new Error("expected a form body");
+  }
+  expect(body.get("gtid")).toBe("12345");
+  expect(body.get("torrent_info")).toBe("Information");
 });
 
 test("rejects an answer without the info block", async () => {

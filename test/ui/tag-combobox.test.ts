@@ -114,7 +114,7 @@ describe("tag combobox", () => {
     open();
 
     for (const option of options()) {
-      const visible = (option.textContent ?? "").trim();
+      const visible = option.textContent.trim();
       const label = option.getAttribute("aria-label") ?? "";
       expect(visible.length).toBeGreaterThan(0);
       expect(label).toContain(visible);
