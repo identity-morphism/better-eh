@@ -43,6 +43,8 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
 - **Reader**: fit-height/zoom/pan or natural-width scrolling, single/spread/continuous layouts,
   right-to-left direction, prefetching, `nl` retry, original-file fallback on deep zoom, keyboard,
   click zones, edge chevrons, swipes, and an optional timed slideshow.
+- **News**: `/news.php` renders the site status, changelog and announcement cards with their dates
+  and forum comment links, replacing the legacy two-column table.
 - **Account pages**: the My Home account overview; favorites folders with search, notes, ordering
   and bulk move/delete; the ranked toplist overview and category pages; the torrent index with
   search, status, only-mine and sortable columns; `/uconfig.php` plus a userscript settings panel,

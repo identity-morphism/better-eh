@@ -11,6 +11,7 @@ export const SITE_PATHS = {
   galleryTorrents: "/gallerytorrents.php",
   archive: "/archiver.php",
   toplist: "/toplist.php",
+  news: "/news.php",
 } as const;
 
 /** The unfiltered front page. */

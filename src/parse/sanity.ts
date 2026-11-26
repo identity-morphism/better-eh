@@ -6,6 +6,7 @@ import type { GalleryTorrentsPage } from "./gallery-torrents";
 import { EMPTY_LIST, EMPTY_TORRENTS } from "./helpers";
 import type { HomePage } from "./home";
 import type { MyTagsPage } from "./my-tags";
+import type { NewsPage } from "./news";
 import type { ToplistPage } from "./toplist";
 import type { TorrentPage } from "./torrents";
 import type { UconfigSection } from "./uconfig";
@@ -42,6 +43,16 @@ export function assertListPage(data: ListPageData, doc: Document): void {
   }
   if (data.items.length === 0 && !EMPTY_LIST.test(data.resultText ?? "")) {
     throw new ParseMismatchError("list", "there are no items and no empty-result notice");
+  }
+}
+
+/** A news page must carry the news table and at least one section or entry. */
+export function assertNewsPage(data: NewsPage, doc: Document): void {
+  if (doc.querySelector("#nt") === null) {
+    throw new ParseMismatchError("news", "the news table is missing");
+  }
+  if (data.status === null && data.changelog === null && data.entries.length === 0) {
+    throw new ParseMismatchError("news", "there are no news sections or entries");
   }
 }
 

@@ -2391,7 +2391,8 @@ ${defaultKeySummary()}`)) {
     torrents: "/torrents.php",
     galleryTorrents: "/gallerytorrents.php",
     archive: "/archiver.php",
-    toplist: "/toplist.php"
+    toplist: "/toplist.php",
+    news: "/news.php"
   };
   var FRONT_PATH = "/";
   var POPULAR_PATH = "/popular";
@@ -4135,6 +4136,92 @@ ${defaultKeySummary()}`)) {
     };
   }
 
+  // src/parse/news.ts
+  var TEXT_NODE = 3;
+  var ELEMENT_NODE = 1;
+  var BLOCK_TAGS = {
+    DIV: true,
+    P: true,
+    LI: true,
+    UL: true,
+    OL: true,
+    TABLE: true,
+    TR: true,
+    TD: true,
+    H1: true,
+    H2: true,
+    H3: true
+  };
+  function collectText(node) {
+    if (node.nodeType === TEXT_NODE) {
+      return (node.textContent ?? "").replace(/\s+/gu, " ");
+    }
+    if (node.nodeType !== ELEMENT_NODE) {
+      return "";
+    }
+    const element = node;
+    if (element.tagName === "BR") {
+      return `
+`;
+    }
+    const text = [...element.childNodes].map(collectText).join("");
+    return BLOCK_TAGS[element.tagName] === true ? `
+${text}
+` : text;
+  }
+  function newsParagraphs(node) {
+    if (node === null) {
+      return [];
+    }
+    return collectText(node).split(`
+`).map(cleanText).filter((line) => line !== "");
+  }
+  function blockFrom(container, base) {
+    if (container === null) {
+      return null;
+    }
+    const titleNode = container.querySelector("h2 a");
+    const body = container.querySelector(".nwi");
+    const title = cleanText(titleNode?.textContent);
+    if (title === "" || body === null) {
+      return null;
+    }
+    return {
+      title,
+      href: anchorHref(titleNode, base),
+      paragraphs: newsParagraphs(body)
+    };
+  }
+  function entryFrom(container, base) {
+    const titleNode = container.querySelector(".newstitle a");
+    const title = cleanText(titleNode?.textContent);
+    if (title === "") {
+      return null;
+    }
+    const comments = container.querySelector(".newslink a");
+    const commentsLabel = cleanText(comments?.textContent);
+    return {
+      title,
+      href: anchorHref(titleNode, base),
+      date: cleanText(container.querySelector(".newsdate")?.textContent),
+      paragraphs: newsParagraphs(container.querySelector(".newstext")),
+      commentsLabel: commentsLabel === "" ? null : commentsLabel,
+      commentsHref: anchorHref(comments ?? null, base)
+    };
+  }
+  function parseNews(doc, url) {
+    const columns = doc.querySelectorAll("#nt td.nd");
+    const side = columns[0] ?? null;
+    const sections = side === null ? [] : [...side.querySelectorAll(".nwo")];
+    const entries = [...doc.querySelectorAll("#nt .newstable")].map((node) => entryFrom(node, url)).filter((entry) => entry !== null);
+    return {
+      url,
+      status: blockFrom(sections[0] ?? null, url),
+      changelog: blockFrom(sections[1] ?? null, url),
+      entries
+    };
+  }
+
   // src/parse/sanity.ts
   function assertViewerPage(data) {
     if (data.imgSrc.trim() === "") {
@@ -4155,6 +4242,14 @@ ${defaultKeySummary()}`)) {
     }
     if (data.items.length === 0 && !EMPTY_LIST.test(data.resultText ?? "")) {
       throw new ParseMismatchError("list", "there are no items and no empty-result notice");
+    }
+  }
+  function assertNewsPage(data, doc) {
+    if (doc.querySelector("#nt") === null) {
+      throw new ParseMismatchError("news", "the news table is missing");
+    }
+    if (data.status === null && data.changelog === null && data.entries.length === 0) {
+      throw new ParseMismatchError("news", "there are no news sections or entries");
     }
   }
   function assertTorrentsPage(data, doc) {
@@ -12051,6 +12146,60 @@ ${defaultKeySummary()}`)) {
     host.append(page);
   }
 
+  // src/views/news.ts
+  var FORUM_LINK = { target: "_blank", rel: "nofollow noopener" };
+  function titleNode(block) {
+    return block.href === null ? el("span", { text: block.title }) : el("a", { ...FORUM_LINK, class: "news-title-link", href: block.href, text: block.title });
+  }
+  function paragraphs(blocks) {
+    return blocks.map((text) => el("p", { class: "news-paragraph", text }));
+  }
+  function sideCard(block) {
+    return el("section", { class: "news-section", "aria-label": block.title }, el("h2", { class: "news-title" }, titleNode(block)), ...paragraphs(block.paragraphs));
+  }
+  function entryCard(entry) {
+    const card = el("article", { class: "news-card", "aria-label": entry.title }, el("h2", { class: "news-title" }, titleNode(entry)));
+    if (entry.date !== "") {
+      card.append(el("p", { class: "news-date", text: entry.date }));
+    }
+    card.append(...paragraphs(entry.paragraphs));
+    if (entry.commentsHref !== null) {
+      card.append(el("a", {
+        ...FORUM_LINK,
+        class: "news-comments",
+        href: entry.commentsHref,
+        text: entry.commentsLabel ?? "Comments"
+      }));
+    }
+    return card;
+  }
+  function renderNews(host, data, ctx) {
+    pageScaffold(host, {
+      title: "News",
+      summary: [
+        el("span", {
+          text: data.entries.length === 0 ? "Site status and changelog" : "Site status and announcements"
+        })
+      ],
+      signal: ctx.signal
+    });
+    const layout = el("div", { class: "news-layout" });
+    const side = el("aside", { class: "news-aside", "aria-label": "Site status and changelog" });
+    if (data.status !== null) {
+      side.append(sideCard(data.status));
+    }
+    if (data.changelog !== null) {
+      side.append(sideCard(data.changelog));
+    }
+    if (side.childElementCount > 0) {
+      layout.append(side);
+    }
+    if (data.entries.length > 0) {
+      layout.append(el("div", { class: "news-list" }, ...data.entries.map(entryCard)));
+    }
+    host.append(layout);
+  }
+
   // src/ui/settings-draft.ts
   function createSettingsDraft({ bindings, onChange }) {
     const baseline = new Map;
@@ -15648,6 +15797,16 @@ ${defaultKeySummary()}`)) {
           sanity: assertToplistPage,
           render: renderToplist,
           title: (data) => data.kind === "category" ? documentTitle(data.title) : documentTitle("Toplists")
+        })
+      },
+      news: {
+        match: (url) => url.pathname === SITE_PATHS.news ? { kind: "news", url: url.href } : null,
+        ...documentView(deps, {
+          tag: "news",
+          parse: parseNews,
+          sanity: assertNewsPage,
+          render: (host, data, ctx) => renderNews(host, data, ctx),
+          title: () => documentTitle("News")
         })
       },
       settings: {
@@ -19866,6 +20025,69 @@ ${defaultKeySummary()}`)) {
     .my-tags-add-fields, .my-tags-tagset-actions {
       align-items: stretch;
     }
+  }
+  .news-layout {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 4);
+    padding-bottom: calc(var(--spacing) * 6);
+  }
+  .news-aside {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,minmax(280px,1fr));
+    align-items: flex-start;
+    gap: calc(var(--spacing) * 4);
+  }
+  .news-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,minmax(300px,1fr));
+    align-items: flex-start;
+    gap: calc(var(--spacing) * 4);
+  }
+  .news-section, .news-card {
+    display: flex;
+    min-width: 0px;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 2);
+    border-radius: var(--radius-card);
+    background-color: var(--color-panel);
+    padding: calc(var(--spacing) * 4);
+    border: 1px solid var(--color-line);
+  }
+  .news-title {
+    margin: 0px;
+    padding-bottom: calc(var(--spacing) * 2);
+    font-size: var(--text-body);
+    color: var(--color-fg);
+    border-bottom: 1px solid var(--color-line);
+    font-weight: 600;
+  }
+  .news-title-link {
+    color: var(--color-fg);
+    text-decoration-line: none;
+  }
+  .news-title-link:hover {
+    text-decoration-line: underline;
+  }
+  .news-date {
+    margin: 0px;
+    font-size: var(--text-meta);
+    color: var(--color-muted);
+  }
+  .news-paragraph {
+    margin: 0px;
+    font-size: var(--text-control);
+    color: var(--color-muted);
+  }
+  .news-comments {
+    margin-top: var(--spacing);
+    align-self: flex-start;
+    font-size: var(--text-control);
+    color: var(--color-accent-text);
+    text-decoration-line: none;
+  }
+  .news-comments:hover {
+    text-decoration-line: underline;
   }
 }
 :root {

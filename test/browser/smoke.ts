@@ -49,6 +49,7 @@ const FIXTURES: Record<string, string> = {
   "/torrents.php": "torrents.html",
   "/home.php": "home.html",
   "/uconfig.php": "uconfig.html",
+  "/news.php": "news.html",
 };
 
 /** The favorite folder names `getFolders` reads from the site's user settings page. */
@@ -332,6 +333,7 @@ async function runFull(browser: Browser): Promise<void> {
     { path: "/torrents.php", selector: ".torrent-row", label: "torrents", count: 3 },
     { path: "/home.php", selector: ".home-section", label: "home" },
     { path: "/uconfig.php", selector: ".settings-section", label: "settings" },
+    { path: "/news.php", selector: ".news-card", label: "news", count: 2 },
     {
       path: "/gallerytorrents.php?gid=987654&t=abcdef1234",
       selector: ".gallery-torrent-card",
@@ -488,7 +490,7 @@ try {
     }
   }
   const views =
-    "list, gallery, reader, favorites, toplist, torrents, home, settings, archive, My Tags";
+    "list, gallery, reader, favorites, toplist, torrents, home, settings, archive, news, My Tags";
   console.log(
     `browser smoke passed (${BROWSER_NAMES.join(",")}): ${views}, cache round trip, mobile, axe`,
   );

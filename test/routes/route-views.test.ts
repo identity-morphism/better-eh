@@ -35,6 +35,7 @@ const favoritesDoc = await loadFixture("favorites.html");
 const toplistDoc = await loadFixture("toplist.html");
 const homeDoc = await loadFixture("home.html");
 const archiveDoc = await loadFixture("archive.html");
+const newsDoc = await loadFixture("news.html");
 
 /** Fixtures keyed by the URL each page route is loaded from. */
 const DOCS: Record<string, Document> = {
@@ -46,6 +47,7 @@ const DOCS: Record<string, Document> = {
   "https://e-hentai.org/toplist.php": toplistDoc,
   [HOME_URL]: homeDoc,
   [ARCHIVE_URL]: archiveDoc,
+  "https://e-hentai.org/news.php": newsDoc,
 };
 
 const galleryRoute = { kind: "gallery", url: GALLERY_URL } satisfies RouteOf<"gallery">;
@@ -587,5 +589,13 @@ describe("account and ranking pages", () => {
     } satisfies RouteOf<"toplist">;
     const toplistData = views.routeView(toplist).parse(toplistDoc, toplist);
     expect(views.routeView(toplist).title(toplistData)).toBe("Toplists - E-Hentai");
+
+    const news = {
+      kind: "news",
+      url: "https://e-hentai.org/news.php",
+    } satisfies RouteOf<"news">;
+    const newsData = views.routeView(news).parse(newsDoc, news);
+    expect(views.routeView(news).title(newsData)).toBe("News - E-Hentai");
+    expect(newsData.entries).toHaveLength(2);
   });
 });

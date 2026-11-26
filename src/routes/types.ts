@@ -4,6 +4,7 @@ import type { FavoritesPage } from "../parse/favorites";
 import type { GalleryTorrentsPage } from "../parse/gallery-torrents";
 import type { HomePage } from "../parse/home";
 import type { MyTagsPage } from "../parse/my-tags";
+import type { NewsPage } from "../parse/news";
 import type { SearchQuery } from "../parse/query";
 import type { ToplistPage } from "../parse/toplist";
 import type { TorrentPage } from "../parse/torrents";
@@ -23,6 +24,7 @@ export type Route =
   | { kind: "torrents"; url: string }
   | { kind: "favorites"; url: string }
   | { kind: "toplist"; url: string }
+  | { kind: "news"; url: string }
   | { kind: "galleryTorrents"; url: string }
   | { kind: "archive"; url: string }
   | { kind: "home"; url: string }
@@ -107,6 +109,7 @@ export interface RouteDataByKind {
   torrents: TorrentPage;
   favorites: FavoritesPage;
   toplist: ToplistPage;
+  news: NewsPage;
   galleryTorrents: GalleryTorrentsPage;
   archive: ArchivePage;
   home: HomePage;

@@ -17,6 +17,7 @@ import { parseGalleryTorrents } from "../parse/gallery-torrents";
 import { parseHome } from "../parse/home";
 import { parseListPage } from "../parse/list";
 import { parseMyTags } from "../parse/my-tags";
+import { parseNews } from "../parse/news";
 import { parseSearchQuery, tagTokenFromHref, uploaderTokenFromHref } from "../parse/query";
 import {
   assertArchivePage,
@@ -26,6 +27,7 @@ import {
   assertHomePage,
   assertListPage,
   assertMyTagsPage,
+  assertNewsPage,
   assertSettingsPage,
   assertToplistPage,
   assertTorrentsPage,
@@ -46,6 +48,7 @@ import { renderGalleryTorrents } from "../views/gallery-torrents";
 import { renderHome } from "../views/home";
 import { listLabels, renderList } from "../views/list";
 import { renderMyTags } from "../views/my-tags";
+import { renderNews } from "../views/news";
 import { renderSettings } from "../views/settings";
 import { renderToplist } from "../views/toplist";
 import { renderTorrents } from "../views/torrents";
@@ -478,6 +481,16 @@ export function createRouteViews(deps: RouteViewDeps): RouteViews {
         render: renderToplist,
         title: (data) =>
           data.kind === "category" ? documentTitle(data.title) : documentTitle("Toplists"),
+      }),
+    },
+    news: {
+      match: (url) => (url.pathname === SITE_PATHS.news ? { kind: "news", url: url.href } : null),
+      ...documentView<"news">(deps, {
+        tag: "news",
+        parse: parseNews,
+        sanity: assertNewsPage,
+        render: (host, data, ctx) => renderNews(host, data, ctx),
+        title: () => documentTitle("News"),
       }),
     },
     settings: {

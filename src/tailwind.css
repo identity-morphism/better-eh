@@ -12,6 +12,7 @@
 @import "./gallery-torrents.css" layer(components);
 @import "./home.css" layer(components);
 @import "./my-tags.css" layer(components);
+@import "./news.css" layer(components);
 
 /* Scanning TS for utility-shaped words emitted 31 utilities of which three are real: the extractor
    matches identifiers, class fragments and CSS property names (`table`, `container`, `blur`, `!table`).
