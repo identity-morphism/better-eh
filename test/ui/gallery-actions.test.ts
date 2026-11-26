@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, test } from "bun:test";
 
 import { cacheUserTags, resetUserTagCache } from "../../src/data/my-tags";
 import type { GalleryData } from "../../src/types";
+import type { ViewContext } from "../../src/views/context";
 import type { GalleryViewDeps } from "../../src/views/gallery";
 import { loadFixture } from "../dom";
 import { deferred, until } from "./async";
+import { viewContext } from "./dom";
 import { GALLERY_URL, mountGallery, renderGalleryAt } from "./gallery-harness";
 
 interface ApiCall {
@@ -35,13 +37,26 @@ describe("gallery parity actions", () => {
     ({ host, data } = await mountGallery({ fixture: "gallery-comments.html" }));
   });
 
-  function render(deps: GalleryViewDeps = {}): void {
-    renderGalleryAt(host, data, undefined, deps);
+  function render(deps: GalleryViewDeps = {}, ctx: ViewContext = viewContext()): void {
+    renderGalleryAt(host, data, ctx, deps);
+  }
+
+  function tracking(): { ctx: ViewContext; count: () => number } {
+    let invalidations = 0;
+    return {
+      ctx: viewContext({
+        invalidate: () => {
+          invalidations += 1;
+        },
+      }),
+      count: () => invalidations,
+    };
   }
 
   test("rating posts stars times two once and then thanks the user", async () => {
     const api = recorder({ rating_avg: 4.61, rating_cnt: 10, rating_usr: 5 });
-    render({ post: api.post });
+    const { ctx, count } = tracking();
+    render({ post: api.post }, ctx);
 
     // The viewer's saved 4.5 stars light nine halves before any vote.
     expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(9);
@@ -68,6 +83,7 @@ describe("gallery parity actions", () => {
     expect(host.querySelector(".rating-label")?.textContent).toBe("Thanks for rating!");
     expect(host.querySelector(".rating-count")?.textContent).toBe("10 votes");
     expect(host.querySelectorAll(".rating-half.is-on")).toHaveLength(10);
+    expect(count()).toBe(1);
   });
 
   test("coarse pointers rate whole stars", async () => {
@@ -124,7 +140,8 @@ describe("gallery parity actions", () => {
 
   test("comment voting posts the comment id and updates the score", async () => {
     const api = recorder({ comment_id: 9001, comment_score: 8, comment_vote: 1 });
-    render({ post: api.post });
+    const { ctx, count } = tracking();
+    render({ post: api.post }, ctx);
 
     const card = host.querySelector<HTMLElement>('[data-comment-id="9001"]');
     card?.querySelector<HTMLButtonElement>(".comment-vote-up")?.click();
@@ -141,6 +158,7 @@ describe("gallery parity actions", () => {
     });
     expect(card?.querySelector(".comment-score")?.textContent).toBe("+8");
     expect(card?.querySelector(".comment-vote-up")?.getAttribute("aria-pressed")).toBe("true");
+    expect(count()).toBe(1);
   });
 
   test("posting a comment renders the page the POST answered with", async () => {
@@ -161,16 +179,20 @@ describe("gallery parity actions", () => {
 
     const submitted: Array<{ url: string; text: string }> = [];
     const loads: string[] = [];
-    render({
-      postComment: (url, text) => {
-        submitted.push({ url, text });
-        return Promise.resolve({ doc: updated, url });
+    const { ctx, count } = tracking();
+    render(
+      {
+        postComment: (url, text) => {
+          submitted.push({ url, text });
+          return Promise.resolve({ doc: updated, url });
+        },
+        loadDocument: (url) => {
+          loads.push(url);
+          return Promise.resolve({ doc: updated, url });
+        },
       },
-      loadDocument: (url) => {
-        loads.push(url);
-        return Promise.resolve({ doc: updated, url });
-      },
-    });
+      ctx,
+    );
 
     const textarea = host.querySelector<HTMLTextAreaElement>("textarea[name='commenttext_new']");
     expect(textarea).not.toBeNull();
@@ -184,6 +206,7 @@ describe("gallery parity actions", () => {
 
     expect(submitted).toEqual([{ url: GALLERY_URL, text: "Nice pacing" }]);
     expect(loads).toEqual([]);
+    expect(count()).toBe(1);
     expect(host.querySelector(".comments-title")?.textContent).toBe("Comments (3)");
     expect([...host.querySelectorAll(".comment-body")].map((node) => node.textContent)).toContain(
       "Fresh from the server",

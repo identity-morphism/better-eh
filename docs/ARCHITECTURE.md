@@ -8,11 +8,12 @@
   host clear, render, title, scroll) with its side effects injected for tests.
 - **`src/router.ts`**: route parsing, owned-route detection, link interception.
 - **`src/routes/`**: `identity` (the path-shape regexes, scope/category tables and native marker)
-  and one exhaustive table of route views (`prepare`, `load`, `parse`, `render`, `title`, `feed`).
-  A row prepares its own address (remembered list filters, the date-cursor redirect, per-route
-  history markers) and supplies the append feed with its paging policy (the list's client-side date
-  range), so the shell crosses one seam and never names a kind. Document-backed kinds are rows of
-  data behind the shared `documentView` builder; `load` and `parse` share one parse function.
+  and one exhaustive table of route views (`prepare`, `load`, `parse`, `render`, `title`,
+  `invalidate`, `feed`). A row prepares its own address (remembered list filters, the date-cursor
+  redirect, per-route history markers) and supplies the append feed with its paging policy (the
+  list's client-side date range), so the shell crosses one seam and never names a kind.
+  Document-backed kinds are rows of data behind the shared `documentView` builder; `load` and
+  `parse` share one parse function, and `invalidate` drops a cached page after a view mutates it.
 - **`src/net/queue.ts`**: priority request scheduler with concurrency/interval limits.
 - **`src/net/http.ts`**: response classification (HTML bodies, rate-limit notices, login wall) and
   the shared POST helpers (`postForm`, `postJson`) every site mutation goes through.
@@ -70,7 +71,8 @@
 - **`src/ui/`**: DOM helpers (`el`, the non-submitting `buttonEl`, inputs, icons), top bar and site
   tabs, popover primitive (every panel, including the
   tag combobox), login gate, active filter chips, quick-tag buttons and editor, parsed title
-  renderer, favorite popover, gallery tag row/rating/comments/tag menu, the pending-action protocol
+  renderer, favorite popover and favorite state (one gallery's truth across cached views), gallery
+  tag row/rating/comments/tag menu, the pending-action protocol
   every mutation control uses, banner/toast, the result-card
   assembly, label/value fact rows, form-control state helpers, live-region helpers, shared pager
   (prev/next or numbered, plus the numbered-strip builder), paged-region (pager ⇄ infinite sentinel and

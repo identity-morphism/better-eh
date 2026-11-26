@@ -23,6 +23,8 @@ export interface CommentSectionDeps extends CommentTransports {
    * returned no usable document.
    */
   refresh: (page?: HtmlResponse) => Promise<void>;
+  /** Called after the server accepts a vote, post or edit, so the cached gallery can be refreshed. */
+  changed?: () => void;
 }
 
 /** Inputs for {@link commentsSection}. */
@@ -108,6 +110,7 @@ function commentCard(
         score.textContent = scoreText(result.score);
         up.setAttribute("aria-pressed", result.vote > 0 ? "true" : "false");
         down.setAttribute("aria-pressed", result.vote < 0 ? "true" : "false");
+        deps.changed?.();
       },
       failure: "Something went wrong.",
       failed: (message) => {
@@ -199,6 +202,7 @@ function commentCard(
                 editing = false;
                 bodyHost.replaceChildren(body);
                 showToast("Comment updated");
+                deps.changed?.();
                 try {
                   await deps.refresh(page);
                 } catch (error) {
@@ -323,6 +327,7 @@ export function commentsSection(options: CommentSectionOptions): HTMLElement {
             return;
           }
           textarea.value = "";
+          deps.changed?.();
           await refresh(page);
         },
         signal,

@@ -1,7 +1,9 @@
+import { beforeEach } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { StorageAdapter } from "../src/store";
+import { resetFavoriteMarks } from "../src/ui/favorite-state";
 
 /**
  * `src/ui/styles.ts` imports Tailwind's generated sheet with a text import, and the app shell pulls
@@ -13,6 +15,8 @@ if (!existsSync(generatedSheet)) {
   mkdirSync(dirname(generatedSheet.pathname), { recursive: true });
   writeFileSync(generatedSheet, "");
 }
+
+beforeEach(resetFavoriteMarks);
 
 const storage = new Map<string, unknown>();
 

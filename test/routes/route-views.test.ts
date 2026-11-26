@@ -214,6 +214,42 @@ describe("route data cache", () => {
 
     expect(docCalls).toHaveLength(2);
   });
+
+  test("refetches an invalidated page once, then caches it again", async () => {
+    const { views, docCalls } = harness();
+    const view = views.routeView(homeRoute);
+    const signal = new AbortController().signal;
+    await view.load(homeRoute, signal);
+
+    const seeded = view.parse(homeDoc, homeRoute);
+    view.seed?.(homeRoute, seeded);
+    view.invalidate?.(homeRoute);
+
+    const refetched = await view.load(homeRoute, signal);
+    expect(refetched).not.toBe(seeded);
+    expect(docCalls).toHaveLength(2);
+    expect(docCalls[1]?.options.fresh).toBe(true);
+
+    await view.load(homeRoute, signal);
+    expect(docCalls).toHaveLength(2);
+  });
+
+  test("an invalidated always-fresh page keeps its policy", async () => {
+    const route = {
+      kind: "settings",
+      url: "https://e-hentai.org/uconfig.php",
+    } satisfies RouteOf<"settings">;
+    const { views, docCalls } = harness();
+    const view = views.routeView(route);
+    const signal = new AbortController().signal;
+
+    await view.load(route, signal);
+    view.invalidate?.(route);
+    await view.load(route, signal);
+
+    expect(docCalls).toHaveLength(2);
+    expect(docCalls.every((call) => call.options.fresh === true)).toBe(true);
+  });
 });
 
 describe("settings route", () => {

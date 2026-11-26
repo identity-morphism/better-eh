@@ -357,6 +357,9 @@ export function createAppShell(env: ShellEnvironment): AppShell {
       reload: () => {
         void transition(route, viewWindow.scrollY, { fresh: true });
       },
+      invalidate: () => {
+        routeView(route).invalidate?.(route);
+      },
       setLeaveGuard: (guard) => {
         lifecycle.setLeaveGuard(guard);
       },

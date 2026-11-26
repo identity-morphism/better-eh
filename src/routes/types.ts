@@ -73,6 +73,11 @@ export interface RouteView<D, R extends Route = Route> {
    */
   seed?(route: R, data: D): void;
   /**
+   * Drop the cached parse for this route so the next visit fetches it again. A mutation changes
+   * server state that the cached page still shows; a view calls this through the shell context.
+   */
+  invalidate?(route: R): void;
+  /**
    * The append feed for this route, after the row's own paging policy (e.g. a client-side date
    * range). Absent on routes that do not paginate.
    */

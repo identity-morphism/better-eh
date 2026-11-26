@@ -44,6 +44,7 @@ export function viewContext(overrides: Partial<ViewContext> = {}): ViewContext {
     signal: new AbortController().signal,
     navigate: () => undefined,
     reload: () => undefined,
+    invalidate: () => undefined,
     setLeaveGuard: () => undefined,
     ...overrides,
   };

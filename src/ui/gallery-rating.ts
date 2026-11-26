@@ -13,6 +13,8 @@ interface RatingControlOptions {
   rating: GalleryRating;
   post?: GalleryPost;
   signal: AbortSignal;
+  /** Called after the server accepts a rating, so the cached gallery can be refreshed. */
+  onRated?: () => void;
 }
 
 /** Milliseconds the confirmation stays up before the average returns. */
@@ -121,6 +123,7 @@ export function ratingControl(options: RatingControlOptions): HTMLElement {
           count.textContent = countText(result.votes, "vote");
         }
         setValue(result.user ?? starCount);
+        options.onRated?.();
         destroy();
         resetTimer = window.setTimeout(() => {
           label.textContent = averageLabel({

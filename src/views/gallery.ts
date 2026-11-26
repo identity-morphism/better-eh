@@ -253,6 +253,8 @@ export function renderGallery(
   // The header button and the favorite count both read this one state, so a change made from
   // either surface keeps them in step without re-reading the page.
   const favoriteState = createFavoriteState(data, data.favorite, isLoggedIn());
+  const stopFavoriteInvalidation = favoriteState.subscribe(() => ctx.invalidate());
+  ctx.signal.addEventListener("abort", stopFavoriteInvalidation, { once: true });
   const favorite = favoriteButton(favoriteState, ctx.signal);
   const config = writableConfig(data);
   const siteItems = siteActionItems(data);
@@ -342,7 +344,13 @@ export function renderGallery(
   const rating =
     config === null
       ? null
-      : ratingControl({ config, rating: data.ratingInfo, post: deps.post, signal: ctx.signal });
+      : ratingControl({
+          config,
+          rating: data.ratingInfo,
+          post: deps.post,
+          signal: ctx.signal,
+          onRated: () => ctx.invalidate(),
+        });
 
   // Right-clicking the title opens the same menu as the rail's native escape hatch. The title is
   // programmatically focusable so closing the menu can return focus to it.
@@ -410,6 +418,7 @@ export function renderGallery(
     post: deps.post,
     postComment: deps.postComment,
     editComment: deps.editComment,
+    changed: () => ctx.invalidate(),
     refresh: async (page) => {
       if (page !== undefined) {
         replaceComments(parseGalleryPage(page.doc, page.url));

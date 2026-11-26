@@ -8338,8 +8338,30 @@ ${defaultKeySummary()}`)) {
   }
 
   // src/ui/favorite-state.ts
+  var completed = new Map;
+  var COMPLETED_LIMIT = 200;
+  function remember(gid, snapshot) {
+    completed.delete(gid);
+    completed.set(gid, { ...snapshot });
+    if (completed.size > COMPLETED_LIMIT) {
+      const oldest = completed.keys().next().value;
+      if (oldest !== undefined) {
+        completed.delete(oldest);
+      }
+    }
+  }
   function createFavoriteState(gallery, mark, known = mark !== null) {
-    let snapshot = !known ? { favorited: null, folder: null, slot: null } : mark === null ? { favorited: false, folder: null, slot: null } : { favorited: true, folder: mark.folder, slot: mark.slot };
+    const remembered = completed.get(gallery.gid);
+    let snapshot;
+    if (remembered !== undefined) {
+      snapshot = remembered;
+    } else if (!known) {
+      snapshot = { favorited: null, folder: null, slot: null };
+    } else if (mark === null) {
+      snapshot = { favorited: false, folder: null, slot: null };
+    } else {
+      snapshot = { favorited: true, folder: mark.folder, slot: mark.slot };
+    }
     const listeners = new Set;
     return {
       gid: gallery.gid,
@@ -8347,6 +8369,7 @@ ${defaultKeySummary()}`)) {
       get: () => snapshot,
       set(favorited, folder) {
         snapshot = favorited ? { favorited: true, folder: folder?.name ?? "", slot: folder?.slot ?? null } : { favorited: false, folder: null, slot: null };
+        remember(gallery.gid, snapshot);
         for (const listener of listeners) {
           listener(snapshot);
         }
@@ -9299,6 +9322,7 @@ ${defaultKeySummary()}`)) {
           score.textContent = scoreText(result.score);
           up.setAttribute("aria-pressed", result.vote > 0 ? "true" : "false");
           down.setAttribute("aria-pressed", result.vote < 0 ? "true" : "false");
+          deps.changed?.();
         },
         failure: "Something went wrong.",
         failed: (message) => {
@@ -9369,6 +9393,7 @@ ${defaultKeySummary()}`)) {
               editing = false;
               bodyHost.replaceChildren(body);
               showToast("Comment updated");
+              deps.changed?.();
               try {
                 await deps.refresh(page);
               } catch (error) {
@@ -9464,6 +9489,7 @@ ${defaultKeySummary()}`)) {
             return;
           }
           textarea.value = "";
+          deps.changed?.();
           await refresh(page);
         },
         signal,
@@ -9564,6 +9590,7 @@ ${defaultKeySummary()}`)) {
             count.textContent = countText(result.votes, "vote");
           }
           setValue(result.user ?? starCount);
+          options.onRated?.();
           destroy();
           resetTimer = window.setTimeout(() => {
             label.textContent = averageLabel({
@@ -10475,6 +10502,8 @@ ${defaultKeySummary()}`)) {
     });
     ctx.signal.addEventListener("abort", unsubscribe, { once: true });
     const favoriteState = createFavoriteState(data, data.favorite, isLoggedIn());
+    const stopFavoriteInvalidation = favoriteState.subscribe(() => ctx.invalidate());
+    ctx.signal.addEventListener("abort", stopFavoriteInvalidation, { once: true });
     const favorite = favoriteButton(favoriteState, ctx.signal);
     const config = writableConfig(data);
     const siteItems = siteActionItems(data);
@@ -10537,7 +10566,13 @@ ${defaultKeySummary()}`)) {
     if (data.visible !== null && data.visible !== "Yes") {
       meta.append(el("span", { class: "meta-dot", text: `Visible: ${data.visible}` }));
     }
-    const rating = config === null ? null : ratingControl({ config, rating: data.ratingInfo, post: deps.post, signal: ctx.signal });
+    const rating = config === null ? null : ratingControl({
+      config,
+      rating: data.ratingInfo,
+      post: deps.post,
+      signal: ctx.signal,
+      onRated: () => ctx.invalidate()
+    });
     const title = el("h1", { class: "gallery-title", tabindex: "-1" }, titleNodes(data.title));
     if (data.alternateTitle !== null) {
       title.querySelector(".title-primary")?.append(el("span", { class: "title-alt", text: ` · ${data.alternateTitle}` }));
@@ -10577,6 +10612,7 @@ ${defaultKeySummary()}`)) {
       post: deps.post,
       postComment: deps.postComment,
       editComment: deps.editComment,
+      changed: () => ctx.invalidate(),
       refresh: async (page) => {
         if (page !== undefined) {
           replaceComments(parseGalleryPage(page.doc, page.url));
@@ -15037,11 +15073,13 @@ ${defaultKeySummary()}`)) {
   var ROUTE_DATA_CACHE_LIMIT = 8;
   function documentView(deps, spec) {
     const cached = new Map;
+    const stale = new Set;
     const cacheable = spec.fresh !== true;
     const remember = (route, data) => {
       if (!cacheable) {
         return;
       }
+      stale.delete(route.url);
       cached.delete(route.url);
       cached.set(route.url, data);
       if (cached.size > ROUTE_DATA_CACHE_LIMIT) {
@@ -15071,13 +15109,14 @@ ${defaultKeySummary()}`)) {
     return {
       prepare: (route) => ({ route, bootUrl: null, state: {} }),
       load: async (route, signal, options) => {
-        if (options?.fresh !== true) {
+        const force = options?.fresh === true || stale.has(route.url);
+        if (!force) {
           const hit = cached.get(route.url);
           if (hit !== undefined) {
             return hit;
           }
         }
-        const { doc, url } = await fetchDocument(spec.request?.(route) ?? route.url, signal, priorityOf("navigation"), options);
+        const { doc, url } = await fetchDocument(spec.request?.(route) ?? route.url, signal, priorityOf("navigation"), force ? { fresh: true } : options);
         const data = spec.parse(doc, url, route);
         spec.sanity?.(data, doc);
         remember(route, data);
@@ -15085,6 +15124,20 @@ ${defaultKeySummary()}`)) {
       },
       seed: (route, data) => {
         remember(route, data);
+      },
+      invalidate: (route) => {
+        if (!cacheable) {
+          return;
+        }
+        cached.delete(route.url);
+        stale.delete(route.url);
+        stale.add(route.url);
+        if (stale.size > ROUTE_DATA_CACHE_LIMIT) {
+          const oldest = stale.values().next().value;
+          if (oldest !== undefined) {
+            stale.delete(oldest);
+          }
+        }
       },
       parse: (doc, route) => {
         const data = spec.parse(doc, route.url, route);
@@ -20596,6 +20649,9 @@ body.fit-h.reader-continuous #reader {
         navigate,
         reload: () => {
           transition(route, viewWindow.scrollY, { fresh: true });
+        },
+        invalidate: () => {
+          routeView(route).invalidate?.(route);
         },
         setLeaveGuard: (guard) => {
           lifecycle.setLeaveGuard(guard);

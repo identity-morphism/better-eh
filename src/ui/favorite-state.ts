@@ -2,9 +2,11 @@
  * One gallery's favorite truth.
  *
  * A result card and the gallery header each paint the same gallery, so they read and write one
- * state instead of keeping copies of the parsed mark. Unknown (signed out, or a page without the
- * mark) is distinct from known-unfavorited: the menu's wording and the remove action depend on that
- * difference.
+ * state instead of keeping copies of the parsed mark. A completed change outlives the view that
+ * made it: the route cache can still hold the pre-mutation page, so the next state for that gallery
+ * starts from the change rather than from the stale parse. Unknown (signed out, or a page without
+ * the mark) is distinct from known-unfavorited: the menu's wording and the remove action depend on
+ * that difference.
  */
 
 import type { FavoriteFolder } from "../data/favorites";
@@ -30,6 +32,26 @@ export interface FavoriteState {
   subscribe(listener: (snapshot: FavoriteSnapshot) => void): () => void;
 }
 
+/** Recent completed changes, keyed by gallery id, so a cached page cannot undo them. */
+const completed = new Map<string, FavoriteSnapshot>();
+const COMPLETED_LIMIT = 200;
+
+function remember(gid: string, snapshot: FavoriteSnapshot): void {
+  completed.delete(gid);
+  completed.set(gid, { ...snapshot });
+  if (completed.size > COMPLETED_LIMIT) {
+    const oldest = completed.keys().next().value;
+    if (oldest !== undefined) {
+      completed.delete(oldest);
+    }
+  }
+}
+
+/** Forget completed changes; tests isolate one gallery session from the next. */
+export function resetFavoriteMarks(): void {
+  completed.clear();
+}
+
 /**
  * Create one gallery's state from its parsed mark.
  *
@@ -42,11 +64,17 @@ export function createFavoriteState(
   mark: FavoriteMark | null,
   known = mark !== null,
 ): FavoriteState {
-  let snapshot: FavoriteSnapshot = !known
-    ? { favorited: null, folder: null, slot: null }
-    : mark === null
-      ? { favorited: false, folder: null, slot: null }
-      : { favorited: true, folder: mark.folder, slot: mark.slot };
+  const remembered = completed.get(gallery.gid);
+  let snapshot: FavoriteSnapshot;
+  if (remembered !== undefined) {
+    snapshot = remembered;
+  } else if (!known) {
+    snapshot = { favorited: null, folder: null, slot: null };
+  } else if (mark === null) {
+    snapshot = { favorited: false, folder: null, slot: null };
+  } else {
+    snapshot = { favorited: true, folder: mark.folder, slot: mark.slot };
+  }
   const listeners = new Set<(snapshot: FavoriteSnapshot) => void>();
 
   return {
@@ -57,6 +85,7 @@ export function createFavoriteState(
       snapshot = favorited
         ? { favorited: true, folder: folder?.name ?? "", slot: folder?.slot ?? null }
         : { favorited: false, folder: null, slot: null };
+      remember(gallery.gid, snapshot);
       for (const listener of listeners) {
         listener(snapshot);
       }

@@ -130,11 +130,17 @@ function documentView<K extends OwnedKind, I = unknown>(
   // session's visits from retaining every parsed document; `fresh` (and an always-fresh spec, such
   // as settings or the archive chooser) still goes to the network.
   const cached = new Map<string, RouteDataByKind[K]>();
+  /**
+   * Pages a view mutated after they were parsed. The next load must bypass both this cache and the
+   * loader's document cache, or the pre-mutation page comes back.
+   */
+  const stale = new Set<string>();
   const cacheable = spec.fresh !== true;
   const remember = (route: RouteOf<K>, data: RouteDataByKind[K]): void => {
     if (!cacheable) {
       return;
     }
+    stale.delete(route.url);
     // Refresh the insertion order so the cap evicts the least recently used page.
     cached.delete(route.url);
     cached.set(route.url, data);
@@ -178,7 +184,8 @@ function documentView<K extends OwnedKind, I = unknown>(
   return {
     prepare: (route) => ({ route, bootUrl: null, state: {} }),
     load: async (route, signal, options) => {
-      if (options?.fresh !== true) {
+      const force = options?.fresh === true || stale.has(route.url);
+      if (!force) {
         const hit = cached.get(route.url);
         if (hit !== undefined) {
           return hit;
@@ -188,7 +195,7 @@ function documentView<K extends OwnedKind, I = unknown>(
         spec.request?.(route) ?? route.url,
         signal,
         priorityOf("navigation"),
-        options,
+        force ? { fresh: true } : options,
       );
       const data = spec.parse(doc, url, route);
       spec.sanity?.(data, doc);
@@ -197,6 +204,20 @@ function documentView<K extends OwnedKind, I = unknown>(
     },
     seed: (route, data) => {
       remember(route, data);
+    },
+    invalidate: (route) => {
+      if (!cacheable) {
+        return;
+      }
+      cached.delete(route.url);
+      stale.delete(route.url);
+      stale.add(route.url);
+      if (stale.size > ROUTE_DATA_CACHE_LIMIT) {
+        const oldest = stale.values().next().value;
+        if (oldest !== undefined) {
+          stale.delete(oldest);
+        }
+      }
     },
     parse: (doc, route) => {
       const data = spec.parse(doc, route.url, route);
