@@ -33,6 +33,7 @@ jobs:
       - name: Tests with the src/ coverage floor
         run: bun run test:coverage
       - run: bun run build
+      - run: bun run check:header
       - run: bun run check:size
       - run: git diff --exit-code dist/
       - name: Pull requests leave the release version alone

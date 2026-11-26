@@ -37,7 +37,7 @@ bun run test:coverage # the same suite plus the src/ line-coverage floor
 bun run test:browser  # built userscript in Chromium, then axe; needs playwright chromium
 ```
 
-`bun run test:browser` reads `dist/`, so build first (`bun run build`).
+`bun run test:browser` and `bun run check:header` read `dist/`, so build first (`bun run build`).
 
 ## Pull requests
 

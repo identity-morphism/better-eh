@@ -13,6 +13,7 @@
     "publish:tag-index": "bun run scripts/publish-data.ts --branch automation/tag-vocabulary --message \"chore: update tag vocabulary data\"",
     "check:generated": "bun run scripts/update-core-vocabulary.ts --check",
     "check:size": "bun run scripts/check-bundle-size.ts",
+    "check:header": "bun run scripts/check-bundle-header.ts",
     "check:release-tag": "bun run scripts/check-release-tag.ts",
     "release": "bun run scripts/release.ts",
     "verify:release": "bun run scripts/verify-release.ts",

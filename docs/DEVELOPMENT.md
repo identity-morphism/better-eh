@@ -24,6 +24,7 @@ bun run check            # format check + lint + type check
 bun run test             # fixtures across parse, fetch, routes, viewer and ui; one global per file
 bun run test:coverage    # the same suite, then the src/ line-coverage floor CI enforces
 bun run test:browser     # built userscript smoke gate (Playwright, local fixtures, axe)
+bun run check:header     # built bundle metadata: matches, grants, update URLs, version
 bun run typecheck        # built-in type checker through the pinned Bun
 bun run lint             # bun lint through scripts/lint.ts
 bun run lint:fix         # bun lint --fix
@@ -71,7 +72,9 @@ specificity; the fixture and smoke pages carry no site CSS, so no gate observes 
 **Release size budget**: the built bundle must stay at or under 700 KiB raw and 170 KiB gzipped,
 the size a userscript manager downloads. `bun run check:size` enforces both and prints the measured
 sizes against each limit; CI runs it after `bun run build`, so a bundle that outgrows either
-ceiling fails the pull request. The core vocabulary (`src/tags/core-vocabulary.ts`) is the only
+ceiling fails the pull request. `bun run check:header` checks the same built file's metadata: both
+matches, the four grants, `@noframes`, `@run-at document-start`, the update URLs, and `@version`
+against `package.json`. The core vocabulary (`src/tags/core-vocabulary.ts`) is the only
 generated source in `src/`; `bun run check:generated` verifies it against the checked-in assets,
 and `bun run scripts/update-core-vocabulary.ts` regenerates it.
 
