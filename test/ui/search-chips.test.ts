@@ -1,12 +1,26 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
 import { closePopovers } from "../../src/ui/popover";
-import { createSearchChips, renderSearchChips } from "../../src/ui/search-chips";
+import { createSearchChips } from "../../src/ui/search-chips";
 import { installDom } from "./dom";
 
 beforeEach(() => {
   installDom();
 });
+
+/** One-shot row used by the view tests; production always keeps the handle. */
+function renderSearchChips(
+  text: string,
+  onSearch: Parameters<typeof createSearchChips>[0],
+  signal?: AbortSignal,
+): HTMLElement | null {
+  const chips = createSearchChips(onSearch, signal);
+  if (chips.update(text)) {
+    return chips.element;
+  }
+  chips.destroy();
+  return null;
+}
 
 function toggles(row: HTMLElement): HTMLButtonElement[] {
   return [...row.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')];

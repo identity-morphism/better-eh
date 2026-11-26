@@ -286,17 +286,3 @@ export function createSearchChips(onSearch: ChipHandler, signal?: AbortSignal): 
     },
   };
 }
-
-/** Render one chip row for a one-shot caller, or `null` when the query is empty. */
-export function renderSearchChips(
-  text: string,
-  onSearch: ChipHandler,
-  signal?: AbortSignal,
-): HTMLElement | null {
-  const chips = createSearchChips(onSearch, signal);
-  if (chips.update(text)) {
-    return chips.element;
-  }
-  chips.destroy();
-  return null;
-}
