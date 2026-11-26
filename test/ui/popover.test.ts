@@ -18,20 +18,55 @@ function anchorWith(document: Document, haspopup: boolean): HTMLElement {
   return anchor;
 }
 
-function press(node: EventTarget, type: string, key?: string): void {
+function press(
+  node: EventTarget,
+  type: string,
+  key?: string,
+  init: { shiftKey?: boolean } = {},
+): void {
   // `installDom` installs linkedom's constructors as globals, so this builds a linkedom event.
   const event = new Event(type, { bubbles: true, cancelable: true });
   if (key !== undefined) {
     Object.defineProperty(event, "key", { value: key });
   }
+  Object.assign(event, init);
   node.dispatchEvent(event);
+}
+
+function focusableContent(doc: Document, labels: readonly string[]): HTMLElement {
+  const node = doc.createElement("div");
+  for (const label of labels) {
+    const button = doc.createElement("button");
+    button.textContent = label;
+    // Linkedom leaves `tabIndex` at -1; the popover's focusable filter requires 0+.
+    button.setAttribute("tabindex", "0");
+    Object.defineProperty(button, "tabIndex", { configurable: true, value: 0 });
+    node.append(button);
+  }
+  return node;
 }
 
 let document: Document;
 
+/** Linkedom does not track focus; the popover reads `document.activeElement` for its trap. */
+function trackFocus(doc: Document): void {
+  let active: Element | null = null;
+  Object.defineProperty(doc, "activeElement", {
+    configurable: true,
+    get: () => active,
+  });
+  const proto = Object.getPrototypeOf(doc.createElement("button")) as {
+    focus?: () => void;
+  };
+  proto.focus = function focus(this: Element): void {
+    active = this;
+  };
+}
+
 beforeEach(() => {
   closePopovers();
   document = installDom();
+  trackFocus(document);
 });
 
 describe("openPopover", () => {
@@ -148,6 +183,63 @@ describe("openPopover", () => {
       globalThis.requestAnimationFrame = originalFrame;
       globalThis.cancelAnimationFrame = originalCancel;
     }
+  });
+
+  test("moves through a menu with arrows, Home and End, then closes on Tab", () => {
+    const popover = openPopover({
+      content: focusableContent(document, ["One", "Two", "Three"]),
+      anchor: anchorWith(document, true),
+      role: "menu",
+    });
+    const items = [...popover.element.querySelectorAll("button")];
+
+    press(popover.element, "keydown", "ArrowDown");
+    expect(document.activeElement).toBe(items[0]);
+    press(popover.element, "keydown", "ArrowDown");
+    expect(document.activeElement).toBe(items[1]);
+    press(popover.element, "keydown", "ArrowUp");
+    expect(document.activeElement).toBe(items[0]);
+    press(popover.element, "keydown", "End");
+    expect(document.activeElement).toBe(items[2]);
+    press(popover.element, "keydown", "Home");
+    expect(document.activeElement).toBe(items[0]);
+
+    press(popover.element, "keydown", "Tab");
+    expect(popover.isOpen()).toBe(false);
+  });
+
+  test("keeps Tab inside an auto-focused dialog and wraps at both edges", () => {
+    const popover = openPopover({
+      content: focusableContent(document, ["First", "Last"]),
+      anchor: anchorWith(document, true),
+      autoFocus: true,
+    });
+    const items = [...popover.element.querySelectorAll("button")];
+    expect(document.activeElement).toBe(items[0]);
+
+    items[1]?.focus();
+    press(popover.element, "keydown", "Tab");
+    expect(document.activeElement).toBe(items[0]);
+
+    press(popover.element, "keydown", "Tab", { shiftKey: true });
+    expect(document.activeElement).toBe(items[1]);
+  });
+
+  test("closes when focus leaves the panel", () => {
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    const popover = openPopover({
+      content: focusableContent(document, ["Inside"]),
+      anchor: anchorWith(document, true),
+      autoFocus: true,
+    });
+    popover.element.querySelector("button")?.focus();
+
+    const event = new Event("focusout", { bubbles: true });
+    Object.defineProperty(event, "relatedTarget", { value: outside });
+    popover.element.dispatchEvent(event);
+
+    expect(popover.isOpen()).toBe(false);
   });
 
   test("an aborted view signal closes the panel", () => {

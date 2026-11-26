@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 const COVERAGE_DIR = join(ROOT, ".cache", "coverage");
-const FLOOR = 0.87;
+const FLOOR = 0.9;
 
 interface Totals {
   found: number;

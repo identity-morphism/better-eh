@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, test } from "bun:test";
 
 import { createAppShell, isFragmentOnlyChange } from "../../src/app-shell";
 import type { ShellEnvironment } from "../../src/app-shell";
+import {
+  HttpError,
+  LoginRequiredError,
+  RateLimitedError,
+  RequestPurgedError,
+} from "../../src/fetch/errors";
 import type { DocumentOptions, HtmlResponse, ViewerPageOptions } from "../../src/fetch/loader";
 import type { Route } from "../../src/router";
 import { nativeUrl, parseRoute } from "../../src/router";
@@ -334,6 +340,79 @@ describe("boot shell", () => {
     } finally {
       console.error = originalError;
     }
+  });
+
+  const errorCases = [
+    {
+      name: "rate limit",
+      error: (): Error => new RateLimitedError("Too many requests"),
+      title: "Rate limited",
+      text: "throttling requests",
+    },
+    {
+      name: "purged queue",
+      error: (): Error => new RequestPurgedError(),
+      title: "Requests paused",
+      text: "not loaded",
+    },
+    {
+      name: "404",
+      error: (): Error => new HttpError(404, GALLERY_URL),
+      title: "Page not found",
+      text: "does not serve",
+    },
+    {
+      name: "other HTTP",
+      error: (): Error => new HttpError(500, GALLERY_URL),
+      title: "Something went wrong",
+      text: "HTTP 500",
+    },
+  ] as const;
+
+  for (const scenario of errorCases) {
+    test(`maps a ${scenario.name} failure to its own panel`, async () => {
+      const harness = construct();
+      const { document, host } = harness;
+      harness.setRespond(() => Promise.reject(scenario.error()));
+      const originalError = console.error;
+      console.error = () => undefined;
+      try {
+        click(absoluteAnchor(harness, "a.card-cover"));
+        const panel = await waitForNode(document, harness.view, () =>
+          host.querySelector(".error-view"),
+        );
+        expect(requireNode(panel, ".state-title").textContent).toBe(scenario.title);
+        expect(requireNode(panel, ".state-text").textContent).toContain(scenario.text);
+        if (scenario.name === "rate limit") {
+          expect(document.querySelector(".eh-banner-text")?.textContent).toContain(
+            "Too many requests",
+          );
+        }
+      } finally {
+        console.error = originalError;
+      }
+    });
+  }
+
+  test("maps a login wall to the sign-in gate", async () => {
+    const harness = construct();
+    const { document, host } = harness;
+    harness.setRespond(() => Promise.reject(new LoginRequiredError()));
+    const originalError = console.error;
+    console.error = () => undefined;
+    let panel: Element;
+    try {
+      click(absoluteAnchor(harness, "a.card-cover"));
+      panel = await waitForNode(document, harness.view, () => host.querySelector(".empty-state"));
+    } finally {
+      console.error = originalError;
+    }
+    expect(requireNode(panel, ".state-title").textContent).toBe("Sign in required");
+    const signIn = requireNode<HTMLAnchorElement>(panel, "a.btn-primary");
+    expect(signIn.textContent).toBe("Sign in");
+    expect(signIn.getAttribute("href")).toBe(
+      "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
+    );
   });
 
   test("back and forward move through the injected history", async () => {
