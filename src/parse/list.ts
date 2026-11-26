@@ -271,7 +271,10 @@ export function parseListPage(doc: Document, url: string): ListPageData {
   const items: ListItem[] = [];
   const seen = new Set<string>();
 
-  for (const row of doc.querySelectorAll<HTMLTableRowElement>("table.itg > tbody > tr")) {
+  // A browser inserts the tbody; linkedom (the live canary) keeps the source's bare rows.
+  for (const row of doc.querySelectorAll<HTMLTableRowElement>(
+    "table.itg > tbody > tr, table.itg > tr",
+  )) {
     const item = parseItem(row, url, TABLE_ROW);
     if (item && !seen.has(item.gid)) {
       seen.add(item.gid);

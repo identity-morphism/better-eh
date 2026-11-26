@@ -75,6 +75,31 @@ describe("parseListPage", () => {
   });
 });
 
+describe("parseListPage without a tbody", () => {
+  test("parses table rows the DOM did not wrap in a tbody", () => {
+    const page = parseListPage(
+      parseDocument(`
+        <table class="itg">
+          <tr>
+            <td class="gl1c glcat"><div class="cn ct1">Misc</div></td>
+            <td class="gl2c">
+              <div class="glthumb"><img src="https://img.example/cover.jpg" style="width:250px;height:300px"></div>
+              <div id="postedpop_7">2026-01-01 12:00</div>
+            </td>
+            <td class="gl3c glname"><a href="/g/7/abc/"><div class="glink">[Artist] A Title</div></a></td>
+            <td class="gl4c"><a href="/uploader/u">u</a><div>10 pages</div></td>
+          </tr>
+        </table>`),
+      "https://e-hentai.org/",
+    );
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.gid).toBe("7");
+    expect(page.items[0]?.title.primary).toBe("A Title");
+    expect(page.items[0]?.pages).toBe(10);
+  });
+});
+
 describe("parseListPage page counts", () => {
   /** One table row around a category/title cell and an arbitrary pages cell. */
   function row(pagesCell: string): Document {

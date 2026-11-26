@@ -13,6 +13,24 @@ const GALLERY_URL = "https://e-hentai.org/g/123456/abcdef1234/";
 const doc = await loadFixture("gallery.html");
 const data = parseGalleryPage(doc, GALLERY_URL);
 
+describe("parseGalleryPage thumbnails", () => {
+  test("reads a sprite from the background shorthand without a CSSOM value", () => {
+    const parsed = parseDocument(`
+      <h1 id="gn">A Gallery</h1>
+      <div id="gdt">
+        <a href="/s/abc/123456-1">
+          <div title="Page 1" style="width:200px;height:300px;background:transparent url(https://img.example/sprite.webp) -200px 0 no-repeat"></div>
+        </a>
+      </div>`);
+
+    const page = parseGalleryPage(parsed, GALLERY_URL);
+
+    expect(page.thumbs).toHaveLength(1);
+    expect(page.thumbs[0]?.sprite).toBe("https://img.example/sprite.webp");
+    expect(page.firstPageHref).toBe("https://e-hentai.org/s/abc/123456-1");
+  });
+});
+
 describe("parseGalleryPage actions", () => {
   test("a rename link only follows base_url while it stays on the site", async () => {
     const renameHref = async (base: string): Promise<string | null> => {

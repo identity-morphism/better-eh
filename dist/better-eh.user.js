@@ -2393,7 +2393,7 @@ ${defaultKeySummary()}`)) {
   function parseListPage(doc, url) {
     const items = [];
     const seen = new Set;
-    for (const row of doc.querySelectorAll("table.itg > tbody > tr")) {
+    for (const row of doc.querySelectorAll("table.itg > tbody > tr, table.itg > tr")) {
       const item = parseItem(row, url, TABLE_ROW);
       if (item && !seen.has(item.gid)) {
         seen.add(item.gid);
@@ -2530,7 +2530,8 @@ ${defaultKeySummary()}`)) {
     if (!node || !("style" in node)) {
       return null;
     }
-    const match = BACKGROUND_URL.exec(node.style.backgroundImage);
+    const declared = node.style.backgroundImage || (node.getAttribute("style") ?? "");
+    const match = BACKGROUND_URL.exec(declared);
     return match?.[1] ?? null;
   }
   function inlineSize(node) {

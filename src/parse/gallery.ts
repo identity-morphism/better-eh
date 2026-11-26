@@ -22,7 +22,11 @@ function backgroundUrl(node: Element | null): string | null {
   if (!node || !("style" in node)) {
     return null;
   }
-  const match = BACKGROUND_URL.exec((node as HTMLElement).style.backgroundImage);
+  // Read the CSSOM value first; a DOM without a CSS parser (the live canary uses linkedom) still
+  // has the shorthand in the attribute.
+  const declared =
+    (node as HTMLElement).style.backgroundImage || (node.getAttribute("style") ?? "");
+  const match = BACKGROUND_URL.exec(declared);
   return match?.[1] ?? null;
 }
 
