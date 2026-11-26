@@ -98,9 +98,13 @@
     { action: "next", label: "Next page", defaults: ["D", "ARROWRIGHT"] },
     { action: "prev", label: "Previous page", defaults: ["A", "ARROWLEFT"] },
     { action: "fit", label: "Toggle fit / natural width", defaults: ["F"] },
-    { action: "gallery", label: "Back to gallery", defaults: ["Q"] },
+    { action: "gallery", label: "Back to gallery", defaults: ["Q", "ESCAPE"] },
     { action: "up", label: "Scroll up", defaults: ["W", "ARROWUP"] },
-    { action: "down", label: "Scroll down", defaults: ["S", "ARROWDOWN"] }
+    { action: "down", label: "Scroll down", defaults: ["S", "ARROWDOWN"] },
+    { action: "reload", label: "Reload image", defaults: ["R"] },
+    { action: "help", label: "Toggle shortcuts", defaults: ["?"] },
+    { action: "first", label: "First page", defaults: ["HOME"] },
+    { action: "last", label: "Last page", defaults: ["END"] }
   ];
   var MAX_KEYS_PER_ACTION = 6;
   var MAX_KEY_LENGTH = 20;
@@ -12097,6 +12101,8 @@ ${defaultKeySummary()}`)) {
     DELETE: "Delete",
     ESCAPE: "Esc",
     ENTER: "Enter",
+    HOME: "Home",
+    END: "End",
     TAB: "Tab"
   };
   var VISUALLY_HIDDEN = "settings-file-input";
@@ -12177,7 +12183,7 @@ ${defaultKeySummary()}`)) {
           return `The "${action}" bindings contain an invalid key.`;
         }
         if (key.includes("+") || modifierNames.has(key)) {
-          return `The "${action}" bindings contain a modified key; only unmodified keys are supported.`;
+          return `The "${action}" bindings contain a modifier combination; bind the effective key instead.`;
         }
         const result = assignKey(imported, action, key, "reject");
         if (!result.ok) {
@@ -12348,9 +12354,9 @@ ${defaultKeySummary()}`)) {
         if (key === "Tab" || MODIFIER_KEYS.has(key)) {
           return;
         }
-        if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        if (event.ctrlKey || event.metaKey || event.altKey) {
           event.preventDefault();
-          setStatus(keymapStatusNode, "Only unmodified keys can be bound; modifiers belong to the browser.", true);
+          setStatus(keymapStatusNode, "Ctrl, Meta and Alt belong to the browser; bind the key without them.", true);
           return;
         }
         event.preventDefault();
@@ -13500,10 +13506,11 @@ ${defaultKeySummary()}`)) {
 
   // src/keymap.ts
   function isKey(e, action) {
-    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) {
+    if (e.ctrlKey || e.metaKey || e.altKey) {
       return false;
     }
-    return getSettings().keymap[action].includes(e.key.toUpperCase());
+    const key = e.key === " " ? " " : e.key.toUpperCase();
+    return getSettings().keymap[action].includes(key);
   }
 
   // src/zoom.ts
@@ -15097,14 +15104,20 @@ ${defaultKeySummary()}`)) {
       }
       if (isKey(event, "fit")) {
         updateSetting("fitHeight", !getSettings().fitHeight);
-      } else if (event.key === "?") {
+      } else if (isKey(event, "help")) {
         setHelp(ui.elHelp.hasAttribute("hidden"));
-      } else if (isKey(event, "gallery") || event.key === "Escape") {
+      } else if (isKey(event, "gallery")) {
         if (!ui.elHelp.hasAttribute("hidden")) {
           setHelp(false);
           return;
         }
         returnToGallery();
+      } else if (isKey(event, "first")) {
+        event.preventDefault();
+        goEnd("first");
+      } else if (isKey(event, "last")) {
+        event.preventDefault();
+        goEnd("last");
       } else if (event.key === " ") {
         event.preventDefault();
         const step = Math.round(window.innerHeight * 0.75);
@@ -15119,7 +15132,7 @@ ${defaultKeySummary()}`)) {
         } else {
           window.scrollBy(0, step);
         }
-      } else if (event.key === "r" || event.key === "R") {
+      } else if (isKey(event, "reload")) {
         reloadImage();
       } else if (isKey(event, "up")) {
         if (!getSettings().fitHeight || navigation.continuous) {

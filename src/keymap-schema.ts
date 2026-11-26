@@ -8,9 +8,13 @@ export const KEY_ACTIONS = [
   { action: "next", label: "Next page", defaults: ["D", "ARROWRIGHT"] },
   { action: "prev", label: "Previous page", defaults: ["A", "ARROWLEFT"] },
   { action: "fit", label: "Toggle fit / natural width", defaults: ["F"] },
-  { action: "gallery", label: "Back to gallery", defaults: ["Q"] },
+  { action: "gallery", label: "Back to gallery", defaults: ["Q", "ESCAPE"] },
   { action: "up", label: "Scroll up", defaults: ["W", "ARROWUP"] },
   { action: "down", label: "Scroll down", defaults: ["S", "ARROWDOWN"] },
+  { action: "reload", label: "Reload image", defaults: ["R"] },
+  { action: "help", label: "Toggle shortcuts", defaults: ["?"] },
+  { action: "first", label: "First page", defaults: ["HOME"] },
+  { action: "last", label: "Last page", defaults: ["END"] },
 ] as const satisfies readonly {
   action: string;
   label: string;
@@ -24,9 +28,10 @@ export type KeyAction = (typeof KEY_ACTIONS)[number]["action"];
 export type KeyMap = Record<KeyAction, string[]>;
 
 /**
- * One policy for captured and imported bindings: single, unmodified keys of at most
- * `MAX_KEY_LENGTH` characters, and at most `MAX_KEYS_PER_ACTION` per action. `keymap.ts` rejects
- * every modified event, so a combination can never match and is never stored.
+ * One policy for captured and imported bindings: single keys of at most `MAX_KEY_LENGTH`
+ * characters, and at most `MAX_KEYS_PER_ACTION` per action. Ctrl, Meta and Alt are reserved for the
+ * browser and app shortcuts; Shift is part of the effective `KeyboardEvent.key` (`?`, `D`), so a
+ * binding stores that key, never a modifier combination.
  */
 export const MAX_KEYS_PER_ACTION = 6;
 export const MAX_KEY_LENGTH = 20;

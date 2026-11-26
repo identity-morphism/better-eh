@@ -68,6 +68,7 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
 | `Space`               | Scroll a screen, then next page    |
 | `Shift` + `Space`     | Scroll back, then previous page    |
 | `R`                   | Reload the current image           |
+| `Home` / `End`        | Jump to the first / last page      |
 | `Q` / `Esc`           | Return to the gallery              |
 | `?`                   | List the reader shortcuts          |
 | `Ctrl` + `+/-/Scroll` | Image zoom                         |

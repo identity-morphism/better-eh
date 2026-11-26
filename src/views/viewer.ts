@@ -580,15 +580,21 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
 
       if (isKey(event, "fit")) {
         updateSetting("fitHeight", !getSettings().fitHeight);
-      } else if (event.key === "?") {
+      } else if (isKey(event, "help")) {
         setHelp(ui.elHelp.hasAttribute("hidden"));
-      } else if (isKey(event, "gallery") || event.key === "Escape") {
+      } else if (isKey(event, "gallery")) {
         // Escape dismisses the shortcut panel first; a second press leaves the reader.
         if (!ui.elHelp.hasAttribute("hidden")) {
           setHelp(false);
           return;
         }
         returnToGallery();
+      } else if (isKey(event, "first")) {
+        event.preventDefault();
+        goEnd("first");
+      } else if (isKey(event, "last")) {
+        event.preventDefault();
+        goEnd("last");
       } else if (event.key === " ") {
         // Native Space/Shift+Space: scroll most of a screen, then step at the edge.
         event.preventDefault();
@@ -607,7 +613,7 @@ export function mountViewer(host: HTMLElement, pageData: PageData, ctx: ViewCont
         } else {
           window.scrollBy(0, step);
         }
-      } else if (event.key === "r" || event.key === "R") {
+      } else if (isKey(event, "reload")) {
         reloadImage();
       } else if (isKey(event, "up")) {
         if (!getSettings().fitHeight || navigation.continuous) {

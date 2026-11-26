@@ -224,7 +224,7 @@ describe("renderUserscriptSettings", () => {
     Object.defineProperty(modified, "key", { value: "k" });
     Object.defineProperty(modified, "ctrlKey", { value: true });
     capture("next").dispatchEvent(modified);
-    expect(root.querySelector(".settings-keymap-status")?.textContent).toContain("unmodified");
+    expect(root.querySelector(".settings-keymap-status")?.textContent).toContain("Ctrl");
 
     press(capture("next"), "Tab");
     expect(capture("next").textContent).toBe("Press a key…");

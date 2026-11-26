@@ -330,10 +330,17 @@ describe("mountViewer", () => {
     expect(img.getAttribute("src")).toContain("nl=777");
     expect(state.toasts).toContain("Reloading image");
 
+    press("Home");
+    press("End");
+    expect(active.navigations.slice(-2)).toEqual([
+      { url: data.firstHref, options: { replace: true } },
+      { url: data.lastHref, options: { replace: true } },
+    ]);
+
     press("?");
     press("Escape");
     expect(help.hidden).toBe(true);
-    expect(active.navigations).toHaveLength(2);
+    expect(active.navigations).toHaveLength(4);
 
     press("Escape");
     expect(active.navigations.at(-1)?.url).toBe(GALLERY);

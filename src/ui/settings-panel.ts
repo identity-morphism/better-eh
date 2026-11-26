@@ -38,6 +38,8 @@ const KEY_LABELS: Record<string, string> = {
   DELETE: "Delete",
   ESCAPE: "Esc",
   ENTER: "Enter",
+  HOME: "Home",
+  END: "End",
   TAB: "Tab",
 };
 
@@ -173,10 +175,10 @@ function parseKeymap(value: Record<string, unknown>): KeyMap | string {
       if (key === "" || key.length > MAX_KEY_LENGTH) {
         return `The "${action}" bindings contain an invalid key.`;
       }
-      // The runtime compares `KeyboardEvent.key` and rejects every modified event, so a
-      // combination can never match and is reported rather than stored as dead weight.
+      // The runtime compares `KeyboardEvent.key` with Ctrl, Meta and Alt rejected; Shift is
+      // already part of that effective key. A combination would never match, so reject it.
       if (key.includes("+") || modifierNames.has(key)) {
-        return `The "${action}" bindings contain a modified key; only unmodified keys are supported.`;
+        return `The "${action}" bindings contain a modifier combination; bind the effective key instead.`;
       }
       const result = assignKey(imported, action, key, "reject");
       if (!result.ok) {
@@ -395,11 +397,11 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
       if (key === "Tab" || MODIFIER_KEYS.has(key)) {
         return;
       }
-      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+      if (event.ctrlKey || event.metaKey || event.altKey) {
         event.preventDefault();
         setStatus(
           keymapStatusNode,
-          "Only unmodified keys can be bound; modifiers belong to the browser.",
+          "Ctrl, Meta and Alt belong to the browser; bind the key without them.",
           true,
         );
         return;

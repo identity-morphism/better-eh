@@ -2,9 +2,11 @@ import type { KeyAction } from "./keymap-schema";
 import { getSettings } from "./settings";
 
 export function isKey(e: KeyboardEvent, action: KeyAction): boolean {
-  // A modified key belongs to the browser or an app shortcut, never to page navigation.
-  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) {
+  // Ctrl, Meta and Alt belong to the browser or an app shortcut. Shift is not checked because
+  // `KeyboardEvent.key` already reports the shifted symbol (`?`) or letter (`D`).
+  if (e.ctrlKey || e.metaKey || e.altKey) {
     return false;
   }
-  return getSettings().keymap[action].includes(e.key.toUpperCase());
+  const key = e.key === " " ? " " : e.key.toUpperCase();
+  return getSettings().keymap[action].includes(key);
 }

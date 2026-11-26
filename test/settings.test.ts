@@ -21,8 +21,8 @@ function readFrom(values: Record<string, unknown>): (key: string) => unknown {
   return (key) => values[key] ?? null;
 }
 
-function keyEvent(key: string): KeyboardEvent {
-  return { key } as KeyboardEvent;
+function keyEvent(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+  return { key, ...init } as KeyboardEvent;
 }
 
 describe("loadSettings", () => {
@@ -166,6 +166,7 @@ describe("the settings store", () => {
 
   test("snapshots are frozen and never alias the caller's keymap", () => {
     const custom: KeyMap = {
+      ...DEFAULT_KEYMAP,
       next: ["N"],
       prev: ["P"],
       fit: ["F"],
@@ -191,6 +192,7 @@ describe("the settings store", () => {
 describe("isKey", () => {
   test("matches a custom keymap case-insensitively and ignores unbound keys", () => {
     const custom: KeyMap = {
+      ...DEFAULT_KEYMAP,
       next: ["N", "ARROWRIGHT"],
       prev: [],
       fit: ["F"],
@@ -205,5 +207,17 @@ describe("isKey", () => {
     expect(isKey(keyEvent("ArrowRight"), "next")).toBe(true);
     expect(isKey(keyEvent("d"), "next")).toBe(false);
     expect(isKey(keyEvent("a"), "prev")).toBe(false);
+  });
+
+  test("matches shifted symbols and keeps browser modifiers reserved", () => {
+    updateSetting("keymap", DEFAULT_KEYMAP);
+
+    expect(isKey(keyEvent("?", { shiftKey: true }), "help")).toBe(true);
+    expect(isKey(keyEvent("Escape"), "gallery")).toBe(true);
+    expect(isKey(keyEvent("Home"), "first")).toBe(true);
+    expect(isKey(keyEvent("End"), "last")).toBe(true);
+    expect(isKey(keyEvent("r", { ctrlKey: true }), "reload")).toBe(false);
+    expect(isKey(keyEvent("r", { metaKey: true }), "reload")).toBe(false);
+    expect(isKey(keyEvent("r", { altKey: true }), "reload")).toBe(false);
   });
 });
