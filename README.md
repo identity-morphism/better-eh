@@ -90,7 +90,7 @@ inserts an exclusion.
    - **Raw master:**  
      `https://raw.githubusercontent.com/identity-morphism/better-eh/master/dist/better-eh.user.js`
 3. Tag suggestions work on first use from a compact embedded core vocabulary (about 1,500 tags,
-   roughly 22 KB of source). The full roughly 400 KB front-coded vocabulary downloads in the
+   roughly 30 KB of source). The full roughly 400 KB front-coded vocabulary downloads in the
    background and replaces it; the popularity snapshot downloads separately. Search works without
    either download.
 
@@ -121,7 +121,7 @@ storage/debugging notes, and [Architecture](docs/ARCHITECTURE.md) for the module
 - Gallery report and petition actions link to the site's own pages rather than being rebuilt
   in-app.
 - Tag suggestions start from an embedded compact core vocabulary (about 1,500 popular tags, roughly
-  22 KB of source), so common tags work immediately. The full roughly 400 KB front-coded vocabulary
+  30 KB of source), so common tags work immediately. The full roughly 400 KB front-coded vocabulary
   (about 220 KB gzipped on the wire) starts downloading as soon as the first owned page renders,
   replaces that core, and is cached for a week. Popularity ranking fetches a roughly 14 KB binary
   asset separately and caches it for a week. If the full download fails, the core stays in place
