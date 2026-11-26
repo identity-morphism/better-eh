@@ -15,6 +15,7 @@
     "check:size": "bun run scripts/check-bundle-size.ts",
     "check:header": "bun run scripts/check-bundle-header.ts",
     "check:release-tag": "bun run scripts/check-release-tag.ts",
+    "check:live": "bun run scripts/check-live-parsers.ts",
     "release": "bun run scripts/release.ts",
     "verify:release": "bun run scripts/verify-release.ts",
     "dev": "bun run build.ts --watch --serve",

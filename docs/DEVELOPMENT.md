@@ -122,6 +122,11 @@ forced-colors/reduced-motion emulation; Firefox repeats the core page shapes via
 `SMOKE_BROWSERS=chromium,firefox`. Axe runs over the shell and every open panel with the WCAG A/AA
 rules, so a new control that fails name, contrast or landmark checks fails CI.
 
+`bun run check:live` fetches a listing, the popular tab, a gallery, one of its pages and the
+toplist from the public site, then runs the same parsers and sanity checks the app uses. The
+**Live parser canary** workflow runs it weekly and opens an issue on failure; it is advisory and
+not part of pull-request CI.
+
 Sleazy Fork is the public listing: <https://sleazyfork.org/en/scripts/606064-better-eh>. The
 listing syncs from this repository's `dist/better-eh.user.js` asset, so publishing needs no upload
 or edit on Sleazy Fork. It follows the committed bundle, but installed copies only update when
