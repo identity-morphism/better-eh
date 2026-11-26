@@ -8,6 +8,7 @@ import {
   MODIFIER_KEYS,
 } from "../keymap-schema";
 import type { KeyAction, KeyMap } from "../keymap-schema";
+import { PROJECT_ISSUES_URL, PROJECT_URL } from "../project";
 import { DEFAULT_SETTINGS, getSettings, updateSettings } from "../settings";
 import {
   applyScalar,
@@ -629,6 +630,32 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
   keymapHost = el("div", { class: "settings-keymap" });
   renderKeymap();
 
+  const feedbackGroup = el(
+    "div",
+    { class: "settings-panel-group" },
+    el("h3", { class: "settings-subhead", text: "Feedback" }),
+    el(
+      "p",
+      { class: "settings-hint" },
+      el("a", {
+        class: "settings-link",
+        href: PROJECT_ISSUES_URL,
+        target: "_blank",
+        rel: "noopener",
+        text: "Report a broken page",
+      }),
+      " with the route and the Copy diagnostics output. The script sends no telemetry; ",
+      el("a", {
+        class: "settings-link",
+        href: PROJECT_URL,
+        target: "_blank",
+        rel: "noopener",
+        text: "source and releases",
+      }),
+      " are on GitHub.",
+    ),
+  );
+
   const keymapSection = el(
     "div",
     { class: "settings-panel-group" },
@@ -687,6 +714,7 @@ export function renderUserscriptSettings(deps: SettingsPanelDeps = {}): Userscri
       ),
       statusNode,
     ),
+    feedbackGroup,
   );
 
   loadDraft(synced);

@@ -67,8 +67,8 @@ from the URL after closing the installer tab.
 **Size budget**: at most 700 KiB raw and 170 KiB gzipped, the size a manager downloads.
 `bun run check:size` enforces both, prints the measured sizes, and prints the app CSS, viewer sheet
 and embedded vocabulary as a share of the raw bundle. `bun run check:header` checks the same file's
-metadata: both matches, the four grants, `@noframes`, `@run-at document-start`, update URLs, and
-`@version` against `package.json`. `src/tags/core-vocabulary.ts` is the only generated source in
+metadata: both matches, the four grants, `@noframes`, `@run-at document-start`, update URLs,
+homepage and support URLs, and `@version` against `package.json`. `src/tags/core-vocabulary.ts` is the only generated source in
 `src/`; `bun run check:generated` verifies it against the checked-in assets, and
 `bun run scripts/update-core-vocabulary.ts` regenerates it.
 

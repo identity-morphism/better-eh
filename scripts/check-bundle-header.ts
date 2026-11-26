@@ -12,6 +12,8 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dir, "..");
 const BUNDLE = join(ROOT, "dist", "better-eh.user.js");
 const REPO = "identity-morphism/better-eh";
+const REPO_URL = `https://github.com/${REPO}`;
+const SUPPORT_URL = `${REPO_URL}/issues/new/choose`;
 const USERSCRIPT_URL = `https://raw.githubusercontent.com/${REPO}/master/dist/better-eh.user.js`;
 const HEADER_START = "// ==UserScript==";
 const HEADER_END = "// ==/UserScript==";
@@ -26,7 +28,9 @@ type Meta = ReadonlyMap<string, readonly string[]>;
 /** Metadata whose value must appear at least once. */
 const REQUIRED_VALUES: readonly (readonly [string, string])[] = [
   ["name", "Better EH"],
-  ["namespace", `https://github.com/${REPO}`],
+  ["namespace", REPO_URL],
+  ["homepageURL", REPO_URL],
+  ["supportURL", SUPPORT_URL],
   ["updateURL", USERSCRIPT_URL],
   ["downloadURL", USERSCRIPT_URL],
   ["run-at", "document-start"],

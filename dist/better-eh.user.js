@@ -4,6 +4,8 @@
 // @version      1.1.2
 // @description  A userscript that reskins E-Hentai and ExHentai into one consistent, image-first interface: galleries, listings, favorites, toplists, torrents and the reader, with tag autocomplete and prefetching.
 // @author       identity-morphism
+// @homepageURL  https://github.com/identity-morphism/better-eh
+// @supportURL   https://github.com/identity-morphism/better-eh/issues/new/choose
 // @icon         https://api.iconify.design/ph/book-open-bold.svg
 // @updateURL    https://raw.githubusercontent.com/identity-morphism/better-eh/master/dist/better-eh.user.js
 // @downloadURL  https://raw.githubusercontent.com/identity-morphism/better-eh/master/dist/better-eh.user.js
@@ -12314,6 +12316,10 @@ ${text}
 `);
   }
 
+  // src/project.ts
+  var PROJECT_URL = "https://github.com/identity-morphism/better-eh";
+  var PROJECT_ISSUES_URL = `${PROJECT_URL}/issues/new/choose`;
+
   // src/ui/settings-panel.ts
   var KEY_LABELS = {
     " ": "Space",
@@ -12763,6 +12769,19 @@ ${text}
     });
     keymapHost = el("div", { class: "settings-keymap" });
     renderKeymap();
+    const feedbackGroup = el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Feedback" }), el("p", { class: "settings-hint" }, el("a", {
+      class: "settings-link",
+      href: PROJECT_ISSUES_URL,
+      target: "_blank",
+      rel: "noopener",
+      text: "Report a broken page"
+    }), " with the route and the Copy diagnostics output. The script sends no telemetry; ", el("a", {
+      class: "settings-link",
+      href: PROJECT_URL,
+      target: "_blank",
+      rel: "noopener",
+      text: "source and releases"
+    }), " are on GitHub."));
     const keymapSection = el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Keyboard shortcuts" }), keymapStatusNode, keymapHost, keymapReset);
     const section = el("section", {
       class: "settings-section settings-panel",
@@ -12775,7 +12794,7 @@ ${text}
     }), el("p", {
       class: "settings-hint",
       text: "Userscript preferences stored in this browser. Changes apply after you press Apply."
-    }), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Reading and interface" }), renderBooleanFields()), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Reader layout" }), renderSelectFields()), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Sizing and network" }), renderNumberFields()), keymapSection, el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Backup" }), el("div", { class: "settings-panel-actions" }, exportButton, importButton, diagnosticsButton, fileInput), statusNode));
+    }), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Reading and interface" }), renderBooleanFields()), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Reader layout" }), renderSelectFields()), el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Sizing and network" }), renderNumberFields()), keymapSection, el("div", { class: "settings-panel-group" }, el("h3", { class: "settings-subhead", text: "Backup" }), el("div", { class: "settings-panel-actions" }, exportButton, importButton, diagnosticsButton, fileInput), statusNode), feedbackGroup);
     loadDraft(synced);
     const engine = createSettingsDraft({ bindings, onChange: deps.onChange });
     return {
@@ -16568,6 +16587,11 @@ ${text}
   }
   .meta-link:hover, .fav-link:hover, .comment-author:hover, .torrent-link:hover {
     text-decoration-line: underline;
+  }
+  .settings-link {
+    color: var(--color-link);
+    text-decoration-line: underline;
+    text-underline-offset: 2px;
   }
   .search-history-clear, .comment-edit {
     cursor: pointer;

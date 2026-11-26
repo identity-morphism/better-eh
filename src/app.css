@@ -212,6 +212,12 @@ a {
   @apply underline;
 }
 
+/* Inline in hint copy, where the surrounding text is already muted: the underline has to carry
+   the distinction, not the colour. */
+.settings-link {
+  @apply text-link underline underline-offset-2;
+}
+
 /* Quiet text actions (clear, edit) share one size and hover. */
 .search-history-clear,
 .comment-edit {

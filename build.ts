@@ -1,6 +1,8 @@
 import { mkdirSync, watch } from "node:fs";
 import { join } from "node:path";
 
+import { PROJECT_ISSUES_URL, PROJECT_URL } from "./src/project";
+
 interface PackageJson {
   version: string;
   description: string;
@@ -11,17 +13,18 @@ const pkg = (await Bun.file("./package.json").json()) as PackageJson;
 const USERSCRIPT_NAME = "Better EH";
 const USERSCRIPT_FILE = "better-eh.user.js";
 const USERSCRIPT_ICON = "https://api.iconify.design/ph/book-open-bold.svg";
-const USERSCRIPT_NAMESPACE = "https://github.com/identity-morphism/better-eh";
 const USERSCRIPT_URL = `https://raw.githubusercontent.com/identity-morphism/better-eh/master/dist/${USERSCRIPT_FILE}`;
 
 function makeHeader(): string {
   return `${[
     "// ==UserScript==",
     `// @name         ${USERSCRIPT_NAME}`,
-    `// @namespace    ${USERSCRIPT_NAMESPACE}`,
+    `// @namespace    ${PROJECT_URL}`,
     `// @version      ${pkg.version}`,
     `// @description  ${pkg.description}`,
     "// @author       identity-morphism",
+    `// @homepageURL  ${PROJECT_URL}`,
+    `// @supportURL   ${PROJECT_ISSUES_URL}`,
     `// @icon         ${USERSCRIPT_ICON}`,
     `// @updateURL    ${USERSCRIPT_URL}`,
     `// @downloadURL  ${USERSCRIPT_URL}`,

@@ -118,9 +118,10 @@ bun run release patch --push
 
 ## Contributing
 
-Bug reports and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) has the local checks,
-fixture rules and the `dist/` rebuild rule, and [Development](docs/DEVELOPMENT.md) the release
-detail. Report security problems through
+Bug reports and feature requests go through the
+[issue templates](https://github.com/identity-morphism/better-eh/issues/new/choose);
+[CONTRIBUTING.md](CONTRIBUTING.md) has the local checks, fixture rules and the `dist/` rebuild
+rule, and [Development](docs/DEVELOPMENT.md) the release detail. Report security problems through
 [advisories](https://github.com/identity-morphism/better-eh/security/advisories/new), not an issue.
 Strip session values from logs and screenshots before posting.
 

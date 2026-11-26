@@ -25,6 +25,8 @@
   switching, click/swipe/keyboard intents and the visible zoom surface.
 - **`src/site.ts`**: domains, display name, owned page paths, document-title joining, and the one
   builder for site page and per-gallery popup URLs.
+- **`src/project.ts`**: the repository and issue-chooser URLs the bundle header and settings panel
+  share.
 - **`src/parse/`**: `viewer`, `gallery`, `gallery-torrents`, `list`, `favorites`, `toplist`,
   `archive`, `torrents`, `home`, `my-tags`, `uconfig`, `query` (search/tag serialization), `pager`,
   shared title parsing, and `url` (safe URLs, gallery identity/href helpers, the `gid`/token query).
