@@ -65,7 +65,7 @@ if (ratio < FLOOR) {
   console.error(
     `coverage: ${percent(ratio)} is below the ${percent(FLOOR)} floor. Cover the new paths, or ` +
       "lower FLOOR in scripts/check-coverage.ts and say why in the pull request. " +
-      "Run `bun test --coverage` for the per-file table.",
+      "Run `bun test --isolate --coverage` for the per-file table.",
   );
   process.exit(1);
 }
