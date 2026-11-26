@@ -1,9 +1,8 @@
 # Better EH
 
-A full reskin of `e-hentai.org` and `exhentai.org`. Every page the script owns — search and
-category listings, galleries, the reader, favorites, My Home, toplists, torrents, gallery torrents,
-My Tags and settings — renders as one consistent, image-first interface instead of the site's
-legacy tables. Routes it does not own stay native.
+A full reskin of `e-hentai.org` and `exhentai.org`. Owned pages — listings, galleries, the reader,
+favorites, My Home, toplists, torrents, gallery torrents, My Tags and settings — share one
+image-first interface; every other route stays native.
 
 ![Search results with demo data](docs/screenshots/browse.webp)
 
@@ -19,44 +18,31 @@ Tag completion in the search bar — namespace-aware, popularity-ranked, and rea
 
 ## Features
 
-- **One shell**: owned routes share the sticky header, pagination, empty/error panel and SPA
-  transitions, including back/forward and per-entry scroll restoration. A `?eh_native=1` link
-  always falls back to the site's own page.
-- **Search and browse**: a cover grid that keeps each gallery's real thumbnail aspect, with
-  category chips, rating/date/page-count metadata, favorite marks, result counts, infinite scroll
-  (per view) and the site's own seek/jump. Advanced filters and the panel state are remembered.
-- **Posted-date range**: a posted-since/posted-until bound narrows a listing in-app. The range is
-  app-owned (`eh_since`/`eh_until`) rather than a site filter, and the bound is applied
-  client-side, so result counts are approximate.
-- **Quick tags**: recent queries and named quick tags share the search field; every quick tag
-  toggles its terms in the current draft, its editor uses the tag combobox, and active filter chips
-  can be removed or flipped to include/exclude/optional without retyping.
-- **Tag autocomplete**: namespace-aware suggestions that work immediately from an embedded core
-  vocabulary, quoted/exact/signed terms, short aliases (`f:`, `a:`), popularity ranking and local
-  usage learning. Clicking a gallery tag adds it to the current search; `Alt+click` excludes it.
-- **Gallery**: parsed title hierarchy, grouped tags with actions, rating and comments (including
-  editing your own), favorite folders with notes, the in-app archive chooser and torrent list,
+- **One shell**: sticky header, pagination, empty/error panel and SPA transitions, including
+  back/forward and per-entry scroll restoration. `?eh_native=1` falls back to the site's own page.
+- **Browse**: cover grid at each gallery's real thumbnail aspect, category chips,
+  rating/date/page-count metadata, favorite marks, result counts, per-view infinite scroll and the
+  site's seek/jump; remembered filters and panel state. An app-owned `eh_since`/`eh_until` range
+  narrows a listing client-side, so counts are approximate.
+- **Tags**: namespace-aware autocomplete (quoted/exact/signed terms, `f:`/`a:` aliases, popularity
+  ranking, local usage learning) from an embedded core vocabulary; quick tags and filter chips flip
+  between include/exclude/optional without retyping. Clicking a gallery tag adds it to the search,
+  `Alt+click` excludes it.
+- **Gallery**: parsed title hierarchy, grouped tags with actions, rating and editable comments,
+  favorite folders with notes, the in-app archive chooser (size and GP price) and torrent list,
   resume position, and a sprite thumbnail grid with the site's pager.
-- **Gallery archive and torrents**: the `/archiver.php` chooser renders in-app with each
-  archive's size, GP price and download step, and `/gallerytorrents.php` renders its torrent rows
-  instead of the site's legacy page.
-- **Reader**: fit-height/zoom/pan or natural-width scrolling, single/spread/continuous layouts,
-  right-to-left direction, prefetching, `nl` retry, original-file fallback on deep zoom, keyboard,
-  click zones, edge chevrons, swipes, and an optional timed slideshow.
-- **News**: `/news.php` renders the site status, changelog and announcement cards with their dates
-  and forum comment links, replacing the legacy two-column table.
-- **Account pages**: the My Home account overview; favorites folders with search, notes, ordering
-  and bulk move/delete; the ranked toplist overview and category pages; the torrent index with
-  search, status, only-mine and sortable columns; `/uconfig.php` plus a userscript settings panel,
-  keybinding editor and JSON backup.
-- **My Tags**: the `/mytags` manager renders in-app: switch, rename and recolour tag sets, watch
-  or hide a tag, set its colour and weight, and add new tags without leaving the shell.
-- **Fast and robust**: request priorities and caching, rate-limit purge with a banner, a
-  Save-Data/2G gate that keeps the background vocabulary and prefetch off metered connections, and
-  a login gate instead of a broken page when a route needs a session.
-- **Accessible**: keyboard paths, managed dialog focus, forced-colors support, reduced-motion
-  handling and touch targets that grow on coarse pointers. The smoke gate runs axe over the shell
-  with the WCAG A/AA rules, so a control that fails name, contrast or landmark checks fails CI.
+- **Reader**: fit-height/zoom/pan or natural-width scrolling in single, spread or continuous
+  layout, right-to-left direction, prefetching, `nl` retry, original-file fallback on deep zoom,
+  keyboard and click zones, edge chevrons, swipes and an optional timed slideshow.
+- **Account**: My Home overview; favorites folders (search, notes, ordering, bulk move/delete);
+  ranked toplists; torrent index (search, status, only-mine, sortable); `/uconfig.php`; My Tags
+  editing; and a settings panel with keybinding editor and JSON backup. `/archiver.php`,
+  `/gallerytorrents.php` and `/news.php` also render in-app.
+- **Robust**: request priorities and caching, rate-limit purge with a banner, a Save-Data/2G gate
+  over the background vocabulary and prefetch, and a login gate instead of a broken page.
+- **Accessible**: keyboard paths, managed dialog focus, forced colors, reduced motion, coarse-pointer
+  touch targets. The smoke gate runs axe with the WCAG A/AA rules, so a control that fails name,
+  contrast or landmark checks fails CI.
 
 ## Controls
 
@@ -93,71 +79,57 @@ inserts an exclusion.
      `https://github.com/identity-morphism/better-eh/releases/latest/download/better-eh.user.js`
    - **Raw master:**  
      `https://raw.githubusercontent.com/identity-morphism/better-eh/master/dist/better-eh.user.js`
-3. Tag suggestions work on first use from a compact embedded core vocabulary (about 1,500 tags,
-   roughly 30 KB of source). The full roughly 400 KB front-coded vocabulary downloads in the
-   background and replaces it; the popularity snapshot downloads separately. Search works without
-   either download.
+
+Tag suggestions start from an embedded core; the full index downloads in the background. Search
+works without either download.
 
 ## Development
 
 Requires [Bun](https://bun.sh/); `bun install` fetches the pinned toolchain.
 
 ```bash
-bun run dev           # watch, rebuild and serve on :8080
-bun run check         # format, lint and type check
-bun run test          # fixture tests, one isolated global per file
-bun run test:browser  # built userscript smoke gate (Playwright)
+bun run dev         # watch, rebuild and serve on :8080
+bun run check       # format, lint and type check
+bun run test        # fixture tests, one isolated global per file
 bun run release patch --push
 ```
 
-See [Development](docs/DEVELOPMENT.md) for setup, the dev-server workflow, release rules and
-storage/debugging notes, and [Architecture](docs/ARCHITECTURE.md) for the module map.
+[Development](docs/DEVELOPMENT.md) covers the browser smoke gate, releases and debugging.
+[Architecture](docs/ARCHITECTURE.md) maps the modules.
 
 ## Known Limits
 
-- `/lofi/` stays native. It is a separate mobile listing, gallery and reader under its own `/lofi/`
-  URL space, not a second skin for the pages this script owns. `/mpv/` no longer exists on the
-  site (it answers 404).
-- My Home is a read-only overview. Actions that spend GP or reset account state — the quota unlock
-  and personalized-torrent key reset — open the native page instead of posting from the app.
-- Toplists are an e-hentai.org feature: the ExHentai site itself answers `/toplist.php` with a 404,
-  so the tab is hidden there.
-- Gallery report and petition actions link to the site's own pages rather than being rebuilt
-  in-app.
-- Tag suggestions start from an embedded compact core vocabulary (about 1,500 popular tags, roughly
-  30 KB of source), so common tags work immediately. The full roughly 400 KB front-coded vocabulary
-  (about 220 KB gzipped on the wire) starts downloading as soon as the first owned page renders,
-  replaces that core, and is cached for a week. Popularity ranking fetches a roughly 14 KB binary
-  asset separately and caches it for a week. If the full download fails, the core stays in place
-  and less-common tags stay missing until a later attempt succeeds.
-- The reader has no page-jump strip. A viewer document carries only the current page's links, so a
-  jump would need the gallery page's full page list or an extra fetch; the gallery thumbnails
-  remain the jump surface.
-- The theme is dark by design. Every component token is compiled from one palette, so a
-  light/system theme needs a second token set and its own forced-colors and contrast audit rather
-  than a toggle.
-- Site HTML changes can break parsers; keep the native escape path available.
+- `/lofi/` stays native: a separate mobile listing, gallery and reader under its own URL space.
+  `/mpv/` no longer exists on the site (404).
+- My Home is read-only. Actions that spend GP or reset account state — quota unlock,
+  personalized-torrent key reset — open the native page.
+- Toplists are an e-hentai.org feature; ExHentai answers `/toplist.php` with a 404, so the tab is
+  hidden there.
+- Gallery report and petition actions link to the site's own pages.
+- Tag data: the embedded core holds about 1,500 popular tags (~30 KB of source). The full ~400 KB
+  front-coded index (~220 KB gzipped) downloads after the first owned page renders, replaces the
+  core and is cached a week; popularity (~14 KB) is fetched separately, also cached a week. A failed
+  download leaves the core, so less-common tags stay missing until a retry succeeds.
+- The reader has no page-jump strip: a viewer document carries only the current page's links, so a
+  jump needs the gallery's page list or another fetch. Gallery thumbnails remain the jump surface.
+- Dark theme only: every token compiles from one palette, so a light/system theme needs a second
+  token set plus its own forced-colors and contrast audits.
+- Site HTML changes can break parsers; the native escape path stays available.
 
 ## Contributing
 
-Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the local
-checks, the fixture and parser rules, and the `dist/` rebuild rule CI enforces.
-[Development](docs/DEVELOPMENT.md) has setup and release detail.
-
-If you report a broken page, say which route broke and paste the console error with debug logging
-on. Zero out gallery ids, tokens, and any `ipb_member_id`, `ipb_pass_hash`, `sk` or `igneous` value
-before posting; they are account credentials. Report security problems through
+Bug reports and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) has the local checks,
+fixture rules and the `dist/` rebuild rule, and [Development](docs/DEVELOPMENT.md) the release
+detail. Report security problems through
 [advisories](https://github.com/identity-morphism/better-eh/security/advisories/new), not an issue.
+Strip session values from logs and screenshots before posting.
 
 ## Data attribution
-
-The project ships derived tag data and uses demo art from these community sources:
 
 - **EhTagTranslation** — namespace and tag names come from
   [EhTagTranslation/Database](https://github.com/EhTagTranslation/Database) via its
   [DatabaseReleases](https://github.com/EhTagTranslation/DatabaseReleases) artifact. This project
-  redistributes only the compact front-coded key list (`assets/tag-index.bin`), not the
-  translations or descriptions.
+  redistributes only the compact front-coded key list (`assets/tag-index.bin`).
 - **e-hentai-tag-count** — gallery popularity counts come from
   [mokurin000/e-hentai-tag-count](https://github.com/mokurin000/e-hentai-tag-count), reduced to the
   compact `assets/tag-counts.bin` snapshot.
@@ -165,8 +137,8 @@ The project ships derived tag data and uses demo art from these community source
   [Pepper&Carrot](https://www.peppercarrot.com/) by David Revoy, licensed
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
-Both datasets remain the property of their upstream projects; their licenses and redistribution
-terms govern the derived assets. The Pepper&Carrot art remains © David Revoy under CC BY 4.0.
+The derived assets remain governed by their upstream licenses and redistribution terms. The
+Pepper&Carrot art remains © David Revoy under CC BY 4.0.
 
 ## License
 

@@ -2,16 +2,17 @@
 
 ## Reporting
 
-Report privately through GitHub's [security advisories](https://github.com/identity-morphism/better-eh/security/advisories/new)
-instead of a public issue.
+Report privately through GitHub's
+[security advisories](https://github.com/identity-morphism/better-eh/security/advisories/new), not a
+public issue.
 
 ## What the script touches
 
 Better EH runs in your browser as a userscript. It has no server, sends no telemetry, and stores
-everything in your manager's value store and session storage on this origin.
+everything in your manager's value store and this origin's session storage.
 
 Outbound requests go to the site you are already on (`e-hentai.org`, `exhentai.org`, and the image
-and forum hosts the pages link) plus the two tag asset mirrors, `raw.githubusercontent.com` and
+and forum hosts its pages link) plus the two tag asset mirrors, `raw.githubusercontent.com` and
 `cdn.jsdelivr.net`, once a week.
 
 ## Credentials
@@ -20,8 +21,8 @@ The script reads the site's own session through the page; it never asks for a pa
 writes cookies. Your `ipb_member_id`, `ipb_pass_hash`, `sk` and `igneous` values leave the browser
 only to the site.
 
-If you post a URL or a screenshot in an issue, strip those values first. A gallery token in
-`/g/<id>/<token>/` works the same way.
+Strip those values, and any gallery token in `/g/<id>/<token>/`, before posting a URL or screenshot
+in an issue.
 
 ## Installing
 
